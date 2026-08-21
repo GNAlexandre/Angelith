@@ -1,0 +1,16 @@
+# Dépendances Python
+openai>=1.40          # client compatible LM Studio / Ollama
+pyyaml>=6.0           # config / glossaire
+pymupdf>=1.24         # extraction texte + images des PDF
+python-docx>=1.1      # détection de titres par mise en forme (police+gras) dans les .docx
+rich>=13.0            # interface console (app.py)
+
+# Dépendances de DÉVELOPPEMENT (pas nécessaires pour faire tourner le pipeline,
+# seulement pour lancer la suite de tests : voir tests/README.md ou le README principal) :
+pytest>=8.0
+
+# Dépendances EXTERNES (hors pip) :
+#   - Pandoc          → https://pandoc.org/installing.html  (docx + epub, obligatoire)
+#   - Un moteur PDF   → pip install weasyprint   (recommandé, réutilise le CSS)
+#                       ou Typst / une distribution LaTeX (xelatex)
+#   - LM Studio       → https://lmstudio.ai  (ou Ollama) avec un modèle chargé

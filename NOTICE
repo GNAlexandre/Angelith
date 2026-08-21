@@ -1,0 +1,67 @@
+# NOTICE — third-party components
+
+Angelith is licensed under the GNU Affero General Public License v3.0 or later
+(see `LICENSE`). It **orchestrates** third-party tools and models that carry their own
+licences. This file lists them.
+
+## Python dependencies (installed via pip, not vendored)
+
+| Component | Role | Licence |
+|---|---|---|
+| `openai` | client for the local Ollama / LM Studio endpoint | Apache-2.0 |
+| `pyyaml` | configuration and glossary | MIT |
+| `pymupdf` | text and image extraction from PDF | **AGPL-3.0** (or commercial) |
+| `python-docx` | heading detection in `.docx` | MIT |
+| `rich` | console interface | MIT |
+| `PySide6` *(GUI only)* | graphical interface | **LGPL-3.0** (or GPL / commercial) |
+| `numpy` *(comics, scan)* | segmentation masks, page geometry | BSD-3-Clause |
+| `onnxruntime` *(comics)* | runs the bubble-detection model | MIT |
+| `manga-ocr` *(comics, scan)* | Japanese OCR | Apache-2.0 |
+| `rarfile` *(comics)* | `.cbr` archive reading | ISC |
+| `pytest`, `psd-tools` *(tests)* | test suite | MIT |
+
+**On PyMuPDF and PySide6.** PyMuPDF is AGPL-3.0, which is why this project is AGPL-3.0 and
+not a permissive licence — it is a consequence, not a preference. PySide6 is LGPL-3.0, and an
+AGPL program may link an LGPL library, so there is nothing to resolve there.
+
+## External tools (not shipped, not installed by pip)
+
+| Tool | Role | Licence |
+|---|---|---|
+| [Pandoc](https://pandoc.org) | Markdown → DOCX / EPUB conversion | GPL-2.0-or-later |
+| [WeasyPrint](https://weasyprint.org) | PDF rendering | BSD-3-Clause |
+| [Ollama](https://ollama.com) | local model serving | MIT |
+| `unrar` / `unar` *(optional)* | `.cbr` extraction | proprietary (unrar) |
+
+## Model weights — downloaded, never vendored
+
+No model weights are committed to this repository. They are fetched on first use, which keeps
+their licences out of this distribution and keeps the clone small.
+
+| Model | Role | Note |
+|---|---|---|
+| `kitsumed/yolov8m_seg-speech-bubble` | speech-bubble detection (~104 MB) | YOLOv8-seg export. **Verify the licence on the model page before redistributing anything derived from it.** Ultralytics YOLOv8 itself is AGPL-3.0. |
+| `manga-ocr` base model | Japanese OCR (~424 MB) | fetched from Hugging Face on first run |
+
+See `manga_models/README.md` for download URLs and the automatic-download behaviour.
+
+## Fonts
+
+| File | Licence |
+|---|---|
+| `templates/fonts/ComicNeue-*.ttf` | SIL OFL 1.1 — full text in `templates/fonts/OFL.txt` |
+
+Comic Neue — Copyright 2014 The Comic Neue Project Authors,
+<https://github.com/crozynski/comicneue>, obtained from Google Fonts. The OFL is the only
+category that unambiguously permits redistributing the font file inside this repository,
+provided `OFL.txt` travels with it and the origin is credited.
+
+> **Known gap.** `templates/fonts/wildjess normal.ttf` was present in the repository with no
+> recorded licence and no reference from any code or configuration. It has been removed from
+> version control pending clarification of its redistribution rights. If you need it, install
+> it yourself and point `manga.typeset.font_path` at it.
+
+## Corpora
+
+The works used to measure quality are **not** distributed with this project and are not named
+in it. Angelith ships no copyrighted text.

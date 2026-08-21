@@ -1,0 +1,116 @@
+# ============================================================
+#  Glossaire — MODÈLE (copie-le dans sources/<TonŒuvre>/glossaire.yaml et adapte-le)
+#  Propre à cette ŒUVRE (réutilisé pour tous ses tomes).
+#  Catégorisé et espacé pour la lecture : personnages / lieux /
+#  organisations / créatures / objets / termes / événements /
+#  groupes / anglicismes. Chaque entrée affiche tous ses champs,
+#  même vides — complète-les librement.
+#  `force: true` IMPOSE le champ `nom` comme traduction obligatoire :
+#  toute forme listée en `variantes`/`interdits` sera remplacée par
+#  `nom` dans le texte final, automatiquement (ex. nom: Leprechaun,
+#  interdits: [lutin, farfadet], force: true).
+#  Alimenté automatiquement par le terminologue/glossariste (fusion
+#  SANS écrasement) ; tes entrées sont conservées et prioritaires.
+# ============================================================
+
+# ─────────────────────  PERSONNAGES  ─────────────────────
+personnages:
+- nom: Kousuke
+  genre: masculin
+  variantes: []
+  interdits: []
+  role: Narrateur principal
+  description: MASCULIN partout (« impuissant », « enveloppé »…).
+  force: false
+- nom: Sylphy
+  genre: féminin
+  variantes: []
+  interdits: []
+  role: ''
+  description: 'Héroïne ; féminine, notamment dans les sections « POV : Sylphy ».'
+  force: false
+- nom: Poiso
+  genre: féminin
+  variantes:
+  - Poizo
+  interdits: []
+  role: ''
+  description: Slime girl. Nom propre, jamais « Poison ».
+  force: false
+
+# ─────────────────────  LIEUX  ─────────────────────
+lieux:
+- nom: Saint Empire
+  variantes: []
+  interdits:
+  - Saint Royaume
+  description: Nation centrale. Toujours « Empire », jamais « Royaume ».
+  force: false
+
+# ─────────────────────  ORGANISATIONS  ─────────────────────
+organisations:
+- nom: Garde impériale
+  variantes: []
+  interdits: []
+  description: Force militaire de l'Empire.
+  force: false
+
+# ─────────────────────  CRÉATURES  ─────────────────────
+creatures:
+- nom: slime girls
+  genre: féminin
+  traduire: null
+  variantes: []
+  interdits: []
+  description: Race de filles-slimes (Lime, Bess, Poiso). Accords féminins.
+  force: false
+
+# ─────────────────────  OBJETS  ─────────────────────
+objets:
+- nom: fusil
+  traduire: true
+  variantes: []
+  interdits:
+  - pistolet
+  description: Arme à feu d'épaule.
+  force: false
+- nom: gizmas
+  traduire: false
+  variantes: []
+  interdits: []
+  description: Objets propres à l'univers ; NE PAS traduire.
+  force: false
+
+# ─────────────────────  TERMES  ─────────────────────
+termes:
+- nom: succès
+  traduire: true
+  variantes: []
+  interdits:
+  - exploits
+  - réalisations
+  description: Terme de game-menu (achievement).
+  force: false
+- nom: Leprechaun
+  traduire: false
+  variantes: []
+  interdits:
+  - lutin
+  - farfadet
+  description: 'Exemple : « force: true » remplace TOUJOURS lutin/farfadet par Leprechaun, quoi que le
+    modèle produise.'
+  force: true
+
+# ─────────────────────  GROUPES (POV collectif / accords)  ─────────────────────
+groupes:
+- nom: slime girls
+  note: 'Dans LEUR POV : « je » (collectif, accords féminins). En récit externe : « elles ».'
+
+# ─────────────────────  ANGLICISMES  ─────────────────────
+anglicismes:
+- vo: Yup
+  fr: Ouais
+- vo: Whoa
+  fr: Ouah
+- vo: OK
+  fr: D'accord

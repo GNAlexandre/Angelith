@@ -1,0 +1,26 @@
+# Dépendances de la brique SCAN (lecture d'un LN japonais livré en images — voir scan/).
+# Sous-ensemble strict de requirements-manga.txt : si tu as déjà installé la brique manga,
+# tu n'as rien de plus à faire.
+#   pip install -r requirements-scan.txt
+
+numpy>=1.26          # analyse de la mise en page (projections, gouttières) — aucun modèle
+manga-ocr>=0.1.14    # OCR japonais vertical (télécharge son modèle depuis Hugging Face au
+                     # premier lancement — ~424 Mo, une seule fois, puis hors ligne)
+
+# Volontairement PAS de dépendance à onnxruntime : la brique SCAN ne détecte rien par
+# réseau de neurones. Toute l'analyse de page (colonnes, ruby, mobilier, coupes) est
+# géométrique et tient dans numpy — une page de roman imprimé est une grille régulière,
+# et une grille se mesure. Le seul modèle chargé est celui de l'OCR.
+
+# --- Vitesse — OPTIONNEL ---------------------------------------------------------------
+# L'OCR est le seul coût réel de la brique : ~0,5 s par tranche, ~30 s par page, ~2 h pour
+# un tome de 270 pages sur processeur. Deux leviers, dans cet ordre d'efficacité :
+#
+# 1. torch en build CUDA (si tu as une carte NVIDIA) — c'est le gros du gain.
+#    Vérifie d'abord ce que tu as : python -c "import torch; print(torch.__version__)"
+#
+# 2. torchvision, qui évite le repli PIL du processeur d'image de transformers.
+#    Volontairement PAS une dépendance dure, exactement comme dans requirements-manga.txt :
+#    un `pip install torchvision` non qualifié réinstallerait un torch incompatible.
+#      pip install torchvision --index-url https://download.pytorch.org/whl/cpu   # torch +cpu
+#      pip install torchvision                                                     # torch CUDA

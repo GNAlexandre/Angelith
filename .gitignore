@@ -1,0 +1,46 @@
+# ⚠ Ce fichier DOIT rester en UTF-8 SANS BOM. Il a été un temps encodé en UTF-16LE
+# avec BOM : git ne décode pas l'UTF-16, le fichier était donc entièrement INERTE
+# (`git check-ignore -v build/` sortait en erreur) et 3347 fichiers se sont retrouvés
+# suivis, dont 2549 sous build/ et 654 sous sources/.
+
+# --- Sorties de traduction (régénérables : `python run.py` / `run_manga.py`) ---
+build/
+
+# --- Scans et textes sources (volumineux, sous droit d'auteur, jamais à publier) ---
+# Exclusion EN BLOC, sans aucune exception. Les glossaires y ont été ré-inclus jusqu'en
+# 1.8.0 — c'est du travail écrit à la main, et le perdre à chaque clone était un vrai
+# coût. Mais le dépôt devient public, et l'arbre git exposait alors le NOM de chaque
+# œuvre comme nom de dossier, plus sa terminologie complète dans le glossaire. Aucune
+# purge du contenu ne rattrape un chemin de fichier.
+#
+# Les glossaires restent sur le disque et dans le dépôt privé d'archive. Leur sauvegarde
+# est désormais la responsabilité de l'utilisateur — cf. `docs/README.fr.md`, sauvegarde
+# du glossaire, et l'import/export prévu en 2.2.0.
+sources/
+
+# --- Modèles et archives (téléchargés/produits, pas versionnés) ---
+*.onnx
+*.cbz
+*.cbr
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# --- Réglages locaux de l'outillage (propres à la machine) ---
+.claude/settings.local.json
+
+# PSD de diagnostic produit par `run_manga.py --psd-test` puis validé par
+# `tools/valider_psd_photoshop.ps1` : un artefact, pas une source.
+psd_test.psd
+
+# --- Document de travail de la purge du corpus ---
+# `docs/purge-corpus.md` recense chaque occurrence purgée AVEC son texte exact : il cite
+# donc les titres réels ligne par ligne. Le publier annulerait la purge qu'il documente.
+# Il reste sur le disque et dans le dépôt privé d'archive.
+docs/purge-corpus.md
+
+# Police non documentee, licence inconnue : retiree du suivi tant que son droit de
+# redistribution n'est pas etabli (cf. NOTICE). Le fichier reste sur le disque.
+templates/fonts/wildjess normal.ttf

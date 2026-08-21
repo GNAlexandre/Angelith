@@ -1,0 +1,17 @@
+# Dépendances de DÉVELOPPEMENT et de TEST uniquement.
+# Rien ici n'est nécessaire pour traduire un tome :
+#   pip install -r requirements-dev.txt
+#
+# ⚠ Ne remonte JAMAIS dans requirements.txt ni requirements-manga.txt : la brique manga tient son
+# engagement de légèreté (pas d'OpenCV pour trois morphologies, pas de bibliothèque PSD pour
+# écrire du binaire documenté).
+
+pytest>=8.0
+
+# Lecteur PSD indépendant, utilisé par tests/test_manga_psd_relecture.py pour relire ce que
+# manga/psd.py écrit. C'est la seule façon de valider un écrivain de format binaire : l'analyseur
+# maison de tests/test_manga_psd.py partage les hypothèses de l'écrivain, et a donc reproduit
+# fidèlement un descripteur mal formé au lieu de le signaler — Photoshop, lui, refusait les
+# calques de texte et retombait sur leurs pixels.
+# `psd-tools` est orienté LECTURE (son écriture est marginale), ce qui est exactement l'usage ici.
+psd-tools>=1.9
