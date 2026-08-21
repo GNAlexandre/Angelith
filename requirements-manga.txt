@@ -1,0 +1,36 @@
+# Dépendances de la brique MANGA (indépendante du pipeline LN — voir manga/).
+# N'installe RIEN qui affecte requirements.txt : installation séparée, à la carte.
+#   pip install -r requirements-manga.txt
+
+numpy>=1.26          # masques de segmentation (bulles)
+onnxruntime>=1.18    # exécution du modèle de détection de bulles (CPU)
+manga-ocr>=0.1.14    # OCR japonais dédié (télécharge son modèle depuis Hugging Face
+                     # au premier lancement — nécessite une connexion réseau une fois)
+rarfile>=4.1         # lecture des archives .cbr (nécessite en plus l'outil externe
+                     # unrar/unar dans le PATH : https://www.rarlab.com/rar_add.htm
+                     # — sans lui, seuls les .cbz/.zip fonctionnent)
+
+# --- Vitesse de l'OCR — OPTIONNEL ---
+# Sans `torchvision`, `transformers` se rabat sur un processeur d'image en PIL, plus lent :
+#   « ViTImageProcessor requires torchvision (not installed); falling back to
+#     ViTImageProcessorPil for backward compatibility »
+# L'avertissement lui-même est déjà tu par `manga/ocr.py` ; il ne reste que le surcoût.
+# Volontairement PAS une dépendance dure : `torch` peut être installé en build `+cpu` ou
+# CUDA, et un `pip install torchvision` non qualifié réinstallerait un `torch` incompatible.
+# Prends la roue qui correspond à TON torch (`python -c "import torch; print(torch.__version__)"`) :
+#   pip install torchvision --index-url https://download.pytorch.org/whl/cpu    # torch +cpu
+#   pip install torchvision                                                      # torch CUDA
+
+# --- Accélération GPU (AMD/Windows) — OPTIONNEL, repli CPU automatique sinon ---
+# La détection de bulles (ONNX) peut tourner sur GPU via DirectML (DX12, marche sur
+# toute carte AMD/NVIDIA/Intel récente sous Windows — pas besoin de ROCm/CUDA) :
+#   pip uninstall onnxruntime && pip install onnxruntime-directml
+# ⚠ onnxruntime et onnxruntime-directml sont MUTUELLEMENT EXCLUSIFS : n'installe
+# que l'un des deux. Le CPU reste largement suffisant en pratique (~1-3 s/planche
+# pour la détection, ~0,5-2 s/bulle pour l'OCR) — n'active DirectML que si tu
+# traites de gros volumes et veux accélérer.
+# Active ensuite "DmlExecutionProvider" dans config.yaml > manga.detection.providers.
+
+# --- Dépendances EXTERNES (hors pip) ---
+#   - unrar OU unar   → uniquement pour lire des .cbr (facultatif, préfère .cbz)
+#   - Modèle de détection de bulles (ONNX, YOLOv8-seg) → voir manga_models/README.md

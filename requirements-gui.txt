@@ -1,0 +1,18 @@
+# Interface graphique (lot 16) — OPTIONNELLE.
+#
+# Fichier séparé, comme requirements-manga.txt et pour la même raison : ni le light novel ni le
+# manga n'en ont besoin pour tourner. `python run.py` et `python run_manga.py` fonctionnent sans
+# qu'une seule de ces lignes soit installée, et c'est ce qui garde la promesse d'installation
+# légère du dépôt.
+#
+#     pip install -r requirements-gui.txt
+#     python gui.py
+#
+# ⚠ Ne PAS promouvoir ces dépendances dans requirements.txt : PySide6 pèse ~120 Mo, contre
+# ~30 Mo pour tout le socle. Un utilisateur qui ne veut que la ligne de commande ne doit pas
+# les payer.
+#
+# La logique métier de l'éditeur (manga/edition.py, manga/traduction_unitaire.py) est en Python
+# nu et ne dépend PAS de Qt : elle se teste et s'utilise sans rien installer d'ici. Seul le
+# dossier gui/ importe PySide6.
+PySide6>=6.7

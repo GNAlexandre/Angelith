@@ -1,0 +1,966 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Alexandre Tournel
+
+# ============================================================
+#  Configuration centrale — pipeline de fan-traduction
+# ============================================================
+
+# --- Serveur d'inférence local (API compatible OpenAI) ---
+llm:
+  # Ollama expose une API compatible OpenAI sur le port 11434.
+  base_url: "http://localhost:11434/v1"
+  api_key: "ollama" # valeur factice : tout est local
+  # PLANCHER de durée d'une requête, en secondes — plus un plafond depuis la 0.39.0. Le
+  # plafond réel est DÉRIVÉ du budget de génération : `max(timeout, max_tokens / debit_
+  # plancher_tok_s)`. Un timeout plat est une contradiction en puissance — celui-ci valait
+  # 900 s alors que le budget du traducteur (20 644 tokens) demande 1 376 s à 15 tok/s et
+  # 4 129 s à 5 tok/s : le pire cas autorisé ne tenait à AUCUN débit, et un run de nuit est
+  # mort dessus. Ce plancher ne sert plus qu'aux petits appels (titres, terminologie).
+  timeout: 900
+  # Débit de génération le plus BAS qu'on accepte de subir sans conclure à une panne.
+  # Mesuré sur roman A Vol.1 : 15 tok/s en régime normal, 5 quand le GPU décroche.
+  # Baisser cette valeur = attendre plus longtemps avant de déclarer un timeout.
+  debit_plancher_tok_s: 5
+  # Tentatives de CETTE enveloppe. ⚠ Le SDK OpenAI est câblé à `max_retries=0` : il retente
+  # sur timeout par défaut (2 fois), ce qui MULTIPLIAIT les tentatives (3 × 3 = 9 requêtes,
+  # soit 2 h 15 d'attente muette par bloc, invisible car le SDK ne journalise rien).
+  max_retries: 2
+  # Ajouté à la fin de chaque message utilisateur (laisse vide en général).
+  extra_directive: ""
+  # Mode « thinking » (raisonnement AVANT la réponse), contrôlé PAR REQUÊTE :
+  #   false → pas de raisonnement (rapide, recommandé par défaut pour la traduction) ;
+  #   true  → le modèle raisonne d'abord (équivaut à "medium") ;
+  #   "low" / "medium" / "high" → ce niveau précisément ;
+  #   (retire la clé pour laisser le défaut du modèle).
+  # Le NIVEAU pèse lourd : sur roman A Vol.1, "medium" sur des blocs japonais de
+  # ~5600 tokens a fait partir 74 à 97 % de la génération dans le raisonnement. Réduire
+  # les blocs (cf. decoupage.max_block_tokens) traite la cause ; passer à "low" est le
+  # levier suivant si le raisonnement reste disproportionné.
+  # ⚠ Sur l'endpoint OpenAI d'Ollama, le paramètre natif `think` est ignoré : le code
+  # le traduit automatiquement en `reasoning_effort` (none / medium), seul mécanisme
+  # qui marche via /v1/chat/completions. Requiert une version récente d'Ollama.
+  # Un SEUL modèle chargé suffit : on peut activer le raisonnement pour certains agents
+  # seulement (cf. endpoints + modeles ci-dessous) sans charger le modèle deux fois.
+  think: false
+  # Budget de tokens SUPPLÉMENTAIRE accordé à un agent en mode « thinking » (think: true),
+  # ajouté à son max_tokens : le modèle raisonne AVANT de répondre, il lui faut de la
+  # place pour ça EN PLUS de la réponse, sinon tout le budget part dans le raisonnement
+  # et la réponse ressort vide.
+  thinking_budget: 16000
+  # Endpoint(s) alternatif(s) : permet à un agent d'utiliser un réglage `think` différent
+  # (ou un autre serveur `base_url`). Cas typique : activer le raisonnement UNIQUEMENT
+  # pour la terminologie et le glossariste (comparer/désambiguïser entre sources = vrai
+  # travail de raisonnement), tout en gardant la traduction/rédaction en non-thinking.
+  # Un endpoint « reflexion » avec `think: true` réutilise le MÊME modèle et le MÊME
+  # serveur — juste le raisonnement activé pour cette requête.
+  # Pour AJOUTER un endpoint : décommente les lignes ci-dessous (indentées de 2 espaces
+  # sous `endpoints:`). ⚠ N'écris PAS `endpoints: {}` sur cette ligne si tu ajoutes des
+  # entrées : le `{}` ferme le dictionnaire et tes entrées atterriraient à côté (le run
+  # s'arrêtera alors avec un message d'erreur pointant ce problème).
+  # Un endpoint accepte aussi `thinking_budget`, qui l'emporte alors sur la valeur
+  # ci-dessus — le budget de raisonnement n'a de sens qu'au regard du niveau `think` et de
+  # la taille des blocs, or les deux se règlent ici.
+  # ⚠ Ne le baisse pas à la légère sur « reflexion » : le glossariste y passe aussi, et SON
+  # entrée n'est pas dimensionnée par bloc (c'est le glossaire entier, cf.
+  # `optimize_glossary_file`). Un budget calé sur des blocs de 2200 tokens peut le tronquer.
+  endpoints:
+    reflexion: { think: true } # même modèle, raisonnement activé
+    # reflexion: { think: "low", thinking_budget: 8000 }   # variante économe
+    # autre_serveur: {base_url: "http://autre-hote:11434/v1"}
+  # Taille de contexte du modèle, DÉCLARATIVE. Le client ne l'envoie pas — `num_ctx` vit dans
+  # le Modelfile Ollama, et l'endpoint /v1 d'Ollama ne l'accepte pas. Elle sert à un seul
+  # usage : permettre aux garde-fous de CALCULER si un prompt tient, au lieu de le supposer.
+  # C'est ce qui manquait quand la traduction d'un tome en un appel a été écartée à la main
+  # (30 948 tokens pour un contexte de 32 768) ; la traduction par lots refait ce calcul à
+  # chaque appel (cf. `manga.lot` et `quality_manga.place_disponible`).
+  # ⚠ Doit correspondre à la VRAIE valeur du Modelfile, sans quoi le garde-fou ment dans les
+  # deux sens — et une valeur déclarative FAUSSE est pire qu'absente. Cette clé a annoncé
+  # 65 536 pendant toute la 1.1.0 alors que le serveur en servait 32 768 : `place_disponible`
+  # croyait disposer de 55 705 tokens utiles quand le plafond réel était 27 852, et un lot de
+  # 20 planches avec raisonnement débordait sans que rien ne le dise.
+  #
+  # ⚠ Et Ollama ne dégrade PAS progressivement. Mesuré sur ce serveur : un prompt de 31 398
+  # tokens passe entier, un prompt de ~33 200 est **silencieusement ramené à 16 386** — plus
+  # de la moitié du contexte jetée, sans erreur ni avertissement. C'est ce qui rend le
+  # dépassement invisible dans le rendu et visible seulement au rapport, planches vides.
+  #
+  # Depuis la 1.2.0, la valeur est VÉRIFIÉE et non plus seulement crue : au premier appel de
+  # traduction, elle est comparée à ce que rend `/api/ps`, et un écart est signalé au journal.
+  # À vérifier aussi à la main : `ollama show <modèle> --modelfile | Select-String num_ctx`.
+  num_ctx: 32768
+
+# --- Modèles par agent ---
+# Mets l'IDENTIFIANT exact du modèle tel qu'il apparaît dans `ollama ls`.
+# Un agent peut cibler un endpoint DIFFÉRENT (cf. llm.endpoints ci-dessus) : remplace la
+# chaîne par un petit dict `{model: "...", endpoint: "..."}`. La terminologie et le
+# glossariste sont les candidats les plus utiles pour activer le raisonnement (et comme
+# ils tournent moins souvent que traducteur/réviseur, le surcoût du thinking pèse moins).
+# ⚠ `<agent>: null` DÉSACTIVE l'agent : son étape est SAUTÉE et le texte passe inchangé à
+# l'étape suivante (utile pour glossariste / terminologue / correcteur /
+# mise_en_page). Le traducteur ne peut PAS être désactivé (le pipeline n'aurait rien à
+# produire). Désactiver mise_en_page dégrade le rendu (perte du drop-cap et des blocs
+# « pensée » ; les dialogues restent stylés automatiquement au rendu).
+modeles:
+  #terminologue: "qwen3.5-9b-yumetrad"
+  #glossariste: "qwen3.5-9b-yumetrad"
+  traducteur: { model: "yume-27b", endpoint: "reflexion" } # thinking activé : agent CENTRAL (contexte, terminologie, temps du récit, reformulation)
+  correcteur: null #"yume-27b"
+  mise_en_page: "yume-27b"
+  glossariste: { model: "yume-27b", endpoint: "reflexion" }
+  terminologue: { model: "yume-27b", endpoint: "reflexion" }
+
+temperatures:
+  terminologue: 0.1
+  traducteur: 0.3
+  correcteur: 0.5
+  mise_en_page: 0.0
+  glossariste: 0.2
+
+# --- Découpage ---
+# On travaille par BLOCS (jamais au milieu d'un paragraphe). max_block_chars borne
+# la taille d'un bloc de la langue pivot ; les sources de référence sont découpées
+# proportionnellement pour rester alignées.
+decoupage:
+  # PLAFOND DUR, en caractères. Un bloc n'ira jamais au-delà, quelle que soit la langue.
+  max_block_chars: 6000
+  # Budget d'un bloc en TOKENS — c'est lui qui décide réellement, `max_block_chars` ne
+  # servant plus que de garde-fou. Un bloc de 6000 caractères ne pèse pas la même chose
+  # selon la langue : ~1500 tokens en anglais (≈4 caractères/token), ~5900 en japonais
+  # (≈1 token/caractère). Découper en caractères revient donc à donner au modèle quatre
+  # fois plus de travail par bloc sur un pivot CJK.
+  # La limite effective est `min(max_block_chars, max_block_tokens / densité mesurée)` :
+  #   - pivot latin (densité 0,250 — mesurée sur roman D, roman E, roman C) →
+  #     2200/0,250 = 8800 car., au-dessus du plafond → DÉCOUPE INCHANGÉE ;
+  #   - pivot japonais (densité 0,974 — mesurée sur roman A Vol.1) → 2258 car.
+  # Effet mesuré sur ce tome : le plafond de sortie `out_cap` saturait son maximum dur
+  # (6000) sur 8 blocs sur 8 ; il retombe à 4644, et redevient un filet plutôt qu'un
+  # régime de croisière. Vide/supprimée = découpage en caractères seul (comportement
+  # d'avant la 0.31.0).
+  max_block_tokens: 2200
+  # Une PARTIE (sous-chapitre détecté, cf. mise_en_forme plus bas) qui chevauche la
+  # limite max_block_chars est gardée ENTIÈRE dans un seul bloc si le dépassement
+  # reste sous cette marge (0.20 = 20 %) — sinon elle est scindée normalement. Ne
+  # change rien pour un chapitre sans Partie détectée.
+  marge_partie_bloc: 0.20
+  # Détection des chapitres : "auto" = titres structurels + mots-clés (déterministe,
+  # recommandé). "llm" = le modèle repère les chapitres (pour sources récalcitrantes ;
+  # nécessite le LLM, sans effet en dry-run).
+  detection: "auto"
+  # Budget de tokens (estimé) pour le prompt d'un bloc de traduction. Garde-le
+  # NETTEMENT sous le num_ctx du modèle Ollama (laisse de la place à
+  # la réponse). Au-delà, les sources de référence les moins prioritaires sont
+  # rognées/limitées automatiquement. Le glossaire injecté est plafonné à ~la moitié
+  # de cette valeur. Règle : num_ctx (Modelfile Ollama, cf. `llm.num_ctx` ci-dessus) ≈
+  # max_input_tokens + 6000 (marge de réponse). Ex. contexte 32768 → ~24000 ; contexte
+  # 65536 → ~56000. Tu as de la VRAM : n'hésite pas à monter le num_ctx du Modelfile ET
+  # cette valeur.
+  max_input_tokens: 24000
+  # Motifs de titres de chapitres ADDITIONNELS. Les défauts multilingues intégrés
+  # (Chapter / Chapitre / Capítulo / Prologue / Epilogue / 第N章 …) restent TOUJOURS actifs :
+  # cette liste les complète, elle ne les remplace pas. Un motif simple
+  # (comme ci-dessous) est automatiquement ancré en DÉBUT DE LIGNE avec limite de mot
+  # — il ne matchera jamais en pleine phrase (ex. « POV » ne matche plus « stopover »).
+  chapter_patterns:
+    [
+      Prologue,
+      Chapitre,
+      Epilogue,
+      PostFace,
+      POV,
+      Chapter,
+      Afterword,
+      Extra Episode,
+      NPC No.,
+      Fragment,
+    ]
+  # Lecture des sources .epub (voir pipeline/epub.py). Un EPUB est déjà structuré — le
+  # « spine » donne l'ordre de lecture, la table des matières nomme les sections — donc il
+  # n'y a presque rien à régler ici, à l'inverse d'un PDF.
+  epub:
+    # Traitement des FURIGANA (<ruby>…<rt>lecture</rt></ruby>), très fréquents en japonais :
+    #   "ignorer"     : la lecture est retirée, seul le kanji reste. Défaut.
+    #   "parentheses" : conservée sous la forme 七堕(ナナエ).
+    # Mesuré sur roman A Vol.1 : 8 140 ruby, soit une glose tous les 22 caractères.
+    # Les garder gonfle la source de 30 % (176 210 → 228 967 caractères) et noie le traducteur
+    # dans des redites.
+    # ⚠ Ce réglage ne concerne QUE le texte transmis aux agents. Les lectures sont de toute
+    # façon RELEVÉES à part, dans un lexique graphie → prononciation (2 029 entrées sur ce
+    # tome), et seul le TERMINOLOGUE les reçoit — uniquement celles qui apparaissent dans son
+    # bloc, et seulement si la langue pivot n'est pas latine. Il n'y a donc plus aucune raison
+    # de passer à "parentheses" pour faire relever les noms propres : "ignorer" suffit.
+    ruby: "ignorer"
+    # Longueur maximale d'une première ligne pour être retenue comme TITRE du document
+    # (quand il n'a ni balise de titre, ni entrée dans la table des matières). Un titre doit
+    # en plus être court RELATIVEMENT à ce qui le suit : voir `epub.titrer`.
+    titre_max_caracteres: 40
+
+  # Détection de titres par MISE EN FORME (taille de police + gras), pour les PDF et
+  # DOCX sans vrai style de titre (journal daté, titres tapés en gras/grand à la
+  # main…) — combinée aux styles/mots-clés ci-dessus. Jusqu'à 2 paliers de taille
+  # sont retenus : le plus grand = Chapitre, le suivant = Partie (sous-chapitre,
+  # imbriquée DANS le chapitre). Voir `python run.py <Projet> <Tome> --plan`.
+  mise_en_forme:
+    ratio_taille_titre: 1.10 # taille (gras) / corps de texte, minimum pour être candidat
+    footer_frac_pages: 0.30 # fraction de pages où un bandeau doit se répéter pour être retiré (filigrane/pied de page)
+    footer_bande_page: 0.10 # bande haut/bas de page (fraction de la hauteur) où chercher ces bandeaux
+    # Titres à IGNORER même s'ils sont gras/grands (sommaire, mentions légales…).
+    titres_exclus:
+      [
+        Table of Contents,
+        Contents,
+        Copyright,
+        Cover,
+        Title Page,
+        Illustrations,
+        Color Illustrations,
+        Table des matières,
+      ]
+
+# --- Langues ---
+# Correspondance dossier → code (insensible à la casse). Tu crées sous chaque Tome
+# les dossiers ENG / JAP / ESP / CHINOIS et éventuellement FR (brouillon à améliorer).
+langues:
+  dossiers:
+    ENG: en
+    ENGLISH: en
+    JAP: jp
+    JAPONAIS: jp
+    JP: jp
+    ESP: es
+    ESPAGNOL: es
+    CHINOIS: zh
+    CHINESE: zh
+    ZH: zh
+    FR: fr
+    FRANCAIS: fr
+    FRENCH: fr
+  # Priorité de SENS pour choisir la langue PIVOT (la 1re présente gagne).
+  # (Si un dossier FR existe → mode AMÉLIORATION : le FR devient la base.)
+  priorite_sens: [en, jp, es, zh]
+  # Priorité de la source des IMAGES (la 1re présente gagne).
+  priorite_images: [fr, en, jp, es, zh]
+  # Sources de langue réellement UTILISÉES (traduction ET amélioration). Permet de
+  # n'en garder qu'une (ex. [en] = traduire depuis l'anglais seul) ou plusieurs
+  # (ex. [fr, jp, en] = améliorer le FR avec le JP et l'EN). En amélioration, inclure « fr ».
+  # Les langues présentes mais hors de cette liste sont ignorées (mais restent dispo :
+  # il suffit de les rajouter). Vide/supprimée = utiliser toutes les langues présentes.
+  sources_utilisees: [fr, en, jp]
+  # Optimisation du glossaire par l'agent glossariste (dédoublonnage/fusion/reclassement) :
+  #  - APRÈS la terminologie de CHAQUE chapitre (recommandé) : nettoie le glossaire AVANT
+  #    que les autres agents ne l'utilisent. Coûte 1 appel LLM par chapitre.
+  optimiser_apres_terminologie: true
+  #  - en fin de volume (redondant si le précédent est activé).
+  optimiser_glossaire_fin_volume: false
+  #  (manuel à tout moment : python run.py "Projet" --optimize-glossary)
+  # Applique les entrées `force: true` du glossaire par remplacement déterministe
+  # (garanti, indépendant du modèle) au texte final avant rendu. Désactive seulement
+  # si tu préfères t'en tenir aux suggestions du glossaire sans forçage automatique.
+  appliquer_traductions_forcees: true
+  # Traduit le TITRE de chaque chapitre en français (appel court, non-thinking, mis en cache
+  # dans .checkpoints/chNN/title.txt). Uniquement en mode « traduction » (en « amélioration »,
+  # le titre du brouillon FR est déjà français). false = garder le titre de la langue source.
+  traduire_titres: true
+
+# --- Garde-fous déterministes (indépendants de la qualité du modèle) ---
+garde_fous:
+  # Ratio minimal (mots en SORTIE / mots en ENTRÉE) sous lequel un bloc « préservation »
+  # est considéré comme ayant perdu du contenu (mot de liaison, phrase entière...) : le
+  # bloc retombe alors sur sa version précédente (+ un retry à température réduite est
+  # tenté avant de renoncer, cf. plus bas). Absent/None pour un agent = pas de contrôle
+  # pour lui (le traducteur peut légitimement condenser/synthétiser plusieurs sources,
+  # donc il n'a volontairement PAS d'entrée ici).
+  # ⚠ Garde-fou grossier : il détecte une chute globale de longueur (phrase/paragraphe
+  # perdu), pas un mot isolé disparu dans un bloc par ailleurs normal — ça reste
+  # principalement le rôle des consignes des prompts (cf. correcteur.md).
+  perte_mots_ratio:
+    # Filet LARGE contre une troncature grossière du traducteur (bloc à moitié sauté,
+    # p.ex. tout le récit après une image ignoré). Volontairement bas : en traduction le
+    # texte FR fait ~1:1 avec le pivot, une chute sous 0.60 trahit une perte, pas une
+    # simple condensation. Mets-le à null pour revenir à l'ancien comportement (aucun
+    # contrôle de longueur sur le traducteur). NB : la troncature « s'arrête à une image »
+    # est en plus détectée indépendamment de ce ratio.
+    traducteur: 0.60
+    correcteur: 0.75 # passe corrective : ne devrait pas couper (corrections ciblées seulement)
+    mise_en_page: 0.90 # ne devrait RIEN couper (classement/balisage seulement)
+  # Facteur de correction de température pour le retry (cf. ci-dessous) : nouvelle
+  # température = température de l'agent × ce facteur (plancher 0.05).
+  # ⚠ SENS INVERSÉ pour une BOUCLE dégénérée du modèle : la répétition en boucle est une
+  # pathologie de BASSE température (le modèle re-choisit sans fin la continuation la plus
+  # probable), donc le retry DIVISE par ce facteur au lieu de multiplier — il chauffe pour
+  # casser le cycle. Mesuré sur roman D Vol.1 : avec l'ancien retry refroidi,
+  # les DEUX tentatives de chaque bloc en boucle bouclaient (temps et tokens doublés).
+  retry_temperature_facteur: 0.4
+
+  # --- Redécoupage-relance (traduction) ---
+  # Quand un bloc échoue pour une raison de TAILLE — budget « thinking » épuisé (le modèle
+  # raisonne et ne produit jamais de réponse finale), sortie qui sature le plafond
+  # `_out_cap` (« emballement »), troncature après image, chute de longueur, ou BOUCLE
+  # dégénérée (le modèle répète un passage jusqu'à saturer son plafond) — le bloc est
+  # coupé EN DEUX et chaque moitié est relancée, avec son propre plafond de sortie et ses
+  # références réalignées. Avant, le bloc était purement abandonné et réinjecté en langue
+  # source dans le texte final.
+  # Les échecs de CONSIGNE (glossaire ou guide de style recopié, titre de partie perdu) ne
+  # déclenchent PAS de redécoupage : couper n'y changerait rien.
+  # Dernier filet si une boucle survit au retry chaud ET au redécoupage : les cycles répétés
+  # sont effondrés et la traduction est conservée (marquée AMBIGU) — un bloc entier en
+  # anglais dans le document final n'est jamais un résultat acceptable.
+  redecoupage_sur_echec: true
+  # Nombre de niveaux de découpe : 1 → 2 sous-blocs, 2 → jusqu'à 4. Au-delà, le coût en
+  # tokens croît vite pour un gain marginal.
+  redecoupage_profondeur_max: 2
+  # Taille (en caractères) sous laquelle on ne redécoupe plus : un bloc déjà petit qui
+  # échoue ne souffre pas d'un problème de taille.
+  redecoupage_taille_min: 800
+
+  # --- Japonais/chinois résiduel dans une sortie française ---
+  # Nombre de caractères CJK tolérés dans un bloc traduit avant de le juger non traduit.
+  # Les formes que le glossaire autorise explicitement (`traduire: false`) et celles qu'il
+  # n'a pas encore romanisées sont retirées AVANT le comptage : le contrôle ne se déclenche
+  # donc pas sur une sortie conforme au glossaire qu'on a soi-même fourni au traducteur.
+  # Contrairement aux motifs de TAILLE, celui-ci ne déclenche PAS de redécoupage (couper un
+  # bloc en deux ne fait pas traduire un nom propre) ni de repli sur la langue source
+  # (retomber d'un français à noms japonais vers du japonais à 100 % serait pire) : la sortie
+  # est conservée et marquée AMBIGU. 0 = contrôle désactivé.
+  cjk_residuel_seuil: 1
+
+  # --- Expiration en série ---
+  # Un timeout ISOLÉ est un bloc trop long : il devient un motif d'échec ordinaire, le bloc
+  # est coupé en deux et relancé (couper est ici un remède causal — deux moitiés génèrent
+  # deux fois moins). Mais N blocs qui expirent d'affilée, c'est le SERVEUR qui ne répond
+  # plus : continuer remplirait le tome de langue source, un bloc après l'autre, chacun payé
+  # au prix d'un timeout complet. Au-delà de ce seuil, arrêt PROPRE (rapport partiel écrit,
+  # checkpoints intacts, message de reprise). 0 = ne jamais abandonner.
+  abandon_apres_timeouts_consecutifs: 3
+
+# --- Mise en page / rendu ---
+rendu:
+  # false : le tiret « — » est généré par ton style Word « Paragraphe de liste »
+  #         (et par le CSS pour EPUB/PDF). true : l'IA écrit « — » dans le texte.
+  dialogue_dash_in_text: false
+  reference_docx: "templates/reference.docx"
+  epub_css: "templates/epub.css"
+  pdf_engine: "weasyprint"
+  formats: [docx, epub, pdf]
+  # Gabarits de blocs custom-style, calés sur TON reference.docx (noms XML exacts).
+  styles:
+    dialogue: "List Paragraph" # ↔ « Paragraphe de liste » (tiret auto)
+    pensee: "Pensée"
+    # narration = paragraphe simple (hérite de « Corps de texte » / Body Text)
+    # encadré game-menu = texte en ***gras+italique*** dans un paragraphe normal
+  metadata:
+    titre: "Light Novel"
+    auteur: "Angelith Novel (trad. Angeloids)"
+    langue: "fr"
+
+# --- Divers ---
+options:
+  dry_run: false # true = exécute tout SANS appeler le LLM (test de tuyauterie)
+
+chemins:
+  sources: "sources"
+  build: "build"
+  glossaire_fichier: "glossaire.yaml" # cherché dans sources/<Projet>/ (un par œuvre)
+  style_guide: "style_guide.md"
+  prompts: "prompts"
+
+# --- Naturalisation (reformulage par le traducteur) ---
+naturalisation:
+  # Intensité du reformulage appliqué par le TRADUCTEUR (0.0 → 1.0).
+  #   0.0  = traduction fidèle, calques flagrants seulement, = comportement historique ;
+  #   1.0  = reformule librement pour un français de roman publié, SANS jamais trahir le sens.
+  # L'idée « brut 0.90 / rephrasage 0.10 » se ramène à ce seul chiffre : brut = 1 − intensite,
+  # donc « rephrasage 0.10 » ⇒ intensite: 0.10. ⚠ Un LLM ne reformule PAS « exactement 10 % des
+  # phrases » : ce curseur pilote une INTENSITÉ (l'ampleur autorisée), pas un quota. Il est
+  # injecté dans le message du traducteur (# CONSIGNE DE NATURALISATION).
+  # Paliers : ≤0.15 minimal · ≤0.45 léger · ≤0.75 modéré · >0.75 marqué.
+  intensite: 0.60
+
+# ============================================================
+#  Manga (brique INDÉPENDANTE du pipeline LN ci-dessus — voir manga/)
+#  Rien ci-dessus n'est modifié ni lu par cette section. CLI dédiée : run_manga.py.
+#  Dépendances additionnelles : requirements-manga.txt (numpy, onnxruntime,
+#  manga-ocr, rarfile — voir ce fichier pour le détail et les alternatives GPU).
+# ============================================================
+manga:
+  # Connexion LLM : hérite de la section `llm:` ci-dessus (même serveur Ollama, même
+  # modèle yume-27b — déjà vision-capable, cf. `ollama show yume-27b`).
+  # L'héritage est une FUSION PROFONDE (lot 2.3, cf. core/config.py) : n'écris ici que ce
+  # qui doit DIFFÉRER, tout le reste — base_url, api_key, timeout, endpoints,
+  # extra_directive — reste celui de la racine. Auparavant ce bloc la REMPLAÇAIT en bloc,
+  # et décommenter les deux lignes ci-dessous suffisait à perdre `llm.endpoints`.
+  # llm:
+  #   # 2 relances × budget de raisonnement = jusqu'à 3 générations perdues sur une page
+  #   # pathologique. Une seule suffit à récupérer les échecs transitoires.
+  #   max_retries: 1
+  #   # Le 16000 de la racine est dimensionné pour un bloc LN de 6000 caractères ; hérité tel
+  #   # quel côté manga, il autoriserait ~18 k tokens de raisonnement PAR PLANCHE.
+  #   thinking_budget: 2500
+
+  # Modèle(s) par agent manga. `manga_traducteur` (prompts/manga_traducteur.md) est le seul
+  # agent NOUVEAU ; `terminologue` et `glossariste` sont ceux du light novel, réutilisés tels
+  # quels (les agents sont agnostiques du média) et écrivant dans le MÊME
+  # sources/<Projet>/glossaire.yaml — c'est ce qui garde les noms cohérents entre un roman et
+  # son manga.
+  #
+  # Les deux sont OPTIONNELS et DÉSACTIVÉS par défaut : décommente-les pour que la brique
+  # RELÈVE les noms propres depuis le japonais OCR au lieu de seulement lire le glossaire.
+  #   terminologue: { model: "yume-27b" }   # + un appel LLM par planche à traduire
+  #   glossariste:  { model: "qwen3.6   :27b" }   # + un appel (dédoublonnage du glossaire)
+  # …et ajoute leur température sous `manga.temperatures` (repli 0,3 sinon).
+  #
+  # Depuis le lot 4.1, le relevé se fait en UNE PASSE sur tout le volume, AVANT la première
+  # traduction, et le dédoublonnage juste après : les 150 planches sont donc traduites avec
+  # le MÊME glossaire, complet et dédoublonné. Avant, le relevé de la planche 42 n'existait
+  # qu'après la traduction de la planche 41 — la planche 1 partait avec un glossaire vide et
+  # le dédoublonnage ne profitait qu'au run suivant.
+  #
+  # ⚠ Sur un tome DÉJÀ traduit, les activer ne suffit pas : une planche n'est relevée que si
+  # elle va être traduite. Il faut donc le demander — `--from traduction` (ou
+  # `--from terminologie`). Sinon les planches en cache restent intactes, ce qui est le
+  # comportement voulu : on ne relance pas 150 appels LLM par surprise.
+  #
+  # ⚠ Un relevé déjà en cache (`.checkpoints/page_XXXX/terminologie.txt`) n'est JAMAIS
+  # refait : il est re-fusionné dans le glossaire, sans appel. Pour forcer un nouveau relevé,
+  # supprimer ce fichier. C'est aussi ce qui rend `--page N` peu coûteux — les relevés des
+  # autres planches sont relus, pas recalculés.
+  #
+  # Le levier le moins cher pour la cohérence des noms reste le forçage : renseigne
+  # `force: true` + `interdits` dans le glossaire de l'œuvre, puis `--from rendu`. Zéro appel
+  # LLM. Mesuré sur manga A Vol.1 : 39 orthographes bannies → 0.
+  modeles:
+    # Depuis le lot 2.2, `build_agents` est la MÊME fonction pour les deux briques : les
+    # deux formes marchent ici comme côté LN — `think: true` en ligne (ci-dessous), ou
+    # `{model: …, endpoint: "reflexion"}` avec l'endpoint déclaré sous `llm.endpoints`.
+    # Auparavant `endpoint:` était SILENCIEUSEMENT ignoré côté manga.
+    #
+    # Coût mesuré : ~180 tokens générés/page et 9,7 s/page sans raisonnement, soit ~24 min
+    # pour 150 planches. Avec le raisonnement, la trace fait typiquement 2 à 6× la réponse,
+    # donc 3 à 7× le temps de mur : ~1 h 15 à 2 h 50 par tome (~1 h 30 à 3 h 30 en mode
+    # vision) — c'est ce qui le rendait inutilisable à une planche par appel, et c'est la
+    # traduction par LOTS qui le rend abordable (la trace est payée une fois par lot).
+    #
+    # ⚠ Le raisonnement de CET agent se règle sous `manga.lot.think`, pas ici : c'est la
+    # taille du lot qui décide s'il est payable, les deux réglages vont donc ensemble. Un
+    # `think:` écrit sur cette ligne serait écrasé (cf. `_appliquer_reflexion_lot`).
+    manga_traducteur: { model: "yume-27b" }
+    terminologue: { model: "yume-27b" }   # + un appel LLM par planche à traduire
+    glossariste:  { model: "yume-27b" }   # + un appel (dédoublonnage du glossaire)
+    # Onomatopées et texte posé sur le dessin (cf. `manga.onomatopees` plus bas) — un appel
+    # LLM court, et SEULEMENT sur les planches qui en portent. Le retirer désactive la
+    # traduction des SFX sans désactiver leur détection (elles seront alors comptées au
+    # rapport, mais pas glosées).
+    manga_onomatopees: { model: "yume-27b", think: false }
+    # Fiche de contexte de l'œuvre (cf. `manga.contexte`) — UN seul appel par tome, mis en
+    # cache. C'est l'agent qui gagne le plus à raisonner : il doit conclure sur un registre à
+    # partir d'un échantillon, pas restituer un texte.
+    manga_contexte: { model: "yume-27b", endpoint: "reflexion" }
+
+  temperatures:
+    manga_traducteur: 0.3
+    terminologue: 0.1
+    glossariste: 0.2
+    manga_onomatopees: 0.4   # une onomatopée se cherche, elle ne se déduit pas
+    manga_contexte: 0.2      # une fiche factuelle : on ne veut pas qu'elle brode
+
+  # --- Contexte inter-planches ---
+  # La continuité du dialogue ne s'attrape pas sur une planche isolée : pronoms, sujets
+  # implicites, qui vouvoie qui. Le traducteur reçoit donc les dernières répliques des planches
+  # qui précèdent, en LECTURE SEULE (le prompt dit « NE PAS retraduire »).
+  #
+  # Élargi de 1 à 3 planches : coût mesuré ~+100 tokens par prompt, soit +4 % du prefill d'un
+  # tome (318 390 tokens sur le Vol.1 du manga A) — négligeable pour de la continuité à l'échelle
+  # d'une scène plutôt que d'une planche.
+  #
+  # ⚠ Traduire TOUT un tome en un seul appel reste écarté, et les DEUX arguments tiennent :
+  # entrée 22 070 + sortie 8 878 = 30 948 tokens pour un `num_ctx` réellement mesuré à 32 768
+  # (le passage à 65 536 était une erreur de déclaration, corrigée en 1.2.0) ; et surtout, un
+  # seul numéro manquant sur 815 relancerait les 815. D'où la traduction par LOTS (cf.
+  # `manga.lot` ci-dessous), qui prend le gain d'appels sans prendre ce risque : le repli y
+  # est par planche, jamais par lot.
+  contexte:
+    planches_precedentes: 3   # 0 = comportement d'avant le lot 14 (aucun contexte)
+    repliques_max: 18         # plafond dur, pour qu'une planche bavarde ne gonfle pas le prompt
+
+    # --- Fiche de contexte de l'ŒUVRE (agent `manga_contexte`, optionnel) ---
+    # Le glossaire est un dictionnaire de TERMES : il ne dit rien du registre ni des rapports
+    # entre personnages. Or un vouvoiement qui bascule au milieu d'un tome se voit aussitôt, et
+    # le traducteur, qui travaille planche par planche, n'a aucun moyen de s'en apercevoir.
+    #
+    # Un SEUL appel LLM par tome (mis en cache dans `.checkpoints/contexte.txt`, jamais refait),
+    # placé après la terminologie et avant la première traduction — le même patron que le relevé.
+    # Décommente `manga_contexte` sous `manga.modeles` pour l'activer ; sans agent, la fiche est
+    # vide et rien ne change.
+    #
+    # ⚠ Chaque token de la fiche est payé UNE FOIS PAR PLANCHE dans le prompt de traduction :
+    # 400 tokens × 131 planches = 52 000 tokens de prefill sur un tome (+16 %). D'où les deux
+    # plafonds ci-dessous, volontairement serrés.
+    budget_echantillon: 3000  # tokens d'OCR échantillonnés sur tout le tome pour rédiger la fiche
+    max_tokens: 400           # taille MAXIMALE de la fiche produite
+
+  # --- Traduction par LOTS de planches ---
+  # Plusieurs planches consécutives dans UN seul appel. Sur un tome de 131 planches, un lot de
+  # 20 fait 7 appels au lieu de 131 : le prefill du glossaire, de la fiche de contexte et du
+  # prompt système n'est plus payé qu'une fois par lot. C'est aussi ce qui rend le raisonnement
+  # abordable — une trace pour 20 planches au lieu de 20 traces.
+  #
+  # La numérotation reste PLATE (1..N sur tout le lot), les planches n'étant que des
+  # séparateurs : les garde-fous, l'expression régulière et la reconstruction sont ceux de la
+  # planche seule, seule la longueur change. La redistribution est arithmétique.
+  #
+  # ⚠ Le lot n'est jamais retenté en entier. Si le modèle ne numérote rien, le lot est
+  # abandonné et les planches sont reprises une par une ; s'il manque une réplique à UNE
+  # planche, seule celle-là est refaite. Au pire on retombe donc sur le coût et le résultat de
+  # la 1.0.0 — le lot est une optimisation, pas un compromis de qualité.
+  #
+  # ⚠ Ce qu'il coûte vraiment : l'unité d'arrêt propre ET l'unité de perte passent de 1 à
+  # `planches`. Un `--stop` ou une panne en milieu de lot fait reperdre le lot entier (les
+  # traductions d'un lot ne sont écrites qu'après leur rattrapage, comme toujours). Pour ITÉRER
+  # sur un prompt, garder `planches: 1` : le retour est immédiat et une planche ratée ne coûte
+  # qu'une planche.
+  lot:
+    planches: 1 # 1 = comportement 1.0.0 (une planche, un appel). Plafonné à 20 par le code.
+    # Le mode vision met une image PLEINE PAGE par planche dans le prompt : 20 planches
+    # satureraient le contexte avant la première réplique. Plafond distinct, appliqué
+    # automatiquement (avec un message) quand `mode_traduction: "vision"`.
+    planches_vision: 4
+    # Plafond de tokens de SORTIE d'un appel de lot. Celui d'une planche seule est 2 048, en
+    # dur : un lot de 20 porte ~130 bulles, soit 7 928 tokens par l'estimateur par bulle, et
+    # serait tronqué à sa sixième planche. Le plafond réel reste dérivé du contenu — cette
+    # valeur n'est qu'un filet, comme le 2 048.
+    plafond_sortie: 6000
+    # Raisonnement du traducteur POUR LES LOTS. Appliqué à `manga.modeles.manga_traducteur`
+    # SEUL (pas au terminologue ni aux onomatopées, dont le coût n'a pas à suivre la taille du
+    # lot). Mêmes valeurs qu'ailleurs : false | true | "low" | "medium" | "high".
+    # Le coût mesuré à 1 planche/appel (~1 h 15 à 2 h 50 par tome) est ce qui le rendait
+    # inutilisable ; à 20 planches/appel il est divisé par autant d'appels économisés.
+    #
+    # ⚠ LAISSÉ COMMENTÉ, et ce n'est pas la même chose que `false`. Ces deux clés sont un
+    # OUTREPASSEMENT : dès qu'elles existent, elles écrasent ce que disent
+    # `manga.modeles.manga_traducteur` ET son `endpoint:`. Livrer `think: false` par défaut
+    # revenait donc à désactiver en silence l'indirection `endpoint:` pour le traducteur —
+    # précisément le défaut que la 2.2 avait corrigé (« `endpoint:` était SILENCIEUSEMENT
+    # ignoré côté manga »). Absente, la clé ne touche à rien et le raisonnement se règle là où
+    # il se réglait déjà.
+    #
+    # Pour un run ponctuel, préférer `--think` en ligne de commande : il écrit ces mêmes clés
+    # pour ce run-là, sans rien laisser derrière.
+    # think: "low"
+    # thinking_budget: 2500   # le 16 000 de la racine est calibré pour un bloc LN : hérité tel
+    #                          # quel, il autoriserait une trace plus longue que le lot lui-même.
+
+  # Rattrapage UNITAIRE des bulles laissées vides par la traduction de planche.
+  #
+  # Le retry de page rejoue la numérotation — exactement ce qui vient d'échouer : sur le Vol.1,
+  # les deux retries de page ont échoué comme leur premier essai. L'escalade change donc de
+  # FORME D'APPEL et non de température : une bulle, une réponse, aucun numéro à se tromper.
+  # Coût mesuré sur le tome : 1 appel court (~1 s) pour 150 planches.
+  #
+  # Trois garde-fous : une source qui ne porte aucun texte n'est pas rattrapable (l'OCR `（）`
+  # de la page 8 n'a rien à traduire) ; au-delà de `max_par_page` on ne rattrape RIEN ; et une
+  # réponse diagnostiquée est REJETÉE plutôt que dessinée — une mauvaise réplique dans une
+  # bulle est pire qu'une bulle vide, qui est au moins signalée au rapport.
+  rattrapage:
+    actif: true
+    # Au-delà, ce n'est plus un trou dans une planche mais une planche ratée : la reprendre
+    # bulle par bulle serait une retraduction déguisée, au prix d'un appel par bulle et sans
+    # le contexte de planche qui fait la qualité de la traduction. Le bon geste est alors
+    # `--page N --from traduction`.
+    max_par_page: 3
+
+  # Détection de DÉRIVE d'orthographe — purement lexicale, AUCUN appel LLM, donc active même
+  # quand le terminologue ci-dessus ne l'est pas.
+  #
+  # Le forçage ne rattrape que ce qu'on lui a listé. Sur le run v0.21.0 du Vol.1, les
+  # `interdits` contenaient les fautes du run PRÉCÉDENT et le tome en a produit de nouvelles
+  # (`Libentina` ×4, `Libertaine`) : `compter_variantes.py` annonçait « 0 forme bannie » —
+  # exact, et trompeur. Le mécanisme n'était pas cassé, il n'était jamais alimenté.
+  #
+  # Trois niveaux de preuve, et seuls les deux premiers écrivent (toujours dans `interdits`,
+  # JAMAIS dans `variantes` — `variantes` est la clé de recherche du dédoublonneur) :
+  #   T1 « ancrée »    : un `termes_source` japonais de l'entrée est dans l'OCR de la MÊME
+  #                      bulle → banni et corrigé dans le run en cours ;
+  #   T2 « dominance » : le nom canonique domine le tome → banni, appliqué au prochain
+  #                      `--from rendu` (zéro appel LLM) ;
+  #   T3 « lexicale »  : proximité seule → signalé au rapport, jamais écrit.
+  terminologie:
+    actif: true
+    # T2 : le nom doit être solidement installé avant qu'une forme proche soit déclarée
+    # fautive — une forme majoritaire n'est pas une faute, c'est un choix de traduction.
+    min_occurrences: 5
+    dominance: 3
+
+  # --- Texte posé SUR LE DESSIN (onomatopées, narration libre) ---
+  #
+  # La brique ne détectait qu'une classe : la bulle. Sur les 1 593 régions des deux tomes
+  # du manga A, `kind` vaut "bulle" 1 593 fois — tout ce qui est écrit hors
+  # d'un ballon restait donc en japonais sur la planche finale. Mesuré sur le Vol.2 :
+  # 23 planches sans AUCUNE détection, dont 13 de vrai contenu (les pages 63-65 et 134-136
+  # pèsent 450 à 720 Ko de dessin et de katakana géants). Le Vol.1 a le même défaut : ce
+  # n'était pas une régression, c'était un angle mort.
+  #
+  # ⚠ On n'EFFACE PAS ces textes. Les retirer demanderait de reconstruire le dessin qu'ils
+  # recouvrent, donc un modèle génératif (LaMa chez koharu) — ce que le principe directeur
+  # de la brique interdit (« l'IA ne dessine jamais », README §12). À la place, la traduction
+  # est POSÉE À CÔTÉ, comme le fait la fantrad à la main depuis toujours. Le japonais reste
+  # visible et intact ; c'est un choix, pas un échec.
+  #
+  # ⚠ Licence : le modèle est `comic-text-detector` (dmMaze), code amont GPL-3.0, poids
+  # entraînés pour partie sur Manga109-s. À vérifier avant toute diffusion des planches
+  # produites — même vigilance que pour les polices.
+  onomatopees:
+    actif: false
+    # "rapport" (DÉFAUT) : détecter, lire, traduire — et n'écrire QUE dans RAPPORT.md.
+    #             Rien n'est dessiné sur la planche.
+    # "glose"   : dessiner en plus la traduction à côté du texte japonais.
+    # "aucun"   : détecter et compter seulement, sans appel LLM.
+    #
+    # ⚠ POURQUOI « rapport » PAR DÉFAUT, et pas « glose ». La DÉTECTION est fiable — elle
+    # trouve bien la colonne de katakana de la page 63, que rien ne voyait avant. La LECTURE
+    # ne l'est pas : `manga-ocr` est un modèle de DIALOGUE, qui rend toujours une phrase
+    # japonaise plausible. Sur une onomatopée stylisée il hallucine, et les trois découpes
+    # testées échouent également. Mesuré sur le Vol.2 :
+    #
+    #     page  63 · ゴォォォ (colonne de 1470 px)  → « こっちは » puis « きゃあああっ »
+    #     page 135 · onomatopée                    → « それは… », « しかし、 », « いや… »
+    #     page  25 · zone de dessin                → « 民主の人とセックスを »
+    #
+    # Dessiner ça sur la planche violerait la règle qui gouverne toute la brique : une
+    # mauvaise réplique dessinée est PIRE qu'une absence signalée. En mode « rapport », les
+    # lectures et leurs traductions sont listées dans RAPPORT.md — donc relisables, et
+    # utilisables pour lettrer à la main dans Photoshop — sans toucher au dessin.
+    #
+    # Passe à "glose" en connaissance de cause : le placement, lui, est sûr (une glose ne
+    # recouvre jamais l'encre ni une bulle, c'est un invariant testé). C'est le CONTENU qui
+    # n'est pas fiable. Le jour où un vrai recogniseur d'onomatopées sera branché
+    # (koharu en embarque un, avec son propre jeu de caractères), « glose » deviendra le
+    # défaut naturel.
+    mode: "rapport"
+    model_path: "manga_models/text_detector.onnx"
+    telechargement_auto: true
+    model_url: ""
+    # Seuil du masque de texte. Le modèle sort des probabilités DÉJÀ activées (0→1) : lui
+    # appliquer une sigmoïde de plus — le réflexe hérité de YOLOv8-seg, dont les prototypes
+    # sont des logits — déclare 94 % de la planche « texte ». Mesuré, puis corrigé.
+    seuil_masque: 0.5
+    # Au-delà de cette part du texte contenue dans une bulle, la zone est considérée comme
+    # DÉJÀ traitée par le chemin nominal. C'est un containment de MASQUES, pas un IoU de
+    # boîtes : une réplique de 200 px² dans un ballon de 40 000 px² donne un IoU de 0,005 et
+    # serait déclarée « hors bulle », alors qu'elle y est entièrement (idée reprise de koharu).
+    containment_bulle: 0.90
+    # px² — en dessous, c'est du bruit de trame, pas du lettrage.
+    aire_min: 1200
+    # Rayon de groupement des traits, en pixels. 0 = automatique (0,8 % du petit côté, soit
+    # ~9 px sur une planche de 1125 px). Une onomatopée est faite de traits DISJOINTS : sans
+    # groupement, un seul ゴ produirait deux zones, donc deux OCR et deux gloses.
+    groupement: 0
+
+    # --- Mobilier de page (filigranes de scan) ---
+    # Mesuré sur les rendus v0.40.0 : sur les 448 zones hors bulle du Vol.1 du manga A,
+    # 283 sont des filigranes (ＲａｗＬａｚｙ．ＳＩ, 13DL.me, ＤＥＦＲａｍＡＳ) — 63 %.
+    # manga B : 105 sur 217. Autant de lectures OCR et d'appels LLM payés pour du
+    # mobilier, et un rapport noyé.
+    #
+    # Le discriminant n'est ni la position (un vrai texte peut occuper un coin) ni le contenu
+    # (l'OCR n'est pas fiable ici) : c'est la RÉCURRENCE GÉOMÉTRIQUE. Un filigrane revient à la
+    # même place sur toutes les planches, une onomatopée jamais. Même raisonnement que la
+    # brique LN sur les bandeaux de PDF (`decoupage.mise_en_forme.footer_frac_pages`).
+    #
+    # ⚠ Le filtre a besoin des boîtes de TOUT le tome : la détection se fait donc planche par
+    # planche, puis le filtre passe, puis SEULES les survivantes sont lues.
+    mobilier_frac_planches: 0.30  # présent sur ≥ 30 % des planches porteuses ⇒ mobilier
+    mobilier_iou: 0.50            # recouvrement de boîtes valant « même position »
+    mobilier_aire_max_frac: 0.05  # au-delà de 5 % de la planche, jamais du mobilier
+
+  # Mode de traduction :
+  #  - "texte"  : traduit à partir du texte OCR seul (rapide, pas d'image envoyée) —
+  #    par défaut, et suffisant pour la plupart des planches.
+  #  - "vision" : envoie EN PLUS la planche entière au LLM, qui peut alors s'appuyer
+  #    sur le contexte visuel (scène, expressions) pour mieux traduire — nécessite
+  #    un modèle avec la capacité `vision` (vérifie via `ollama show <modèle>` ;
+  #    yume-27b l'a). Plus lent (encodage image), à réserver aux passages ambigus.
+  mode_traduction: "texte"
+
+  detection:
+    # Modèle ONNX de détection de bulles (YOLOv8-seg). Voir manga_models/README.md
+    # pour le détail (ex. kitsumed/yolov8m_seg-speech-bubble, HF).
+    model_path: "manga_models/bubble_detector.onnx"
+
+    # Télécharge le modèle tout seul s'il manque (~104 Mo, une seule fois), comme
+    # `manga-ocr` le fait déjà pour le sien. Le fichier n'est PAS dans le dépôt (trop
+    # volumineux, cf. .gitignore) : sans cette option, une machine neuve — ou un fichier
+    # simplement disparu — arrête un tome de 150 planches sur une consigne à recopier à la
+    # main. L'écriture passe par un fichier `.part` renommé à la fin : une coupure ne
+    # laisse jamais un `.onnx` tronqué derrière elle.
+    # false = comportement historique (message actionnable, et arrêt).
+    telechargement_auto: true
+    # URL de remplacement, si tu veux figer une autre version ou un autre modèle YOLOv8-seg.
+    # Vide = celle de manga_models/README.md.
+    model_url: ""
+
+    conf_threshold: 0.35
+    iou_threshold: 0.45
+    # Fournisseur(s) ONNX Runtime, dans l'ordre de préférence. "DmlExecutionProvider"
+    # accélère sur AMD/Windows via DirectML — nécessite `pip install
+    # onnxruntime-directml` (remplace `onnxruntime` : les deux paquets sont
+    # MUTUELLEMENT EXCLUSIFS, n'installe que l'un des deux). Repli automatique sur
+    # CPU si absent/indisponible ; largement suffisant en pratique (~1-3 s/planche).
+    providers: ["CPUExecutionProvider"]
+
+    # Scission des régions BI-LOBÉES : le détecteur émet parfois UNE instance là où le
+    # dessinateur a mis DEUX ballons qui se touchent (5 régions pour 6 ballons page 136 du tome
+    # de référence, 8 pour 9 page 142). Les deux répliques sont alors OCRisées en une seule
+    # chaîne, traduites en une seule, et composées dans la géométrie fusionnée — donc posées
+    # sur le goulot entre les lobes, à 13 px là où les autres bulles de la planche sont à
+    # 17-31 px. Rien ne le signalait : autant de traductions que de bulles, et le texte tenait.
+    #
+    # Les seuils viennent d'une mesure sur les 797 bulles du tome, dont les 40 découpages
+    # candidats ont été inspectés un par un (cf. manga/geometry.py, `scinder_par_erosion`).
+    # Réglage volontairement CONSERVATEUR : scinder à tort casse une planche correcte, ne pas
+    # scinder laisse le défaut en place. Résultat mesuré : 19 scissions sur 18 planches,
+    # zéro faux positif, une douzaine de vrais doubles manqués.
+    scission:
+      actif: true
+      # Au-dessus de ce remplissage de boîte, on ne cherche même pas : un ballon, même
+      # dentelé, remplit sa boîte (médiane 0,89). Pure économie de temps — le tenter sur
+      # toutes les bulles donne exactement le même résultat, en 68 s au lieu de 20.
+      seuil_remplissage: 0.88
+      # Chaque lobe doit atteindre ce remplissage pour que le découpage soit accepté. C'est LE
+      # discriminant : les huit faux découpages mesurés (bulle unique tranchée en deux,
+      # onomatopée sur de la trame, fragment de kanji) sont tous ≤ 0,71 ; les vrais doubles
+      # sont entre 0,72 et 0,91.
+      remplissage_lobe_min: 0.72
+      min_lobe_frac: 0.10 # part minimale de l'aire totale pour un lobe
+      aire_min: 10000 # px² — deux répliques ne tiennent pas dans 100×100
+      # En dessous de ce remplissage SANS avoir pu être scindée, la région est listée dans
+      # RAPPORT.md (« Régions bi-lobées SUSPECTES ») : c'est là que le lettrage peut souffrir.
+      seuil_suspect: 0.70
+
+  nettoyage:
+    # Le masque du détecteur couvre TOUTE la bulle, contour compris. On l'érode avant
+    # de mesurer/remplir : le trait de contour (4-6 px, à cheval sur la frontière) est
+    # ainsi préservé. Sans cette érosion, la couleur était échantillonnée sur le DESSIN
+    # autour de la bulle — 308 bulles sur 797 repeintes en gris/noir.
+    marge_bord: 0.03 # rayon d'érosion = 3 % du petit côté, borné [2, 12] px
+    # "auto" décide par bulle selon l'uniformité de l'intérieur ; "masque" vide tout
+    # l'intérieur ; "texte" n'efface que le texte ; "aucun" ne touche à rien.
+    mode: "auto"
+    seuil_uniformite: 0.60 # mesuré sur 797 bulles : médiane 0,892 · p5 0,770 · p1 0,591
+    # En dessous : ce n'est pas une bulle, on n'y touche pas et on le signale. Le seuil
+    # tombe dans un creux net de la distribution (2 cas à 0,131 et 0,226, puis 0,457) —
+    # page 44, le détecteur avait pris un gratte-ciel pour une bulle.
+    seuil_abandon: 0.35
+    seuil_texte: 45 # écart de luminance texte/fond (0-255)
+    dilatation_texte: 0.6 # × rayon d'érosion, pour manger l'anti-crénelage
+    couleur_texte_sombre: [0, 0, 0]
+    couleur_texte_clair: [255, 255, 255]
+
+  typeset:
+    # Police pour le texte français réinjecté. Vide = repli automatique : voir
+    # templates/fonts/README.md pour la chaîne complète et les licences. Le défaut
+    # livré est Comic Neue Bold (SIL OFL 1.1) ; avant, la chaîne tombait
+    # systématiquement sur Arial. Vérifie la licence de toute police substituée avant
+    # de partager les planches produites.
+    font_path: ""
+    font_path_italique: "" # emphase : le traducteur encadre la réplique de *…*
+    font_path_gras: ""
+    taille_min: 11
+    taille_max: 60
+    # Plancher EMPRUNTABLE, jamais la taille de travail : on n'y descend que lorsque la bulle
+    # est géométriquement incapable d'accueillir le texte à `taille_min`, et donc que la seule
+    # autre issue est un débordement — c'est-à-dire des lettres DÉCOUPÉES par le masque. Un
+    # corps plus petit reste entier. Une bulle saine n'y touche jamais : elle a trouvé sa
+    # taille bien avant. Mesuré sur le Vol.1 : 5 bulles sur 815, lettrées entre 9 et 10 px, et
+    # 9 débordements ramenés à 2. Mettre la même valeur que `taille_min` désactive l'emprunt.
+    taille_min_absolue: 8
+    # En dessous de cette aire INTÉRIEURE (px² du masque utilisables par du texte centré), une
+    # région n'est plus une bulle et n'est PAS lettrée : le masque ne laisserait passer que des
+    # fragments de lettres. Le rapport la range alors sous « corriger la détection ». Mesuré :
+    # la seule région concernée fait 181 px², la plus petite vraie bulle du tome 3 055.
+    aire_min_bulle: 900
+    # Dessiné dans une bulle dont la SOURCE japonaise n'est pas vide mais dont la traduction
+    # l'est. Une bulle rendue vierge est indistinguable d'un choix éditorial ; des points de
+    # suspension se lisent comme un silence, donc la planche n'est pas trahie, et le trou
+    # devient repérable. "" rétablit la bulle vierge.
+    marqueur_vide: "…"
+    # --- Gloses des onomatopées (cf. `manga.onomatopees`) ---
+    # Corps maximal d'une glose. Elle est posée dans un blanc du dessin, pas dans une bulle :
+    # trop grande, elle ne trouve plus de place et n'est pas posée du tout.
+    glose_taille_max: 22
+    glose_taille_min: 10
+    glose_marge: 0.45      # air autour du texte, en fraction du corps
+    glose_ecart: 3         # px minimum entre la glose et l'encre qu'elle ne doit pas toucher
+    glose_contour: true    # sur du dessin, c'est le contour qui fait la lisibilité
+    interligne: 1.12 # × (ascendante + descendante), métriques réelles de la police
+    interligne_min: 0.95 # 1er repli si le texte ne tient pas
+    marge_interne: 0.04 # fraction de la largeur de bulle
+    majuscules: false # true = lettrage tout en capitales (É/À/Ç gérés)
+    cesure_traits_union: true # coupe autorisée aux traits d'union EXISTANTS seulement
+    contour: "auto" # contour du texte seulement en mode de nettoyage "texte"
+    contour_epaisseur: 0.07 # × taille de police, min 1 px
+    # Le bloc de texte peut QUITTER le centre vertical de la bulle, d'au plus cette fraction
+    # de l'espace libre de part et d'autre (0 = toujours centré, comportement d'avant 4.3).
+    # La largeur disponible d'une ligne est le MINIMUM du profil sur toute sa hauteur : un
+    # bloc centré dans une bulle dentelée ou asymétrique peut donc tomber sur son passage le
+    # plus étroit alors que 30 px plus haut il aurait deux fois la place.
+    #
+    # La position centrée est essayée d'abord et l'emporte à égalité — le texte reste centré
+    # quand rien ne l'y oblige. Et la taille retenue est la plus grande des deux stratégies
+    # (centrée, glissante), ce qui rend une régression impossible par construction. Mesuré sur
+    # les 792 bulles du tome : 219 gagnent du corps (médiane +2 px, max +19), 2 débordements
+    # disparaissent, AUCUNE ne rétrécit.
+    glissement_vertical: 0.5
+    harmonisation: true # ramène les bulles trop grandes vers la médiane de la planche
+    harmonisation_ratio_max: 1.25 # page 60 : écart max 2,4× -> 1,9×
+    # "signaler" : on dessine à taille_min, on ne tronque JAMAIS, et le débordement est
+    # remonté (perf.log + RAPPORT.md). Tronquer perdrait du contenu en silence.
+    debordement: "signaler"
+
+  ocr:
+    # Isole la bulle avant l'OCR : `image.crop(bbox)` laissait entrer le texte de la bulle
+    # VOISINE, que manga-ocr lisait aussi. La toile de fond prend la couleur MESURÉE de la
+    # bulle (du blanc autour d'un texte clair détruirait l'OCR d'une bulle inversée).
+    masquer_hors_bulle: true
+    marge_crop: 6
+    agrandissement_min: 64 # agrandit ×2 les bulles dont le petit côté est plus petit
+    # Charger `kha-white/manga-ocr-base` depuis le CACHE LOCAL plutôt que par identifiant de
+    # dépôt. Sans cela, `from_pretrained` contacte Hugging Face à CHAQUE lancement pour
+    # revalider la révision : latence réseau, avertissement « unauthenticated requests », run
+    # impossible hors ligne — et surtout une nouvelle révision peut arriver EN PLEIN TOME et
+    # changer l'OCR sans prévenir. Le chemin local fige la révision.
+    #   "auto" (défaut) : hors ligne dès que le modèle est en cache, téléchargement sinon ;
+    #   true            : exiger le cache, échouer avec un message clair s'il manque ;
+    #   false           : comportement d'avant (identifiant de dépôt, révision revalidée).
+    hors_ligne: "auto"
+
+  rendu:
+    # Formats de sortie du tome traduit : "images" (dossier de pages), "cbz", "pdf", "psd".
+    #
+    # "psd" écrit build/<Projet>/<Tome>/manga/pages_psd/page_XXXX.psd, un fichier Photoshop
+    # À CALQUES par planche — un calque par bulle, plus la planche nettoyée et le scan
+    # d'origine (masqué). C'est ce qui permet de déplacer ou réécrire une réplique à la main
+    # sans relancer le pipeline.
+    #
+    # Poids MESURÉ sur une planche de 1125×1600 à 12 bulles : **7,2 Mo**, dont 2,4 Mo pour le
+    # scan d'origine, 2,0 Mo pour la planche nettoyée, ~2,7 Mo pour l'aperçu aplati… et 0,01 Mo
+    # pour les douze calques de texte réunis, chacun étant borné à sa bulle. Soit ~1,1 Go pour
+    # un tome de 150 planches, ou ~700 Mo sans le scan d'origine. À n'activer que si tu comptes
+    # vraiment retoucher.
+    formats: ["cbz", "images", "psd"]
+
+    # Inclure le scan d'origine comme calque du bas, MASQUÉ : pratique pour vérifier ce que
+    # disait le japonais, ou vers qui pointe la queue d'une bulle. C'est un tiers du poids du
+    # fichier, et le scan reste de toute façon dans sources/ — mettre à false si le disque
+    # compte plus que le confort.
+    psd_original: true
+
+    # "type" (DÉFAUT) : chaque bulle devient un vrai CALQUE DE TEXTE Photoshop — police,
+    #          corps, couleur, et réécriture au clavier.
+    # "rasterise" : des pixels seulement. Déplaçable, redimensionnable, effaçable, mais il
+    #          faut retaper pour changer un mot. À garder pour un lecteur qui n'est pas
+    #          Photoshop et digérerait mal un bloc `TySh`.
+    #
+    # Le défaut est passé à « type » en v0.27.0, après validation par le MOTEUR DE PHOTOSHOP
+    # lui-même (21.0.1, automation COM) — pas par un lecteur tiers. Sur quatre planches et
+    # 34 calques, Photoshop annonce `LayerKind.TEXTLAYER`, relit le contenu et **accepte la
+    # réécriture**. Trois tentatives avaient échoué avant faute de cette boucle : alerte puis
+    # dégradation en pixels (v0.18/0.19.0), plantage à l'ouverture (v0.19.1), repli prudent
+    # sur « rasterise » (v0.21.0).
+    #
+    # Et « type » ne coûte rien en fidélité : le calque porte À LA FOIS nos pixels et
+    # l'information de texte. La planche composée par Photoshop est **identique au pixel près**
+    # à celle que le lettrage a dessinée (mesuré : 0 pixel d'écart sur 1 800 000) ; le texte
+    # n'est re-rendu que le jour où on le modifie.
+    #
+    # → Revalider après toute modification de `manga/psd.py` :
+    #     python run_manga.py --psd-test
+    #     powershell -ExecutionPolicy Bypass -File tools/valider_psd_photoshop.ps1
+    #
+    # ⚠ Une bulle en DÉBORDEMENT retombe toujours en rasterisé : sa mise en page n'est plus
+    # celle qu'un calque de type saurait reproduire, et des pixels justes valent mieux qu'un
+    # calque éditable faux.
+    psd_texte: "type"
+    # → ComicInfo.xml : Manga=YesAndRightToLeft. Sans cette clé, un lecteur affiche la
+    # planche de gauche à droite et inverse les doubles pages.
+    sens_lecture: "droite_gauche"
+    langue_iso: "fr"
+    pdf_dpi: 300
+    pdf_qualite: 85
+    pdf_largeur_max: null # ex. 1600 pour alléger le PDF
+
+  rapport:
+    seuil_confiance: 0.50 # en dessous, la détection est listée comme douteuse
+    max_lignes_section: 40
+
+  chemins:
+    # Vide : hérité de `chemins:` à la racine par FUSION PROFONDE (lot 2.3) — même racine
+    # que le LN, sources/<Projet>/<Tome>/manga/ et build/<Projet>/<Tome>/manga/. Avant, ce
+    # bloc recopiait `sources` et `build` ; changer la seule racine faisait écrire la brique
+    # manga à l'ancien endroit, sans un mot. N'écris ici QUE ce qui doit différer.
+
+# =============================================================================
+# BRIQUE SCAN — lire un light novel japonais livré en IMAGES de pages
+# =============================================================================
+# Tout ce bloc est OPTIONNEL : absent, les défauts de `scan/grille.py` s'appliquent.
+# Il ne concerne que `python run_ocr.py`, jamais `run.py` ni `run_manga.py`.
+scan:
+  # Binarisation. `null` = choisi par BALAYAGE, page par page, en gardant le seuil qui
+  # révèle la grille de colonnes la plus régulière (cf. `grille.choisir_seuil`).
+  # Ne fixe une valeur que si tu as regardé un aperçu : l'ecart entre le bon seuil et le
+  # mauvais n'est pas un compromis mais une falaise. Mesuré sur cinq pages du Vol.1 de
+  # manga C : à 112 la page sort en 16 colonnes régulières, à 128 elle
+  # sort en UNE seule bande — le halo JPEG a refermé toutes les gouttières.
+  seuil_encre: null
+
+  # Hauteur d'une tranche donnée à l'OCR, en caractères. C'EST la constante critique de
+  # toute la brique : `manga-ocr` redimensionne son entrée en 224 × 224, si bien qu'une
+  # colonne entière de 40 caractères en ressort INVENTÉE (23 à 29 caractères rendus, sans
+  # rapport avec la page). Découpée en tranches de 8 à 16, la même colonne est lue à ~95 %.
+  # Monter cette valeur ramène l'hallucination ; la baisser multiplie les coutures.
+  caracteres_par_tranche: 10
+
+  # Nombre d'imagettes envoyées au modèle en un appel. Mesuré : 0,655 s/tranche une par
+  # une, 0,488 s/tranche par lots de 16, pour une sortie identique au caractère près.
+  lot_ocr: 16
+
+  # Furigana : "ignorer" | "parentheses" (rend `唖然(あぜん)`).
+  # Même arbitrage que `decoupage.epub.ruby`, et pour la même raison mesurée : conserver
+  # les ruby gonfle le japonais transmis au traducteur de ~30 % et le noie. `parentheses`
+  # sert à relever les lectures de noms propres pour le glossaire — la position insérée
+  # est ESTIMÉE et peut glisser d'un caractère.
+  ruby: "ignorer"
+
+  # Au-delà de cette part d'encre, la page n'est pas du texte : c'est une illustration.
+  # Elle est alors copiée dans <langue>/media/ et remplacée par un marqueur d'image, que
+  # le pipeline LN sait déjà réinsérer dans le DOCX/EPUB final.
+  illustration_encre_max: 0.12
+
+  # Une page dont les glyphes sont au moins 1,6 fois plus grands que le corps du tome, et
+  # qui tient en 3 colonnes ou moins, est une page de TITRE : elle sort en `# …`, ce qui
+  # suffit à `pipeline/split.py` pour y voir une frontière de chapitre.
+  titre_pas_min: 1.6
+
+  # En dessous de ce nombre de colonnes, la page n'a pas de grille exploitable.
+  colonnes_min: 4
+
+  # Options passées à `manga/ocr.py` (mêmes clés que `manga.ocr`).
+  ocr:
+    hors_ligne: "auto"
+
+# =============================================================================
+# INTERFACE GRAPHIQUE (`python gui.py`)
+# =============================================================================
+# Entièrement OPTIONNEL : absent, les défauts de `gui/cache_apercu.py` s'appliquent.
+# Ne concerne QUE l'interface — aucune ligne de commande ne lit ce bloc.
+gui:
+  apercu:
+    # Nombre de planches préchargées de part et d'autre de celle qu'on regarde.
+    # Composer l'aperçu d'une planche coûte 1,37 s en médiane (mesuré sur manga A Vol.1) :
+    # les précharger est la seule façon de ne jamais attendre en tournant les pages.
+    # 10 = 21 planches en mémoire, ~21 Mo, ~27 s de fond. Monter cette valeur précharge
+    # plus loin mais retarde d'autant les planches proches.
+    fenetre: 10
+
+    # Plafond MÉMOIRE du cache d'aperçus, en Mo. En octets et non en nombre d'entrées :
+    # une planche à deux bulles et une planche à quatorze ne coûtent pas la même chose.
+    # Au-delà, les planches les moins récemment vues sont oubliées et seront recomposées.
+    plafond_mo: 120
