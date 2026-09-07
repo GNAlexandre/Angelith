@@ -202,7 +202,13 @@ def test_reecrire_un_brouillon_remplace_le_precedent(tome):
 
 def test_un_etat_inchange_rend_la_meme_empreinte(tome):
     build, ckpt = tome
-    assert rec.empreinte(document.lire_etat(ckpt)) == rec.empreinte(document.lire_etat(ckpt))
+    # Les deux lectures sont NOMMÉES, et ce n'est pas cosmétique : écrite en une ligne,
+    # l'assertion comparait deux expressions identiques, ce qui se lit comme une tautologie
+    # alors que le test porte sur la relecture — `lire_etat` est appelé DEUX fois, et c'est
+    # sa reproductibilité qu'on mesure.
+    premiere = rec.empreinte(document.lire_etat(ckpt))
+    seconde = rec.empreinte(document.lire_etat(ckpt))
+    assert premiere == seconde
 
 
 def test_une_correction_d_un_seul_caractere_change_l_empreinte(tome):

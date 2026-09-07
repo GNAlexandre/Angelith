@@ -64,7 +64,7 @@ def test_resolve_model_adds_missing_tag():
 
 def test_model_not_found_raises_systemexit_immediately():
     """Un 404 « model not found » lève une SystemExit actionnable sans retenter."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
     import pytest as _pytest
     llm = LLM("http://x/v1", "k", max_retries=2)
     llm._model_cache = {"m": "m"}

@@ -347,3 +347,119 @@ def test_le_rendu_aplati_coupe_la_manipulation_directe(panneau):
     panneau.bouton_finale.setChecked(False)
     panneau._basculer_fond()
     assert panneau.scene.interactif is True
+
+
+# --------------------------------------------------------------------------- #
+# Le système visuel — PLAN-19 L19.5 et L19.6.6
+# --------------------------------------------------------------------------- #
+
+def test_la_comparaison_au_rendu_porte_le_meme_bandeau_qu_un_run(panneau):
+    """⚠ **Le cas le plus important de la liste des états** (L19.5).
+
+    Cocher « Comparer au rendu du pipeline » coupe TOUTE interaction du canevas — c'est ce que
+    `test_le_rendu_aplati_coupe_la_manipulation_directe` vérifie juste au-dessus — et le seul
+    indice était l'état enfoncé d'un bouton. Le cas voisin du run, lui, affichait
+    « — affichage seul » depuis toujours. Deux situations identiques pour l'utilisateur, un
+    seul bandeau."""
+    panneau.bouton_finale.setChecked(True)
+    panneau._basculer_fond()
+    assert panneau.etat_planche.text() == panneau.BANDEAU_COMPARAISON
+    assert "affichage seul" in panneau.etat_planche.text()
+
+    panneau.bouton_finale.setChecked(False)
+    panneau._basculer_fond()
+    assert panneau.etat_planche.text() == ""
+
+
+def test_le_bandeau_du_run_l_emporte_sur_celui_de_la_comparaison(panneau):
+    """Pendant un run, savoir que rien ne s'écrit prime sur savoir pourquoi la planche est
+    aplatie — et deux bandeaux empilés ne se lisent pas."""
+    panneau.bouton_finale.setChecked(True)
+    panneau._basculer_fond()
+    panneau.marquer_verrou(None, "run", True)
+    assert panneau.etat_planche.text() == "run — affichage seul"
+    panneau.marquer_verrou(None, "run", False)
+    assert panneau.etat_planche.text() == panneau.BANDEAU_COMPARAISON
+    panneau.bouton_finale.setChecked(False)
+    panneau._basculer_fond()
+
+
+def _fleche(panneau, touche, modificateurs=None):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+    ev = QKeyEvent(QKeyEvent.KeyPress, touche, modificateurs or Qt.NoModifier)
+    panneau.keyPressEvent(ev)
+    return ev
+
+
+def test_les_fleches_du_panneau_deplacent_la_bulle_selectionnee(panneau):
+    """L19.6.6 — l'alternative clavier aux gestes de canevas, vue depuis le panneau."""
+    from PySide6.QtCore import Qt
+
+    panneau.scene.choisir(0)
+    avant = panneau.scene.zone(0).rect_scene()
+    _fleche(panneau, Qt.Key_Right)
+    apres = panneau.scene.zone(0).rect_scene()
+    assert apres.left() == avant.left() + panneau.PAS_FIN
+
+    _fleche(panneau, Qt.Key_Right, Qt.ShiftModifier)
+    assert (panneau.scene.zone(0).rect_scene().left()
+            == avant.left() + panneau.PAS_FIN + panneau.PAS_LARGE)
+
+
+def test_ctrl_et_fleche_retaille_au_lieu_de_deplacer(panneau):
+    from PySide6.QtCore import Qt
+
+    panneau.scene.choisir(0)
+    avant = panneau.scene.zone(0).rect_scene()
+    _fleche(panneau, Qt.Key_Down, Qt.ControlModifier)
+    apres = panneau.scene.zone(0).rect_scene()
+    assert apres.topLeft() == avant.topLeft()
+    assert apres.height() == avant.height() + panneau.PAS_FIN
+
+
+def test_les_fleches_ne_volent_pas_les_touches_d_une_saisie(panneau, monkeypatch):
+    """⚠ Le même piège que les raccourcis `1`–`5` : une flèche dans un champ de réplique
+    appartient au champ. Déplacer une bulle sous les doigts de qui tape une réplique serait
+    pire qu'aucun raccourci.
+
+    ⚠ `_en_saisie` est SIMULÉ plutôt que provoqué par un vrai `setFocus` : un panneau qui n'a
+    jamais été montré n'a pas de fenêtre active, donc Qt n'y déplace aucun focus. Ce qui est
+    testé ici est la GARDE, pas la mécanique de focus de Qt."""
+    from PySide6.QtCore import Qt
+
+    panneau.scene.choisir(0)
+    monkeypatch.setattr(panneau, "_en_saisie", lambda: True)
+    avant = panneau.scene.zone(0).rect_scene()
+    _fleche(panneau, Qt.Key_Left)
+    assert panneau.scene.zone(0).rect_scene() == avant
+
+
+def test_le_depot_du_flechage_est_temporise(panneau):
+    """Une écriture par flèche coûterait une seconde par pression. Le minuteur est le
+    « relâchement » du geste au clavier."""
+    from PySide6.QtCore import Qt
+
+    panneau.scene.choisir(0)
+    panneau._minuteur_flecher.stop()
+    _fleche(panneau, Qt.Key_Left)
+    assert panneau._minuteur_flecher.isActive()
+    assert panneau._minuteur_flecher.interval() == panneau.DELAI_DEPOT_MS
+    panneau._minuteur_flecher.stop()
+
+
+def test_le_bandeau_de_planche_vide_ne_parait_que_sans_bulle(panneau):
+    """L19.7, troisième état vide. La planche de la fixture porte deux bulles : le bandeau
+    doit rester caché — un état vide qui s'affiche sur une planche pleine est pire que pas
+    d'état vide du tout."""
+    panneau._maj_ligne_etat()
+    assert panneau.bandeau_vide.isVisibleTo(panneau) is False
+
+    vraies, panneau.planche.bulles = panneau.planche.bulles, []
+    try:
+        panneau._maj_ligne_etat()
+        assert panneau.bandeau_vide.isVisibleTo(panneau) is True
+        assert panneau.texte_vide.text() in panneau.TEXTES_VIDE.values()
+    finally:
+        panneau.planche.bulles = vraies
+        panneau._maj_ligne_etat()

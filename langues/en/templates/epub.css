@@ -1,0 +1,39 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later
+   Copyright (C) 2026 Alexandre Tournel */
+
+/* EPUB + PDF stylesheet (weasyprint), ENGLISH pack. Mirrors reference.docx.
+   Adapted from langues/fr/templates/epub.css; see the .dialogue rule for the
+   only substantive difference. */
+@page { margin: 2cm; }
+
+body {
+  font-family: "Lucida Sans Unicode", "Lucida Grande", sans-serif;
+  line-height: 1.5;
+  text-align: justify;
+}
+
+h1, h2 { text-align: center; font-weight: bold; page-break-before: always; }
+h1 { font-size: 1.6em; margin: 2em 0 0.3em; }
+h2 { font-size: 1.3em; font-style: italic; margin: 0 0 1.2em; }
+
+/* Narration : paragraphes en bloc (comme « Corps de texte »), sans alinéa. */
+p { text-indent: 0; margin: 0 0 0.7em; }
+
+/* SEUL le 1er paragraphe d'un chapitre (celui qui suit le titre, avec le mot d'ouverture
+   en gras) est décalé — charte Vol.1. Le reste de la narration reste à ras. */
+h1 + p, h2 + p { text-indent: 1.5em; }
+
+/* Dialogue. ⚠ NO `::before` dash here, and that is the one real difference with the French
+   stylesheet: an English line of dialogue is delimited by its QUOTES, which the text already
+   carries. Adding an em dash on top would give « — "Go!" », which is neither convention.
+   English dialogue is indented instead, as a published novel sets it. */
+.dialogue p { text-indent: 1.5em; margin: 0 0 0.4em; }
+
+/* Pensée → italique. */
+.pensee p { font-style: italic; }
+
+/* Encadré game-menu (si une classe .encadre est utilisée) : gras + italique. */
+.encadre p { font-weight: bold; font-style: italic; margin: 0.5em 1.5em; }
+
+/* Images : centrées, jamais coupées. */
+img { display: block; max-width: 100%; margin: 1em auto; }

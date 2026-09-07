@@ -128,6 +128,77 @@ def test_bulle_trop_longue_sans_sources_est_inactif():
     assert q.diagnostiquer("1. " + "x " * 200, n=1, cap=100000) is None
 
 
+# --------------------------------------------------------------------------- #
+# `bulle_trop_courte` — le symétrique qui manquait (lot 15, L7.8)
+#
+# Les six autres motifs sont morphologiques ou statistiques, et AUCUN ne détectait une
+# réplique abrégée. Or la pression est structurellement dans le sens de l'abrègement : le
+# prompt injecte un budget de caractères par bulle SANS aucune contrepartie sur la fidélité.
+# On demandait d'être court, et on ne vérifiait jamais qu'on n'avait pas coupé.
+# --------------------------------------------------------------------------- #
+
+def test_motif_bulle_trop_courte():
+    """L'exemple du plan : une bulle japonaise de 40 caractères rendue par « Ouais. » passait
+    les six autres motifs — elle n'est pas vide, elle est numérotée, elle est en français,
+    elle est unique, et elle est courte."""
+    assert q.diagnostiquer("1. Ouais.", n=1, cap=5000,
+                           sources=["あ" * 40], langue="jp") == "bulle_trop_courte"
+
+
+def test_une_traduction_serree_mais_fidèle_passe():
+    """Le ratio est calé sous le 2ᵉ centile du corpus (médiane 0,65 en source CJK) : il ne
+    doit se déclencher que sur une réplique franchement amputée."""
+    fidele = ("1. Je ne pensais vraiment pas te revoir ici un jour, surtout pas "
+              "après tout ce temps.")
+
+    assert q.diagnostiquer(fidele, n=1, cap=5000,
+                           sources=["あ" * 40], langue="jp") is None
+
+
+def test_le_seuil_depend_de_la_langue_source():
+    """Le japonais est dense : un ratio naïf produirait des faux positifs en masse d'un
+    côté, ou un plancher inatteignable de l'autre. Mesuré sur `build/` : médiane 0,65 en
+    source CJK contre 1,06 en source latine."""
+    court = "1. Ouais."
+    source_latine = ["Yeah, I never thought I would see you here again after all this time"]
+
+    assert q.diagnostiquer(court, n=1, cap=5000, sources=source_latine,
+                           langue="en") == "bulle_trop_courte"
+    assert q.RATIO_COURT["cjk"] < q.RATIO_COURT["latin"]
+
+
+def test_une_source_courte_ne_declenche_rien():
+    """Une bulle de deux caractères rendue par un mot est parfaitement normale, et c'est le
+    tiers du corpus."""
+    assert q.diagnostiquer("1. Oui.", n=1, cap=5000, sources=["はい"], langue="jp") is None
+
+
+def test_une_bulle_vide_n_est_pas_une_bulle_courte():
+    """Elle est déjà signalée par `bulles_manquantes` et reprise par le rattrapage unitaire.
+    La compter ici la ferait rapporter deux fois sous deux noms différents."""
+    motifs = q.diagnostiquer_tous("1. ", n=1, cap=5000, sources=["あ" * 40], langue="jp")
+
+    assert "bulle_trop_courte" not in motifs
+
+
+def test_un_ratio_a_zero_desarme_le_motif_sans_toucher_aux_autres():
+    """Une œuvre à sources très elliptiques peut vouloir le taire."""
+    court, source = "1. Ouais.", ["あ" * 40]
+
+    assert q.diagnostiquer(court, n=1, cap=5000, sources=source, langue="jp",
+                           ratio_court={"cjk": 0}) is None
+    assert q.diagnostiquer("", n=1, cap=5000, sources=source, langue="jp",
+                           ratio_court={"cjk": 0}) == "vide"
+
+
+def test_l_exces_de_longueur_passe_avant_le_defaut():
+    """Les deux peuvent répondre sur la même planche. L'excès est le plus visible au rendu —
+    c'est celui qui déborde de la bulle — d'où son rang dans le registre ordonné."""
+    noms = [nom for nom, _ in q.MOTIFS]
+
+    assert noms.index("bulle_trop_longue") < noms.index("bulle_trop_courte")
+
+
 def test_l_ordre_du_registre_va_du_grossier_au_fin():
     """Une sortie vide ne doit pas être diagnostiquée « japonais résiduel »."""
     assert [nom for nom, _ in q.MOTIFS][:2] == ["vide", "bulles_manquantes"]
@@ -135,7 +206,14 @@ def test_l_ordre_du_registre_va_du_grossier_au_fin():
 
 
 def test_tous_les_motifs_ont_un_libelle():
-    assert set(nom for nom, _ in q.MOTIFS) == set(q.LIBELLES)
+    """Aucun motif sans libellé, et aucun libellé orphelin.
+
+    ⚠ `MOTIFS_HORS_REGISTRE` (lot 21) porte les motifs qui refusent une ZONE au lieu de
+    diagnostiquer une planche : ils ont un libellé, ils n'arment aucun retry de page, et ils
+    n'ont donc rien à faire dans le registre ordonné. L'exception est déclarée dans
+    `quality_manga`, pas ici."""
+    assert set(nom for nom, _ in q.MOTIFS) | q.MOTIFS_HORS_REGISTRE == set(q.LIBELLES)
+    assert not (set(nom for nom, _ in q.MOTIFS) & q.MOTIFS_HORS_REGISTRE)
 
 
 # --------------------------------------------------------------------------- #

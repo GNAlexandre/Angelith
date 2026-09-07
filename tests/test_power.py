@@ -6,6 +6,7 @@
 Ollama (ollama_load/ollama_unload). Toutes les frontières externes (ctypes, subprocess,
 openai, urllib) sont mockées — aucun test ne touche réellement l'OS ou le réseau."""
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,11 +85,25 @@ def test_ollama_unload_failure_returns_false_and_prints(monkeypatch, capsys):
 # keep_awake / release (Windows : SetThreadExecutionState)
 # --------------------------------------------------------------------------- #
 
+def _faux_windll(monkeypatch, set_thread_execution_state):
+    """Installe un `ctypes.windll` factice, sur Windows COMME sur Linux.
+
+    ⚠ Ces tests écrivaient `monkeypatch.setattr("ctypes.windll.kernel32.…")`. La forme
+    pointée impose à monkeypatch de RÉSOUDRE `ctypes.windll` avant de patcher — un attribut
+    qui n'existe que sur Windows. Sur le runner Linux de la matrice, les trois tests ne
+    tombaient donc pas sur ce qu'ils mesurent (`keep_awake` sous Windows simulé) mais sur un
+    `ModuleNotFoundError: No module named 'ctypes.windll'` levé par l'outillage de test.
+    On pose l'objet nous-mêmes — `raising=False` parce que hors Windows il n'y a rien à
+    remplacer — ce qui teste la MÊME chose sur les deux OS."""
+    import ctypes
+    kernel32 = SimpleNamespace(SetThreadExecutionState=set_thread_execution_state)
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(kernel32=kernel32), raising=False)
+
+
 def test_keep_awake_windows_sets_display_required_flag(monkeypatch):
     calls = []
     monkeypatch.setattr(power, "_IS_WIN", True)
-    monkeypatch.setattr("ctypes.windll.kernel32.SetThreadExecutionState",
-                        lambda flags: calls.append(flags) or 1)
+    _faux_windll(monkeypatch, lambda flags: calls.append(flags) or 1)
     assert power.keep_awake() is True
     assert calls and calls[0] & power._ES_DISPLAY_REQUIRED
     assert calls[0] & power._ES_SYSTEM_REQUIRED
@@ -96,7 +111,7 @@ def test_keep_awake_windows_sets_display_required_flag(monkeypatch):
 
 def test_keep_awake_returns_false_when_set_thread_execution_state_fails(monkeypatch):
     monkeypatch.setattr(power, "_IS_WIN", True)
-    monkeypatch.setattr("ctypes.windll.kernel32.SetThreadExecutionState", lambda flags: 0)
+    _faux_windll(monkeypatch, lambda flags: 0)
     assert power.keep_awake() is False
 
 
@@ -108,8 +123,7 @@ def test_keep_awake_returns_false_on_non_windows(monkeypatch):
 def test_release_restores_continuous_flag_and_stops_thread(monkeypatch):
     calls = []
     monkeypatch.setattr(power, "_IS_WIN", True)
-    monkeypatch.setattr("ctypes.windll.kernel32.SetThreadExecutionState",
-                        lambda flags: calls.append(flags) or 1)
+    _faux_windll(monkeypatch, lambda flags: calls.append(flags) or 1)
     power.keep_awake()
     calls.clear()
     power.release()
@@ -196,7 +210,7 @@ def test_cancel_shutdown_linux(monkeypatch):
     monkeypatch.setattr(power, "_IS_MAC", False)
     calls = []
     monkeypatch.setattr(power.subprocess, "run", lambda cmd, check=False: calls.append(cmd))
-    hint = power.cancel_shutdown()
+    power.cancel_shutdown()
     assert calls == [["shutdown", "-c"]]
 
 

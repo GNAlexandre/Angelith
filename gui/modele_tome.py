@@ -133,12 +133,25 @@ class Tome:
 
     def pages_source(self) -> list[Path]:
         """Images SOURCE, dans l'ordre de lecture. Coûteux (extraction d'archives) : appelé
-        seulement quand on a besoin de relire une bulle à l'OCR."""
+        seulement quand on a besoin de relire une bulle à l'OCR.
+
+        ⚠ `config` est passé au scan : sans lui, les dossiers de langue ne sont pas reconnus
+        et un tome rangé en `webtoon/ENG/` ressort vide."""
         if self._pages_source is None:
             from manga import sources_manga
             self._pages_source = list(
-                sources_manga.scan_volume(self.vol_dir, self.build_dir).pages)
+                sources_manga.scan_volume(self.vol_dir, self.build_dir, self.config).pages)
         return self._pages_source
+
+    def langue_source(self) -> str:
+        """Langue source du tome, telle que le dernier run l'a enregistrée.
+
+        Relue de `projet.json` plutôt que redéduite : l'éditeur doit retraduire une bulle
+        avec la MÊME langue que le run, et rescanner les sources coûterait l'extraction des
+        archives pour un simple clic."""
+        etat = projet_mod.lire(self.build_dir) or {}
+        return str(etat.get("langue_source")
+                   or ((self.config.get("manga") or {}).get("langue_source") or "jp"))
 
     def chemin_source(self, index: int) -> Path | None:
         pages = self.pages_source()
@@ -229,14 +242,47 @@ def lister_tomes(config: dict, projet: str) -> list[str]:
     return [v for v in list_volumes(racine, projet) if _est_tome_manga(racine / projet / v)]
 
 
+def tomes_non_editables(config: dict, projet: str) -> list[str]:
+    """Les tomes de ce projet que la retouche NE montre pas, dans l'ordre du disque.
+
+    ⚠ **Une liste qui filtre sans le dire est une liste qu'on croit complète** (`PLAN-35`
+    L35.1 point 1). Un projet peut porter un roman et son manga sous le même titre ; celui
+    qui vient de lancer un run light novel et cherche « Vol.3 » ici doit lire pourquoi il
+    n'y est pas, plutôt que d'aller vérifier si le dossier existe encore.
+
+    La phrase, elle, est dans `gui/vue_retouche.phrase_tomes_absents` — sans Qt, comme toutes
+    les décisions d'affichage du dépôt."""
+    from pipeline.sources import list_volumes
+    chemins = core_config.section(config, "manga", "chemins")
+    racine = Path(chemins["sources"])
+    return [v for v in list_volumes(racine, projet)
+            if not _est_tome_manga(racine / projet / v)]
+
+
 _EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".cbz", ".cbr"}
 
 
 def _est_tome_manga(vol_dir: Path) -> bool:
-    """Un tome est « manga » s'il porte des images ou une archive — sous `manga/`, ou
-    directement (le repli que `sources_manga.scan_volume` accepte déjà)."""
-    for dossier in (vol_dir / "manga", vol_dir):
-        if dossier.is_dir() and any(p.suffix.lower() in _EXTENSIONS
-                                    for p in dossier.iterdir() if p.is_file()):
+    """Un tome est « manga » s'il porte des images ou une archive.
+
+    Cherche aux trois niveaux que `sources_manga.resoudre_source` accepte : sous
+    `<Tome>/<format>/<LANGUE>/`, sous `<Tome>/<format>/`, ou directement dans `<Tome>/`.
+    Volontairement TOLÉRANT — il ne s'agit que de décider si un tome mérite d'apparaître dans
+    la liste, pas de choisir lequel de ses dossiers sera lu."""
+    from manga.sources_manga import FORMATS
+
+    def _porte_des_planches(dossier: Path) -> bool:
+        return dossier.is_dir() and any(p.suffix.lower() in _EXTENSIONS
+                                        for p in dossier.iterdir() if p.is_file())
+
+    if _porte_des_planches(vol_dir):
+        return True
+    for fmt in FORMATS:
+        racine = vol_dir / fmt
+        if not racine.is_dir():
+            continue
+        if _porte_des_planches(racine):
+            return True
+        if any(_porte_des_planches(sub) for sub in racine.iterdir() if sub.is_dir()):
             return True
     return False

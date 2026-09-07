@@ -143,10 +143,36 @@ def test_rien_ne_change_nest_PAS_un_gain():
 
 def test_une_GEOMETRIE_amelioree_est_un_gain_sans_bulle_gagnee():
     """Un masque mieux rempli sur la MÊME bulle veut dire que le détecteur l'a mieux cernée —
-    un gain réel, et parfaitement invisible au décompte des bulles."""
+    un gain réel, et parfaitement invisible au décompte des bulles.
+
+    ⚠ Le cas ACCEPTÉ est celui où la BOÎTE a rétréci : la référence traîne un éclat de masque
+    détaché qui gonfle sa boîte englobante (remplissage 0,25), la candidate rend le seul
+    ballon (remplissage 1,0) — avec **moins** de pixels de masque, pas plus. C'est la
+    distinction que le lot 12 (L4.4) a introduite ; le cas symétrique — même boîte, masque qui
+    grossit — est désormais refusé, cf.
+    `test_un_masque_qui_GROSSIT_nest_pas_une_geometrie_amelioree`."""
+    m = np.zeros(TAILLE, dtype=bool)
+    m[10:60, 10:60] = True
+    m[190:195, 190:195] = True          # éclat détaché : la boîte double, le remplissage chute
+    avec_eclat = BubbleRegion(bbox=(10, 10, 195, 195), mask=m, score=0.9, cls=0)
+    v = dr.arbitrer([avec_eclat], [A])
+    assert v.accepte and v.gagnees == [] and "remplissage" in v.detail
+    assert int(A.mask.sum()) < int(avec_eclat.mask.sum())     # la candidate a MOINS de pixels
+
+
+def test_un_masque_qui_GROSSIT_nest_pas_une_geometrie_amelioree():
+    """Le remplissage peut monter pour deux raisons OPPOSÉES : la boîte a rétréci autour du
+    même masque (la bulle est mieux cernée) ou le masque a grossi dans la même boîte (la région
+    a avalé du décor). Le critère d'origine ne les distinguait pas et acceptait les deux.
+
+    `geometry.py` établit dans ce même dépôt qu'un remplissage BAS est le signal d'un vrai
+    double (0,61 et 0,60 contre une médiane de 0,89) : un masque qui gonfle vers un remplissage
+    élevé va donc dans le sens de la perte d'information."""
     troue = _region(10, 10, 60, 60, trous=8)
     v = dr.arbitrer([troue], [A])
-    assert v.accepte and v.gagnees == [] and "remplissage" in v.detail
+    assert not v.accepte and v.motif == "masque_gonfle"
+    # …et le doute profite bien à la détection en place : rien n'est retenu.
+    assert v.retenir([A]) == [A] and v.retenues is None
 
 
 def test_une_geometrie_DEGRADEE_nest_pas_un_gain():
@@ -157,6 +183,45 @@ def test_une_geometrie_DEGRADEE_nest_pas_un_gain():
 def test_un_tome_sans_reference_accepte_ce_qui_est_nettoyable():
     """Première détection d'une planche : il n'y a rien à protéger."""
     assert dr.arbitrer([], [A, B], {0: 0.9, 1: 0.9}).accepte is True
+
+
+# --------------------------------------------------------------------------- #
+# Référence VIDE — le régime des 188 planches à zéro bulle (lot 12, L4.2)
+# --------------------------------------------------------------------------- #
+
+def test_sans_reference_la_selection_est_candidate_par_candidate():
+    """Il n'y a rien à préserver, donc rien qui justifie le tout-ou-rien : une pleine page
+    d'action où l'escalade trouve deux vraies bulles et un bout de trame doit rendre les deux.
+
+    C'est LA différence avec le régime à référence non vide, où accepter la moitié d'une
+    relance produirait une planche qui n'a jamais été détectée telle quelle."""
+    v = dr.arbitrer([], [A, B, C], {0: 0.9, 1: 0.12, 2: 0.9})
+    assert v.accepte
+    assert v.retenues == [0, 2]
+    assert v.retenir([A, B, C]) == [A, C]
+
+
+def test_sans_reference_tout_ce_qui_est_du_dessin_est_refuse():
+    """Une bulle nettoyable est une bulle ; une bulle qu'on ne sait pas peindre est du décor.
+    Sur une planche où l'on vient d'abaisser les seuils, le seuil d'abandon est le seul rempart
+    calibré dont on dispose."""
+    v = dr.arbitrer([], [A, B], {0: 0.1, 1: 0.2})
+    assert not v.accepte and v.motif == "aucune_nettoyable"
+    assert v.retenir([A, B]) == []
+
+
+def test_sans_reference_une_candidate_NON_MESUREE_est_conservee():
+    """Même convention que partout ailleurs dans le module : l'appelant qui n'a pas mesuré ne
+    doit pas se voir inventer une valeur. L'orchestrateur, lui, mesure toujours."""
+    assert dr.arbitrer([], [A, B]).retenues == [0, 1]
+
+
+def test_sans_reference_le_veto_de_CACHE_reste_arme():
+    """`chevauchement` n'est pas un jugement de détection mais une garde de cache : `masks.png`
+    est une image d'étiquettes, un pixel partagé revient amputé au rechargement."""
+    jumelle = _region(12, 12, 62, 62)
+    v = dr.arbitrer([], [A, jumelle], {0: 0.9, 1: 0.9})
+    assert not v.accepte and v.motif == "chevauchement"
 
 
 def test_une_relance_qui_ne_trouve_RIEN_sur_une_page_vide_est_neutre():

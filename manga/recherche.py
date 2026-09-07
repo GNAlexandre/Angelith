@@ -145,3 +145,119 @@ def extrait(texte: str, motif: str, *, marge: int = 28) -> str:
     droite = min(len(plat), debut + len(motif) + marge)
     return (("…" if gauche else "") + plat[gauche:droite]
             + ("…" if droite < len(plat) else ""))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REMPLACER
+#
+# Corriger un nom sur quarante planches demandait quarante ouvertures. La recherche savait
+# déjà les trouver ; il ne manquait que le geste d'écriture.
+#
+# ⚠ On ne remplace que dans la **réplique affichée**, et c'est un choix, pas une limite.
+# L'OCR est du texte SOURCE : y « corriger » un nom français n'a pas de sens, et le modifier
+# périmerait la traduction qui en descend. La traduction d'origine, elle, est la sortie du
+# modèle — un `--from traduction` la réécrirait, donc y écrire serait écrire dans le sable.
+#
+# Le remplacement atterrit dans `traduction_manuelle.json`, exactement comme une saisie au
+# clavier, et pour la même raison : c'est le seul fichier que le pipeline ne réécrit jamais.
+# Un nom corrigé ici survit à toute relance.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def occurrences_remplacables(build_dir, motif: str, indices=None, *,
+                             limite: int = 500) -> list[dict]:
+    """Les résultats de `chercher` sur lesquels un remplacement a un sens.
+
+    C'est-à-dire ceux de la réplique AFFICHÉE — cf. le commentaire ci-dessus. Séparé de
+    `remplacer` pour que l'appelant puisse montrer ce qui va changer AVANT de l'écrire : un
+    remplacement sur tout un tome n'est pas un geste qu'on lance à l'aveugle."""
+    return [r for r in chercher(build_dir, motif, indices, limite=limite)
+            if r["champ"] == CHAMP_AFFICHEE]
+
+
+def _table_normalisee(texte: str) -> tuple[str, list[int]]:
+    """`(forme normalisée, index d'origine de chacun de ses caractères)`.
+
+    ⚠ On ne peut PAS se contenter de comparer les longueurs. `normaliser` ne les préserve pas
+    en général : `casefold()` rend « ß » → « ss », les ligatures se décomposent, et un signe
+    combinant disparaît. Un découpage par index nu écrirait donc au mauvais endroit sur ces
+    textes-là — silencieusement, ce qui est le pire des défauts pour une opération qui touche
+    quarante planches d'un coup.
+
+    On normalise donc caractère par caractère en gardant la trace de l'origine de chacun, ce
+    qui rend la transposition exacte quoi qu'il arrive à la longueur."""
+    forme: list[str] = []
+    origines: list[int] = []
+    for i, caractere in enumerate(texte):
+        morceau = normaliser(caractere)
+        forme.append(morceau)
+        origines.extend([i] * len(morceau))
+    return "".join(forme), origines
+
+
+def remplacer_dans(texte: str, motif: str, par: str) -> str:
+    """Remplace toutes les occurrences, **insensible à la casse et aux accents** — la même
+    comparaison que `chercher`, sinon on montrerait des résultats qu'on ne saurait pas
+    remplacer.
+
+    Écrit depuis le texte D'ORIGINE, jamais depuis sa forme normalisée : cette dernière
+    rendrait « Cafe » là où la planche dit « Café » pour tout ce qui entoure la trouvaille.
+    La correspondance entre les deux passe par `_table_normalisee`."""
+    plat = texte or ""
+    if not motif:
+        return plat
+    aiguille = normaliser(motif)
+    if not aiguille:
+        return plat
+    reference, origines = _table_normalisee(plat)
+
+    sortie: list[str] = []
+    i = j = 0                       # `i` dans l'original, `j` dans la forme normalisée
+    while True:
+        k = reference.find(aiguille, j)
+        if k < 0:
+            sortie.append(plat[i:])
+            return "".join(sortie)
+        debut = origines[k]
+        fin = origines[k + len(aiguille)] if k + len(aiguille) < len(origines) else len(plat)
+        sortie.append(plat[i:debut])
+        sortie.append(par)
+        i, j = fin, k + len(aiguille)
+
+
+def remplacer(build_dir, motif: str, par: str, occurrences: list[dict]) -> list[int]:
+    """Applique le remplacement aux `occurrences` données. Rend les planches modifiées.
+
+    ⚠ On prend une LISTE d'occurrences plutôt que de rechercher soi-même : c'est ce qui permet
+    à l'appelant de n'en cocher qu'une partie. Remplacer « Leo » partout alors qu'une planche
+    parle d'un autre Leo est précisément l'erreur qu'un remplacement global rend facile.
+
+    Passe par `manga.document`, jamais par une écriture directe : c'est lui qui tient
+    l'alignement par position et la distinction saisie / sortie du modèle."""
+    from . import document as doc_mod
+
+    par_planche: dict[int, set[int]] = {}
+    for occ in occurrences:
+        par_planche.setdefault(int(occ["planche"]), set()).add(int(occ["bulle"]))
+
+    modifiees: list[int] = []
+    for planche in sorted(par_planche):
+        ckpt = checkpoints.page_checkpoint_dir(build_dir, planche)
+        document = doc_mod.DocumentPlanche.ouvrir(ckpt)
+        # On relit la planche APRÈS l'avoir ouverte, plutôt que de se fier aux textes que la
+        # recherche a rapportés : entre les deux, un run a pu la retoucher. Remplacer sur un
+        # texte périmé écrirait une réplique qui n'a jamais existé.
+        courant = {b["bulle"]: b["affichee"] for b in repliques(build_dir, planche)}
+        touchee = False
+        for index in sorted(par_planche[planche]):
+            if index >= len(document.etat.regions):
+                continue      # la planche a changé depuis la recherche : on la saute
+            avant_texte = courant.get(index, "")
+            apres_texte = remplacer_dans(avant_texte, motif, par)
+            if apres_texte == avant_texte:
+                continue
+            document.poser_correction(index, apres_texte)
+            touchee = True
+        if touchee:
+            document.enregistrer()
+            modifiees.append(planche)
+    return modifiees

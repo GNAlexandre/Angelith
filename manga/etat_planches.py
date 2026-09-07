@@ -26,6 +26,7 @@ travail était écrit, et l'archive continuait de porter l'ancienne image.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from . import checkpoints, report_manga
@@ -51,6 +52,21 @@ def _mtime(chemin: Path) -> float | None:
         return None
 
 
+def _motifs(rendu: float | None, mtimes: dict[str, float]) -> list[str]:
+    """**LA** règle de péremption, et le seul endroit où elle est écrite.
+
+    `rendu` est la date du rendu de la planche, `mtimes` celles de ses fichiers de cache par
+    nom. Deux chemins d'accès l'appellent — `motifs_de_peremption`, qui interroge le disque
+    planche par planche pour l'éditeur, et `balayer_tome`, qui lit tout un tome d'un coup pour
+    la bibliothèque. Ils ne diffèrent que par la façon d'obtenir les dates ; s'ils
+    différaient par la COMPARAISON, la bibliothèque afficherait « à jour » sur une planche que
+    l'éditeur propose de relettrer."""
+    if rendu is None:
+        return []
+    return [motif for nom, motif in SOURCES_DE_PEREMPTION
+            if nom in mtimes and rendu < mtimes[nom]]
+
+
 def motifs_de_peremption(build_dir, index: int) -> list[str]:
     """Pourquoi le rendu de cette planche est en retard — vide s'il est à jour.
 
@@ -66,19 +82,112 @@ def motifs_de_peremption(build_dir, index: int) -> list[str]:
     if rendu is None:
         return []
     ckpt = checkpoints.page_checkpoint_dir(build_dir, index)
-    motifs = []
-    for nom, motif in SOURCES_DE_PEREMPTION:
-        donnee = _mtime(ckpt / nom)
-        if donnee is not None and rendu < donnee:
-            motifs.append(motif)
-    return motifs
+    mtimes = {}
+    for nom, _motif in SOURCES_DE_PEREMPTION:
+        date = _mtime(ckpt / nom)
+        if date is not None:
+            mtimes[nom] = date
+    return _motifs(rendu, mtimes)
+
+
+def balayer_tome(build_dir) -> dict[int, dict]:
+    """Tout ce qu'un tome dit de lui-même en **un `scandir` par planche**.
+
+    Rend `{index: {"fichiers": set[str], "rendu": float | None, "motifs": [str],
+    "mtime": float | None}}`, où `mtime` est la date de la dernière écriture VUE dans le
+    checkpoint de la planche — c'est-à-dire quand le pipeline l'a touchée pour la dernière
+    fois. Elle est relevée au passage, sans un appel de plus, et c'est ce qui permet à la
+    bibliothèque d'afficher un « dernier run » sur un tome détecté mais jamais rendu.
+
+    ## Pourquoi cette fonction existe
+
+    Elle ne change **aucune règle** : les motifs sortent de `_motifs`, la même comparaison que
+    `motifs_de_peremption` fait planche par planche. Ce qu'elle change est la façon d'obtenir
+    les dates.
+
+    ⚠ Le chemin planche-par-planche paie **cinq `os.stat`** par planche — un par fichier
+    surveillé, plus le rendu. Sur les 55 tomes du corpus, mesuré le 2026-09-05, c'était
+    **5 470 des 13 631 appels `stat`** du balayage complet de la bibliothèque, pour une
+    information que l'entrée de répertoire porte déjà. `os.scandir` rend le nom ET les
+    métadonnées en une fois.
+
+    ⚠ **Le gain dépend du système, et le dire vaut mieux que de l'annoncer partout.** Sous
+    Windows, `DirEntry.stat()` lit un cache rempli par le `scandir` et ne touche plus le
+    disque : les 5 470 appels disparaissent. Sous Linux, `DirEntry.stat()` fait un vrai appel
+    et le gain se réduit à ce que la lecture de répertoire économise. C'est mesuré sur
+    Windows, et nulle part ailleurs.
+
+    ⚠ Ce qu'elle ne fait pas : ouvrir un seul fichier. Ni JSON, ni image. Un tome dont le
+    cache est à moitié écrit rend un état pauvre, jamais une exception — même tolérance que
+    `etat_planche`, et pour la même raison.
+    """
+    build_dir = Path(build_dir)
+    surveilles = {nom for nom, _ in SOURCES_DE_PEREMPTION}
+
+    rendus: dict[int, float] = {}
+    try:
+        with os.scandir(build_dir / "pages_out") as entrees:
+            for e in entrees:
+                tige = Path(e.name).stem
+                if not e.name.endswith(".png") or not tige.startswith("page_"):
+                    continue
+                numero = tige.removeprefix("page_")
+                if numero.isdigit():
+                    rendus[int(numero)] = e.stat().st_mtime
+    except OSError:
+        pass
+
+    sortie: dict[int, dict] = {}
+    try:
+        with os.scandir(build_dir / ".checkpoints") as entrees:
+            pages = [(int(e.name.removeprefix("page_")), e.path) for e in entrees
+                     if e.name.startswith("page_")
+                     and e.name.removeprefix("page_").isdigit() and e.is_dir()]
+    except OSError:
+        pages = []
+
+    for index, chemin in sorted(pages):
+        fichiers: set[str] = set()
+        mtimes: dict[str, float] = {}
+        dernier: float | None = None
+        try:
+            with os.scandir(chemin) as contenu:
+                for e in contenu:
+                    fichiers.add(e.name)
+                    try:
+                        date = e.stat().st_mtime
+                    except OSError:
+                        continue
+                    if e.name in surveilles:
+                        mtimes[e.name] = date
+                    if dernier is None or date > dernier:
+                        dernier = date
+        except OSError:
+            pass
+        rendu = rendus.get(index)
+        sortie[index] = {"fichiers": fichiers, "rendu": rendu, "mtime": dernier,
+                         "motifs": _motifs(rendu, mtimes)}
+    return sortie
+
+
+def perimees_du_balayage(balayage: dict[int, dict]) -> list[int]:
+    """Les planches périmées d'un balayage déjà fait, triées.
+
+    Existe pour qu'un appelant qui a **déjà** payé `balayer_tome` — la bibliothèque, qui a
+    besoin du même balayage pour compter ses étapes — n'ait pas à le refaire pour poser la
+    question de la péremption."""
+    return sorted(i for i, etat in balayage.items() if etat["motifs"])
 
 
 def planches_a_relettrer(build_dir, indices=None) -> list[int]:
     """Planches dont le rendu est antérieur à l'une de leurs données, triées.
 
     `indices` restreint l'examen (l'index de `projet.json`, typiquement) ; sans lui, les
-    dossiers de `.checkpoints/` font foi."""
+    dossiers de `.checkpoints/` font foi — et c'est alors `balayer_tome` qui répond, en un
+    balayage plutôt qu'en cinq `stat` par planche. Le résultat est le même : les deux chemins
+    passent par `_motifs`."""
+    if indices is None:
+        return perimees_du_balayage(balayer_tome(build_dir))
     return sorted(i for i in indices_de(build_dir, indices)
                   if motifs_de_peremption(build_dir, i))
 
@@ -91,12 +200,18 @@ def indices_de(build_dir, indices=None) -> list[int]:
     répondre pareil sur ce qui compte comme une planche."""
     if indices is not None:
         return [int(i) for i in indices]
+    # ⚠ `os.scandir` et non `iterdir()` + `is_dir()` : le second paie un `stat` par entrée,
+    # et ce dossier en porte une par planche. Mesuré au lot 34 sur le corpus : 1 102 appels
+    # système pour une question à laquelle l'entrée de répertoire répond déjà. Le résultat
+    # est identique — même filtre, même tri.
     racine = Path(build_dir) / ".checkpoints"
-    if not racine.is_dir():
+    try:
+        with os.scandir(racine) as entrees:
+            return sorted(int(e.name.removeprefix("page_")) for e in entrees
+                          if e.name.startswith("page_")
+                          and e.name.removeprefix("page_").isdigit() and e.is_dir())
+    except OSError:
         return []
-    return sorted(int(d.name.removeprefix("page_")) for d in racine.iterdir()
-                  if d.is_dir() and d.name.startswith("page_")
-                  and d.name.removeprefix("page_").isdigit())
 
 
 # --------------------------------------------------------------------------- #

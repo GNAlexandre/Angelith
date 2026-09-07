@@ -48,7 +48,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from . import checkpoints, detection_retry, document
+from . import checkpoints, document
 from . import ocr as ocr_mod
 from . import geometry
 from .detection import BubbleRegion
@@ -293,7 +293,7 @@ def _reecrire(ckpt_dir: Path, anciennes: list[BubbleRegion],
     etat = document.EtatPlanche(
         regions=list(anciennes), ocr=etat.ocr, traduction=etat.traduction,
         manuelles=etat.manuelles, origines=etat.origines,
-        mises_en_page=etat.mises_en_page, taille=etat.taille)
+        mises_en_page=etat.mises_en_page, taille=etat.taille, sens=etat.sens)
     try:
         neuf, rapport = document.poser_regions(etat, nouvelles, touchees, relire=relire)
     except document.ErreurDocument as err:
@@ -462,7 +462,6 @@ def relire_zone(ckpt_dir: Path, image_source, index: int, *, cfg_manga: dict | N
     from PIL import Image as PILImage
 
     from . import clean
-    from . import ocr as ocr_mod
 
     regions, _taille = _charger(ckpt_dir)
     _verifier_index(index, regions)
@@ -486,7 +485,8 @@ def relire_zone(ckpt_dir: Path, image_source, index: int, *, cfg_manga: dict | N
 
 
 def retraduire_zone(ckpt_dir: Path, index: int, agent, *,
-                    gloss_text: str = "") -> tuple[str, str | None]:
+                    gloss_text: str = "",
+                    langue: str = "jp", pack=None) -> tuple[str, str | None]:
     """Retraduit la SEULE bulle `index` et écrit le résultat dans `traduction.json`.
 
     Passe par `traduction_unitaire.traduire_bulle`, donc par le MÊME prompt et les mêmes refus
@@ -505,7 +505,8 @@ def retraduire_zone(ckpt_dir: Path, index: int, agent, *,
     source = sources[index] if index < len(sources) else ""
 
     texte, motif = traduction_unitaire.traduire_bulle(
-        agent, source, gloss_text=gloss_text, bbox=regions[index].bbox)
+        agent, source, gloss_text=gloss_text, bbox=regions[index].bbox, langue=langue,
+        pack=pack)
     if motif is not None:
         return "", motif
 
@@ -521,21 +522,21 @@ def retraduire_zone(ckpt_dir: Path, index: int, agent, *,
 
 def reprendre_zone(ckpt_dir: Path, index: int, *, ctx: ContextePlanche,
                    lecteur=None, agent=None, gloss_text: str = "",
-                   cfg_manga: dict | None = None) -> dict:
+                   cfg_manga: dict | None = None, langue: str = "jp") -> dict:
     """Le geste complet sur UNE bulle : **vide, lit, traduit**.
 
     C'est le bouton unique de l'éditeur, et il n'invente rien — il compose trois primitives
     qui existaient déjà, dans le seul ordre qui marche :
 
     1. `repeindre_clean` — la bulle est vidée dans `pages_clean/`. Sans cette étape d'abord,
-       le lettrage réécrirait par-dessus le japonais ;
-    2. `relire_zone` — `manga-ocr` sur cette seule bulle ;
+       le lettrage réécrirait par-dessus le texte source ;
+    2. `relire_zone` — l'OCR de la langue du tome sur cette seule bulle ;
     3. `retraduire_zone` — un appel court, une bulle, une réponse.
 
     L'ordre compte pour une seconde raison : l'OCR lit l'image **d'origine** (jamais la planche
     nettoyée, cf. le graphe de dépendances de `checkpoints`), donc vider d'abord ne lui retire
     rien. L'inverse — traduire puis nettoyer — laisserait une fenêtre où la planche porte du
-    français sur du japonais.
+    français sur la source.
 
     Chaque étape est optionnelle par ses dépendances : sans `lecteur` on saute l'OCR, sans
     `agent` on saute la traduction. Ce qui permet d'utiliser la fonction pour « juste vider »
@@ -551,14 +552,15 @@ def reprendre_zone(ckpt_dir: Path, index: int, *, ctx: ContextePlanche,
               "ocr": None, "traduction": None, "refus": None}
     if compte["nettoyage"]["abandons"]:
         # `mode: "aucun"` — l'intérieur est trop peu uniforme pour être repeint sans abîmer le
-        # dessin. La bulle gardera son japonais visible ; le taire serait pire.
+        # dessin. La bulle gardera son texte source visible ; le taire serait pire.
         compte["refus"] = "nettoyage_abandonne"
 
     if lecteur is not None:
         compte["ocr"] = relire_zone(ckpt_dir, ctx.image_source, index,
                                     cfg_manga=mcfg, lecteur=lecteur)
     if agent is not None:
-        texte, motif = retraduire_zone(ckpt_dir, index, agent, gloss_text=gloss_text)
+        texte, motif = retraduire_zone(ckpt_dir, index, agent, gloss_text=gloss_text,
+                                       langue=langue)
         compte["traduction"] = texte
         if motif is not None:
             compte["refus"] = motif

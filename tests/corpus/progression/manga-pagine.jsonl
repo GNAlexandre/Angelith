@@ -1,0 +1,756 @@
+{"t": 0.0, "methode": "phase", "args": ["preparation", ""]}
+{"t": 0.0, "methode": "phase", "args": ["chargement", ""]}
+{"t": 0.0, "methode": "stage", "args": ["Page 1/150 — page_0001.png (detection)"]}
+{"t": 0.0, "methode": "progres", "args": [1, 150, "page_0001.png"]}
+{"t": 34.64, "methode": "phase", "args": ["analyse", ""]}
+{"t": 34.64, "methode": "stage", "args": ["Page 2/150 — page_0002.png (detection)"]}
+{"t": 34.64, "methode": "progres", "args": [2, 150, "page_0002.png"]}
+{"t": 36.32, "methode": "stage", "args": ["Page 3/150 — page_0003.png (detection)"]}
+{"t": 36.32, "methode": "progres", "args": [3, 150, "page_0003.png"]}
+{"t": 38.36, "methode": "stage", "args": ["Page 4/150 — page_0004.png (detection)"]}
+{"t": 38.36, "methode": "progres", "args": [4, 150, "page_0004.png"]}
+{"t": 40.29, "methode": "stage", "args": ["Page 5/150 — page_0005.png (detection)"]}
+{"t": 40.29, "methode": "progres", "args": [5, 150, "page_0005.png"]}
+{"t": 43.16, "methode": "stage", "args": ["Page 6/150 — page_0006.png (detection)"]}
+{"t": 43.16, "methode": "progres", "args": [6, 150, "page_0006.png"]}
+{"t": 48.94, "methode": "stage", "args": ["Page 7/150 — page_0007.png (detection)"]}
+{"t": 48.94, "methode": "progres", "args": [7, 150, "page_0007.png"]}
+{"t": 54.71, "methode": "stage", "args": ["Page 8/150 — page_0008.png (detection)"]}
+{"t": 54.71, "methode": "progres", "args": [8, 150, "page_0008.png"]}
+{"t": 57.4, "methode": "stage", "args": ["Page 9/150 — page_0009.png (detection)"]}
+{"t": 57.4, "methode": "progres", "args": [9, 150, "page_0009.png"]}
+{"t": 60.26, "methode": "stage", "args": ["Page 10/150 — page_0010.png (detection)"]}
+{"t": 60.26, "methode": "progres", "args": [10, 150, "page_0010.png"]}
+{"t": 63.83, "methode": "stage", "args": ["Page 11/150 — page_0011.png (detection)"]}
+{"t": 63.83, "methode": "progres", "args": [11, 150, "page_0011.png"]}
+{"t": 68.89, "methode": "stage", "args": ["Page 12/150 — page_0012.png (detection)"]}
+{"t": 68.89, "methode": "progres", "args": [12, 150, "page_0012.png"]}
+{"t": 71.75, "methode": "stage", "args": ["Page 13/150 — page_0013.png (detection)"]}
+{"t": 71.75, "methode": "progres", "args": [13, 150, "page_0013.png"]}
+{"t": 75.65, "methode": "stage", "args": ["Page 14/150 — page_0014.png (detection)"]}
+{"t": 75.65, "methode": "progres", "args": [14, 150, "page_0014.png"]}
+{"t": 81.86, "methode": "stage", "args": ["Page 15/150 — page_0015.png (detection)"]}
+{"t": 81.86, "methode": "progres", "args": [15, 150, "page_0015.png"]}
+{"t": 87.72, "methode": "stage", "args": ["Page 16/150 — page_0016.png (detection)"]}
+{"t": 87.72, "methode": "progres", "args": [16, 150, "page_0016.png"]}
+{"t": 92.5, "methode": "stage", "args": ["Page 17/150 — page_0017.png (detection)"]}
+{"t": 92.5, "methode": "progres", "args": [17, 150, "page_0017.png"]}
+{"t": 100.51, "methode": "stage", "args": ["Page 18/150 — page_0018.png (detection)"]}
+{"t": 100.51, "methode": "progres", "args": [18, 150, "page_0018.png"]}
+{"t": 102.76, "methode": "stage", "args": ["Page 19/150 — page_0019.png (detection)"]}
+{"t": 102.76, "methode": "progres", "args": [19, 150, "page_0019.png"]}
+{"t": 107.77, "methode": "stage", "args": ["Page 20/150 — page_0020.png (detection)"]}
+{"t": 107.77, "methode": "progres", "args": [20, 150, "page_0020.png"]}
+{"t": 114.07, "methode": "stage", "args": ["Page 21/150 — page_0021.png (detection)"]}
+{"t": 114.07, "methode": "progres", "args": [21, 150, "page_0021.png"]}
+{"t": 117.05, "methode": "stage", "args": ["Page 22/150 — page_0022.png (detection)"]}
+{"t": 117.05, "methode": "progres", "args": [22, 150, "page_0022.png"]}
+{"t": 122.26, "methode": "stage", "args": ["Page 23/150 — page_0023.png (detection)"]}
+{"t": 122.26, "methode": "progres", "args": [23, 150, "page_0023.png"]}
+{"t": 126.19, "methode": "stage", "args": ["Page 24/150 — page_0024.png (detection)"]}
+{"t": 126.19, "methode": "progres", "args": [24, 150, "page_0024.png"]}
+{"t": 128.11, "methode": "stage", "args": ["Page 25/150 — page_0025.png (detection)"]}
+{"t": 128.11, "methode": "progres", "args": [25, 150, "page_0025.png"]}
+{"t": 137.18, "methode": "stage", "args": ["Page 26/150 — page_0026.png (detection)"]}
+{"t": 137.18, "methode": "progres", "args": [26, 150, "page_0026.png"]}
+{"t": 140.49, "methode": "stage", "args": ["Page 27/150 — page_0027.png (detection)"]}
+{"t": 140.49, "methode": "progres", "args": [27, 150, "page_0027.png"]}
+{"t": 142.69, "methode": "stage", "args": ["Page 28/150 — page_0028.png (detection)"]}
+{"t": 142.69, "methode": "progres", "args": [28, 150, "page_0028.png"]}
+{"t": 148.38, "methode": "stage", "args": ["Page 29/150 — page_0029.png (detection)"]}
+{"t": 148.38, "methode": "progres", "args": [29, 150, "page_0029.png"]}
+{"t": 152.66, "methode": "stage", "args": ["Page 30/150 — page_0030.png (detection)"]}
+{"t": 152.66, "methode": "progres", "args": [30, 150, "page_0030.png"]}
+{"t": 158.98, "methode": "stage", "args": ["Page 31/150 — page_0031.png (detection)"]}
+{"t": 158.98, "methode": "progres", "args": [31, 150, "page_0031.png"]}
+{"t": 166.33, "methode": "stage", "args": ["Page 32/150 — page_0032.png (detection)"]}
+{"t": 166.33, "methode": "progres", "args": [32, 150, "page_0032.png"]}
+{"t": 171.25, "methode": "stage", "args": ["Page 33/150 — page_0033.png (detection)"]}
+{"t": 171.25, "methode": "progres", "args": [33, 150, "page_0033.png"]}
+{"t": 175.48, "methode": "stage", "args": ["Page 34/150 — page_0034.png (detection)"]}
+{"t": 175.48, "methode": "progres", "args": [34, 150, "page_0034.png"]}
+{"t": 177.24, "methode": "stage", "args": ["Page 35/150 — page_0035.png (detection)"]}
+{"t": 177.24, "methode": "progres", "args": [35, 150, "page_0035.png"]}
+{"t": 180.65, "methode": "stage", "args": ["Page 36/150 — page_0036.png (detection)"]}
+{"t": 180.65, "methode": "progres", "args": [36, 150, "page_0036.png"]}
+{"t": 185.58, "methode": "stage", "args": ["Page 37/150 — page_0037.png (detection)"]}
+{"t": 185.58, "methode": "progres", "args": [37, 150, "page_0037.png"]}
+{"t": 187.54, "methode": "stage", "args": ["Page 38/150 — page_0038.png (detection)"]}
+{"t": 187.54, "methode": "progres", "args": [38, 150, "page_0038.png"]}
+{"t": 191.72, "methode": "stage", "args": ["Page 39/150 — page_0039.png (detection)"]}
+{"t": 191.72, "methode": "progres", "args": [39, 150, "page_0039.png"]}
+{"t": 198.76, "methode": "stage", "args": ["Page 40/150 — page_0040.png (detection)"]}
+{"t": 198.76, "methode": "progres", "args": [40, 150, "page_0040.png"]}
+{"t": 203.03, "methode": "stage", "args": ["Page 41/150 — page_0041.png (detection)"]}
+{"t": 203.03, "methode": "progres", "args": [41, 150, "page_0041.png"]}
+{"t": 208.06, "methode": "stage", "args": ["Page 42/150 — page_0042.png (detection)"]}
+{"t": 208.06, "methode": "progres", "args": [42, 150, "page_0042.png"]}
+{"t": 215.01, "methode": "stage", "args": ["Page 43/150 — page_0043.png (detection)"]}
+{"t": 215.01, "methode": "progres", "args": [43, 150, "page_0043.png"]}
+{"t": 220.18, "methode": "stage", "args": ["Page 44/150 — page_0044.png (detection)"]}
+{"t": 220.18, "methode": "progres", "args": [44, 150, "page_0044.png"]}
+{"t": 223.01, "methode": "stage", "args": ["Page 45/150 — page_0045.png (detection)"]}
+{"t": 223.01, "methode": "progres", "args": [45, 150, "page_0045.png"]}
+{"t": 228.26, "methode": "stage", "args": ["Page 46/150 — page_0046.png (detection)"]}
+{"t": 228.26, "methode": "progres", "args": [46, 150, "page_0046.png"]}
+{"t": 232.97, "methode": "stage", "args": ["Page 47/150 — page_0047.png (detection)"]}
+{"t": 232.97, "methode": "progres", "args": [47, 150, "page_0047.png"]}
+{"t": 238.23, "methode": "stage", "args": ["Page 48/150 — page_0048.png (detection)"]}
+{"t": 238.23, "methode": "progres", "args": [48, 150, "page_0048.png"]}
+{"t": 239.97, "methode": "stage", "args": ["Page 49/150 — page_0049.png (detection)"]}
+{"t": 239.97, "methode": "progres", "args": [49, 150, "page_0049.png"]}
+{"t": 245.03, "methode": "stage", "args": ["Page 50/150 — page_0050.png (detection)"]}
+{"t": 245.03, "methode": "progres", "args": [50, 150, "page_0050.png"]}
+{"t": 247.76, "methode": "stage", "args": ["Page 51/150 — page_0051.png (detection)"]}
+{"t": 247.76, "methode": "progres", "args": [51, 150, "page_0051.png"]}
+{"t": 250.81, "methode": "stage", "args": ["Page 52/150 — page_0052.png (detection)"]}
+{"t": 250.81, "methode": "progres", "args": [52, 150, "page_0052.png"]}
+{"t": 253.61, "methode": "stage", "args": ["Page 53/150 — page_0053.png (detection)"]}
+{"t": 253.61, "methode": "progres", "args": [53, 150, "page_0053.png"]}
+{"t": 258.7, "methode": "stage", "args": ["Page 54/150 — page_0054.png (detection)"]}
+{"t": 258.7, "methode": "progres", "args": [54, 150, "page_0054.png"]}
+{"t": 264.98, "methode": "stage", "args": ["Page 55/150 — page_0055.png (detection)"]}
+{"t": 264.98, "methode": "progres", "args": [55, 150, "page_0055.png"]}
+{"t": 270.65, "methode": "stage", "args": ["Page 56/150 — page_0056.png (detection)"]}
+{"t": 270.65, "methode": "progres", "args": [56, 150, "page_0056.png"]}
+{"t": 277.58, "methode": "stage", "args": ["Page 57/150 — page_0057.png (detection)"]}
+{"t": 277.58, "methode": "progres", "args": [57, 150, "page_0057.png"]}
+{"t": 281.67, "methode": "stage", "args": ["Page 58/150 — page_0058.png (detection)"]}
+{"t": 281.67, "methode": "progres", "args": [58, 150, "page_0058.png"]}
+{"t": 287.49, "methode": "stage", "args": ["Page 59/150 — page_0059.png (detection)"]}
+{"t": 287.49, "methode": "progres", "args": [59, 150, "page_0059.png"]}
+{"t": 294.17, "methode": "stage", "args": ["Page 60/150 — page_0060.png (detection)"]}
+{"t": 294.17, "methode": "progres", "args": [60, 150, "page_0060.png"]}
+{"t": 301.98, "methode": "stage", "args": ["Page 61/150 — page_0061.png (detection)"]}
+{"t": 301.98, "methode": "progres", "args": [61, 150, "page_0061.png"]}
+{"t": 308.73, "methode": "stage", "args": ["Page 62/150 — page_0062.png (detection)"]}
+{"t": 308.73, "methode": "progres", "args": [62, 150, "page_0062.png"]}
+{"t": 315.65, "methode": "stage", "args": ["Page 63/150 — page_0063.png (detection)"]}
+{"t": 315.65, "methode": "progres", "args": [63, 150, "page_0063.png"]}
+{"t": 321.42, "methode": "stage", "args": ["Page 64/150 — page_0064.png (detection)"]}
+{"t": 321.42, "methode": "progres", "args": [64, 150, "page_0064.png"]}
+{"t": 330.54, "methode": "stage", "args": ["Page 65/150 — page_0065.png (detection)"]}
+{"t": 330.54, "methode": "progres", "args": [65, 150, "page_0065.png"]}
+{"t": 334.09, "methode": "stage", "args": ["Page 66/150 — page_0066.png (detection)"]}
+{"t": 334.09, "methode": "progres", "args": [66, 150, "page_0066.png"]}
+{"t": 337.05, "methode": "stage", "args": ["Page 67/150 — page_0067.png (detection)"]}
+{"t": 337.05, "methode": "progres", "args": [67, 150, "page_0067.png"]}
+{"t": 343.12, "methode": "stage", "args": ["Page 68/150 — page_0068.png (detection)"]}
+{"t": 343.12, "methode": "progres", "args": [68, 150, "page_0068.png"]}
+{"t": 348.24, "methode": "stage", "args": ["Page 69/150 — page_0069.png (detection)"]}
+{"t": 348.24, "methode": "progres", "args": [69, 150, "page_0069.png"]}
+{"t": 352.96, "methode": "stage", "args": ["Page 70/150 — page_0070.png (detection)"]}
+{"t": 352.96, "methode": "progres", "args": [70, 150, "page_0070.png"]}
+{"t": 358.03, "methode": "stage", "args": ["Page 71/150 — page_0071.png (detection)"]}
+{"t": 358.03, "methode": "progres", "args": [71, 150, "page_0071.png"]}
+{"t": 363.56, "methode": "stage", "args": ["Page 72/150 — page_0072.png (detection)"]}
+{"t": 363.56, "methode": "progres", "args": [72, 150, "page_0072.png"]}
+{"t": 366.96, "methode": "stage", "args": ["Page 73/150 — page_0073.png (detection)"]}
+{"t": 366.96, "methode": "progres", "args": [73, 150, "page_0073.png"]}
+{"t": 371.02, "methode": "stage", "args": ["Page 74/150 — page_0074.png (detection)"]}
+{"t": 371.02, "methode": "progres", "args": [74, 150, "page_0074.png"]}
+{"t": 374.53, "methode": "stage", "args": ["Page 75/150 — page_0075.png (detection)"]}
+{"t": 374.53, "methode": "progres", "args": [75, 150, "page_0075.png"]}
+{"t": 378.58, "methode": "stage", "args": ["Page 76/150 — page_0076.png (detection)"]}
+{"t": 378.58, "methode": "progres", "args": [76, 150, "page_0076.png"]}
+{"t": 381.19, "methode": "stage", "args": ["Page 77/150 — page_0077.png (detection)"]}
+{"t": 381.19, "methode": "progres", "args": [77, 150, "page_0077.png"]}
+{"t": 382.99, "methode": "stage", "args": ["Page 78/150 — page_0078.png (detection)"]}
+{"t": 382.99, "methode": "progres", "args": [78, 150, "page_0078.png"]}
+{"t": 384.62, "methode": "stage", "args": ["Page 79/150 — page_0079.png (detection)"]}
+{"t": 384.62, "methode": "progres", "args": [79, 150, "page_0079.png"]}
+{"t": 386.95, "methode": "stage", "args": ["Page 80/150 — page_0080.png (detection)"]}
+{"t": 386.95, "methode": "progres", "args": [80, 150, "page_0080.png"]}
+{"t": 393.19, "methode": "stage", "args": ["Page 81/150 — page_0081.png (detection)"]}
+{"t": 393.19, "methode": "progres", "args": [81, 150, "page_0081.png"]}
+{"t": 401.13, "methode": "stage", "args": ["Page 82/150 — page_0082.png (detection)"]}
+{"t": 401.13, "methode": "progres", "args": [82, 150, "page_0082.png"]}
+{"t": 408.4, "methode": "stage", "args": ["Page 83/150 — page_0083.png (detection)"]}
+{"t": 408.4, "methode": "progres", "args": [83, 150, "page_0083.png"]}
+{"t": 414.09, "methode": "stage", "args": ["Page 84/150 — page_0084.png (detection)"]}
+{"t": 414.09, "methode": "progres", "args": [84, 150, "page_0084.png"]}
+{"t": 419.06, "methode": "stage", "args": ["Page 85/150 — page_0085.png (detection)"]}
+{"t": 419.06, "methode": "progres", "args": [85, 150, "page_0085.png"]}
+{"t": 424.25, "methode": "stage", "args": ["Page 86/150 — page_0086.png (detection)"]}
+{"t": 424.25, "methode": "progres", "args": [86, 150, "page_0086.png"]}
+{"t": 427.21, "methode": "stage", "args": ["Page 87/150 — page_0087.png (detection)"]}
+{"t": 427.21, "methode": "progres", "args": [87, 150, "page_0087.png"]}
+{"t": 436.16, "methode": "stage", "args": ["Page 88/150 — page_0088.png (detection)"]}
+{"t": 436.16, "methode": "progres", "args": [88, 150, "page_0088.png"]}
+{"t": 444.95, "methode": "stage", "args": ["Page 89/150 — page_0089.png (detection)"]}
+{"t": 444.95, "methode": "progres", "args": [89, 150, "page_0089.png"]}
+{"t": 450.54, "methode": "stage", "args": ["Page 90/150 — page_0090.png (detection)"]}
+{"t": 450.54, "methode": "progres", "args": [90, 150, "page_0090.png"]}
+{"t": 455.99, "methode": "stage", "args": ["Page 91/150 — page_0091.png (detection)"]}
+{"t": 455.99, "methode": "progres", "args": [91, 150, "page_0091.png"]}
+{"t": 462.69, "methode": "stage", "args": ["Page 92/150 — page_0092.png (detection)"]}
+{"t": 462.69, "methode": "progres", "args": [92, 150, "page_0092.png"]}
+{"t": 465.25, "methode": "stage", "args": ["Page 93/150 — page_0093.png (detection)"]}
+{"t": 465.25, "methode": "progres", "args": [93, 150, "page_0093.png"]}
+{"t": 470.52, "methode": "stage", "args": ["Page 94/150 — page_0094.png (detection)"]}
+{"t": 470.52, "methode": "progres", "args": [94, 150, "page_0094.png"]}
+{"t": 480.77, "methode": "stage", "args": ["Page 95/150 — page_0095.png (detection)"]}
+{"t": 480.77, "methode": "progres", "args": [95, 150, "page_0095.png"]}
+{"t": 484.6, "methode": "stage", "args": ["Page 96/150 — page_0096.png (detection)"]}
+{"t": 484.6, "methode": "progres", "args": [96, 150, "page_0096.png"]}
+{"t": 492.09, "methode": "stage", "args": ["Page 97/150 — page_0097.png (detection)"]}
+{"t": 492.09, "methode": "progres", "args": [97, 150, "page_0097.png"]}
+{"t": 497.99, "methode": "stage", "args": ["Page 98/150 — page_0098.png (detection)"]}
+{"t": 497.99, "methode": "progres", "args": [98, 150, "page_0098.png"]}
+{"t": 501.45, "methode": "stage", "args": ["Page 99/150 — page_0099.png (detection)"]}
+{"t": 501.45, "methode": "progres", "args": [99, 150, "page_0099.png"]}
+{"t": 505.74, "methode": "stage", "args": ["Page 100/150 — page_0100.png (detection)"]}
+{"t": 505.74, "methode": "progres", "args": [100, 150, "page_0100.png"]}
+{"t": 510.16, "methode": "stage", "args": ["Page 101/150 — page_0101.png (detection)"]}
+{"t": 510.16, "methode": "progres", "args": [101, 150, "page_0101.png"]}
+{"t": 517.93, "methode": "stage", "args": ["Page 102/150 — page_0102.png (detection)"]}
+{"t": 517.93, "methode": "progres", "args": [102, 150, "page_0102.png"]}
+{"t": 523.36, "methode": "stage", "args": ["Page 103/150 — page_0103.png (detection)"]}
+{"t": 523.36, "methode": "progres", "args": [103, 150, "page_0103.png"]}
+{"t": 527.77, "methode": "stage", "args": ["Page 104/150 — page_0104.png (detection)"]}
+{"t": 527.77, "methode": "progres", "args": [104, 150, "page_0104.png"]}
+{"t": 535.77, "methode": "stage", "args": ["Page 105/150 — page_0105.png (detection)"]}
+{"t": 535.77, "methode": "progres", "args": [105, 150, "page_0105.png"]}
+{"t": 538.85, "methode": "stage", "args": ["Page 106/150 — page_0106.png (detection)"]}
+{"t": 538.85, "methode": "progres", "args": [106, 150, "page_0106.png"]}
+{"t": 543.88, "methode": "stage", "args": ["Page 107/150 — page_0107.png (detection)"]}
+{"t": 543.88, "methode": "progres", "args": [107, 150, "page_0107.png"]}
+{"t": 546.79, "methode": "stage", "args": ["Page 108/150 — page_0108.png (detection)"]}
+{"t": 546.79, "methode": "progres", "args": [108, 150, "page_0108.png"]}
+{"t": 549.29, "methode": "stage", "args": ["Page 109/150 — page_0109.png (detection)"]}
+{"t": 549.29, "methode": "progres", "args": [109, 150, "page_0109.png"]}
+{"t": 551.05, "methode": "stage", "args": ["Page 110/150 — page_0110.png (detection)"]}
+{"t": 551.05, "methode": "progres", "args": [110, 150, "page_0110.png"]}
+{"t": 552.79, "methode": "stage", "args": ["Page 111/150 — page_0111.png (detection)"]}
+{"t": 552.79, "methode": "progres", "args": [111, 150, "page_0111.png"]}
+{"t": 557.57, "methode": "stage", "args": ["Page 112/150 — page_0112.png (detection)"]}
+{"t": 557.57, "methode": "progres", "args": [112, 150, "page_0112.png"]}
+{"t": 560.64, "methode": "stage", "args": ["Page 113/150 — page_0113.png (detection)"]}
+{"t": 560.64, "methode": "progres", "args": [113, 150, "page_0113.png"]}
+{"t": 563.83, "methode": "stage", "args": ["Page 114/150 — page_0114.png (detection)"]}
+{"t": 563.83, "methode": "progres", "args": [114, 150, "page_0114.png"]}
+{"t": 568.09, "methode": "stage", "args": ["Page 115/150 — page_0115.png (detection)"]}
+{"t": 568.09, "methode": "progres", "args": [115, 150, "page_0115.png"]}
+{"t": 571.55, "methode": "stage", "args": ["Page 116/150 — page_0116.png (detection)"]}
+{"t": 571.55, "methode": "progres", "args": [116, 150, "page_0116.png"]}
+{"t": 577.63, "methode": "stage", "args": ["Page 117/150 — page_0117.png (detection)"]}
+{"t": 577.63, "methode": "progres", "args": [117, 150, "page_0117.png"]}
+{"t": 580.48, "methode": "stage", "args": ["Page 118/150 — page_0118.png (detection)"]}
+{"t": 580.48, "methode": "progres", "args": [118, 150, "page_0118.png"]}
+{"t": 585.34, "methode": "stage", "args": ["Page 119/150 — page_0119.png (detection)"]}
+{"t": 585.34, "methode": "progres", "args": [119, 150, "page_0119.png"]}
+{"t": 591.08, "methode": "stage", "args": ["Page 120/150 — page_0120.png (detection)"]}
+{"t": 591.08, "methode": "progres", "args": [120, 150, "page_0120.png"]}
+{"t": 596.36, "methode": "stage", "args": ["Page 121/150 — page_0121.png (detection)"]}
+{"t": 596.36, "methode": "progres", "args": [121, 150, "page_0121.png"]}
+{"t": 601.94, "methode": "stage", "args": ["Page 122/150 — page_0122.png (detection)"]}
+{"t": 601.94, "methode": "progres", "args": [122, 150, "page_0122.png"]}
+{"t": 604.53, "methode": "stage", "args": ["Page 123/150 — page_0123.png (detection)"]}
+{"t": 604.53, "methode": "progres", "args": [123, 150, "page_0123.png"]}
+{"t": 609.52, "methode": "stage", "args": ["Page 124/150 — page_0124.png (detection)"]}
+{"t": 609.52, "methode": "progres", "args": [124, 150, "page_0124.png"]}
+{"t": 616.39, "methode": "stage", "args": ["Page 125/150 — page_0125.png (detection)"]}
+{"t": 616.39, "methode": "progres", "args": [125, 150, "page_0125.png"]}
+{"t": 624.62, "methode": "stage", "args": ["Page 126/150 — page_0126.png (detection)"]}
+{"t": 624.62, "methode": "progres", "args": [126, 150, "page_0126.png"]}
+{"t": 631.38, "methode": "stage", "args": ["Page 127/150 — page_0127.png (detection)"]}
+{"t": 631.38, "methode": "progres", "args": [127, 150, "page_0127.png"]}
+{"t": 637.78, "methode": "stage", "args": ["Page 128/150 — page_0128.png (detection)"]}
+{"t": 637.78, "methode": "progres", "args": [128, 150, "page_0128.png"]}
+{"t": 644.26, "methode": "stage", "args": ["Page 129/150 — page_0129.png (detection)"]}
+{"t": 644.26, "methode": "progres", "args": [129, 150, "page_0129.png"]}
+{"t": 650.25, "methode": "stage", "args": ["Page 130/150 — page_0130.png (detection)"]}
+{"t": 650.25, "methode": "progres", "args": [130, 150, "page_0130.png"]}
+{"t": 655.98, "methode": "stage", "args": ["Page 131/150 — page_0131.png (detection)"]}
+{"t": 655.98, "methode": "progres", "args": [131, 150, "page_0131.png"]}
+{"t": 660.51, "methode": "stage", "args": ["Page 132/150 — page_0132.png (detection)"]}
+{"t": 660.51, "methode": "progres", "args": [132, 150, "page_0132.png"]}
+{"t": 666.14, "methode": "stage", "args": ["Page 133/150 — page_0133.png (detection)"]}
+{"t": 666.14, "methode": "progres", "args": [133, 150, "page_0133.png"]}
+{"t": 672.19, "methode": "stage", "args": ["Page 134/150 — page_0134.png (detection)"]}
+{"t": 672.19, "methode": "progres", "args": [134, 150, "page_0134.png"]}
+{"t": 674.14, "methode": "stage", "args": ["Page 135/150 — page_0135.png (detection)"]}
+{"t": 674.14, "methode": "progres", "args": [135, 150, "page_0135.png"]}
+{"t": 678.62, "methode": "stage", "args": ["Page 136/150 — page_0136.png (detection)"]}
+{"t": 678.62, "methode": "progres", "args": [136, 150, "page_0136.png"]}
+{"t": 685.02, "methode": "stage", "args": ["Page 137/150 — page_0137.png (detection)"]}
+{"t": 685.02, "methode": "progres", "args": [137, 150, "page_0137.png"]}
+{"t": 690.05, "methode": "stage", "args": ["Page 138/150 — page_0138.png (detection)"]}
+{"t": 690.05, "methode": "progres", "args": [138, 150, "page_0138.png"]}
+{"t": 694.3, "methode": "stage", "args": ["Page 139/150 — page_0139.png (detection)"]}
+{"t": 694.3, "methode": "progres", "args": [139, 150, "page_0139.png"]}
+{"t": 700.0, "methode": "stage", "args": ["Page 140/150 — page_0140.png (detection)"]}
+{"t": 700.0, "methode": "progres", "args": [140, 150, "page_0140.png"]}
+{"t": 706.31, "methode": "stage", "args": ["Page 141/150 — page_0141.png (detection)"]}
+{"t": 706.31, "methode": "progres", "args": [141, 150, "page_0141.png"]}
+{"t": 710.76, "methode": "stage", "args": ["Page 142/150 — page_0142.png (detection)"]}
+{"t": 710.76, "methode": "progres", "args": [142, 150, "page_0142.png"]}
+{"t": 714.57, "methode": "stage", "args": ["Page 143/150 — page_0143.png (detection)"]}
+{"t": 714.57, "methode": "progres", "args": [143, 150, "page_0143.png"]}
+{"t": 716.37, "methode": "stage", "args": ["Page 144/150 — page_0144.png (detection)"]}
+{"t": 716.37, "methode": "progres", "args": [144, 150, "page_0144.png"]}
+{"t": 719.31, "methode": "stage", "args": ["Page 145/150 — page_0145.png (detection)"]}
+{"t": 719.31, "methode": "progres", "args": [145, 150, "page_0145.png"]}
+{"t": 722.3, "methode": "stage", "args": ["Page 146/150 — page_0146.png (detection)"]}
+{"t": 722.3, "methode": "progres", "args": [146, 150, "page_0146.png"]}
+{"t": 724.64, "methode": "stage", "args": ["Page 147/150 — page_0147.png (detection)"]}
+{"t": 724.64, "methode": "progres", "args": [147, 150, "page_0147.png"]}
+{"t": 726.32, "methode": "stage", "args": ["Page 148/150 — page_0148.png (detection)"]}
+{"t": 726.32, "methode": "progres", "args": [148, 150, "page_0148.png"]}
+{"t": 728.15, "methode": "stage", "args": ["Page 149/150 — page_0149.png (detection)"]}
+{"t": 728.15, "methode": "progres", "args": [149, 150, "page_0149.png"]}
+{"t": 729.91, "methode": "stage", "args": ["Page 150/150 — page_0150.png (detection)"]}
+{"t": 729.91, "methode": "progres", "args": [150, 150, "page_0150.png"]}
+{"t": 731.88, "methode": "phase", "args": ["terminologie", ""]}
+{"t": 731.88, "methode": "progres", "args": [1, 150, "page_0001.png"]}
+{"t": 731.88, "methode": "progres", "args": [2, 150, "page_0002.png"]}
+{"t": 731.88, "methode": "progres", "args": [3, 150, "page_0003.png"]}
+{"t": 731.88, "methode": "progres", "args": [4, 150, "page_0004.png"]}
+{"t": 731.88, "methode": "progres", "args": [5, 150, "page_0005.png"]}
+{"t": 750.05, "methode": "progres", "args": [6, 150, "page_0006.png"]}
+{"t": 751.65, "methode": "progres", "args": [7, 150, "page_0007.png"]}
+{"t": 753.25, "methode": "progres", "args": [8, 150, "page_0008.png"]}
+{"t": 754.68, "methode": "progres", "args": [9, 150, "page_0009.png"]}
+{"t": 756.12, "methode": "progres", "args": [10, 150, "page_0010.png"]}
+{"t": 757.65, "methode": "progres", "args": [11, 150, "page_0011.png"]}
+{"t": 763.69, "methode": "progres", "args": [12, 150, "page_0012.png"]}
+{"t": 767.89, "methode": "progres", "args": [13, 150, "page_0013.png"]}
+{"t": 769.45, "methode": "progres", "args": [14, 150, "page_0014.png"]}
+{"t": 771.05, "methode": "progres", "args": [15, 150, "page_0015.png"]}
+{"t": 772.57, "methode": "progres", "args": [16, 150, "page_0016.png"]}
+{"t": 774.08, "methode": "progres", "args": [17, 150, "page_0017.png"]}
+{"t": 775.7, "methode": "progres", "args": [18, 150, "page_0018.png"]}
+{"t": 777.06, "methode": "progres", "args": [19, 150, "page_0019.png"]}
+{"t": 778.49, "methode": "progres", "args": [20, 150, "page_0020.png"]}
+{"t": 779.94, "methode": "progres", "args": [21, 150, "page_0021.png"]}
+{"t": 781.28, "methode": "progres", "args": [22, 150, "page_0022.png"]}
+{"t": 782.72, "methode": "progres", "args": [23, 150, "page_0023.png"]}
+{"t": 784.14, "methode": "progres", "args": [24, 150, "page_0024.png"]}
+{"t": 784.15, "methode": "progres", "args": [25, 150, "page_0025.png"]}
+{"t": 785.71, "methode": "progres", "args": [26, 150, "page_0026.png"]}
+{"t": 787.08, "methode": "progres", "args": [27, 150, "page_0027.png"]}
+{"t": 788.4, "methode": "progres", "args": [28, 150, "page_0028.png"]}
+{"t": 789.83, "methode": "progres", "args": [29, 150, "page_0029.png"]}
+{"t": 791.19, "methode": "progres", "args": [30, 150, "page_0030.png"]}
+{"t": 792.64, "methode": "progres", "args": [31, 150, "page_0031.png"]}
+{"t": 794.16, "methode": "progres", "args": [32, 150, "page_0032.png"]}
+{"t": 795.64, "methode": "progres", "args": [33, 150, "page_0033.png"]}
+{"t": 797.0, "methode": "progres", "args": [34, 150, "page_0034.png"]}
+{"t": 797.0, "methode": "progres", "args": [35, 150, "page_0035.png"]}
+{"t": 798.39, "methode": "progres", "args": [36, 150, "page_0036.png"]}
+{"t": 799.75, "methode": "progres", "args": [37, 150, "page_0037.png"]}
+{"t": 799.76, "methode": "progres", "args": [38, 150, "page_0038.png"]}
+{"t": 801.12, "methode": "progres", "args": [39, 150, "page_0039.png"]}
+{"t": 802.56, "methode": "progres", "args": [40, 150, "page_0040.png"]}
+{"t": 803.92, "methode": "progres", "args": [41, 150, "page_0041.png"]}
+{"t": 806.71, "methode": "progres", "args": [42, 150, "page_0042.png"]}
+{"t": 811.06, "methode": "progres", "args": [43, 150, "page_0043.png"]}
+{"t": 812.55, "methode": "progres", "args": [44, 150, "page_0044.png"]}
+{"t": 813.99, "methode": "progres", "args": [45, 150, "page_0045.png"]}
+{"t": 815.49, "methode": "progres", "args": [46, 150, "page_0046.png"]}
+{"t": 817.0, "methode": "progres", "args": [47, 150, "page_0047.png"]}
+{"t": 818.49, "methode": "progres", "args": [48, 150, "page_0048.png"]}
+{"t": 818.49, "methode": "progres", "args": [49, 150, "page_0049.png"]}
+{"t": 819.94, "methode": "progres", "args": [50, 150, "page_0050.png"]}
+{"t": 821.39, "methode": "progres", "args": [51, 150, "page_0051.png"]}
+{"t": 822.82, "methode": "progres", "args": [52, 150, "page_0052.png"]}
+{"t": 824.26, "methode": "progres", "args": [53, 150, "page_0053.png"]}
+{"t": 825.77, "methode": "progres", "args": [54, 150, "page_0054.png"]}
+{"t": 827.27, "methode": "progres", "args": [55, 150, "page_0055.png"]}
+{"t": 829.95, "methode": "progres", "args": [56, 150, "page_0056.png"]}
+{"t": 834.31, "methode": "progres", "args": [57, 150, "page_0057.png"]}
+{"t": 835.75, "methode": "progres", "args": [58, 150, "page_0058.png"]}
+{"t": 837.26, "methode": "progres", "args": [59, 150, "page_0059.png"]}
+{"t": 838.8, "methode": "progres", "args": [60, 150, "page_0060.png"]}
+{"t": 840.36, "methode": "progres", "args": [61, 150, "page_0061.png"]}
+{"t": 844.03, "methode": "progres", "args": [62, 150, "page_0062.png"]}
+{"t": 848.44, "methode": "progres", "args": [63, 150, "page_0063.png"]}
+{"t": 849.97, "methode": "progres", "args": [64, 150, "page_0064.png"]}
+{"t": 851.6, "methode": "progres", "args": [65, 150, "page_0065.png"]}
+{"t": 858.43, "methode": "progres", "args": [66, 150, "page_0066.png"]}
+{"t": 862.79, "methode": "progres", "args": [67, 150, "page_0067.png"]}
+{"t": 864.43, "methode": "progres", "args": [68, 150, "page_0068.png"]}
+{"t": 865.93, "methode": "progres", "args": [69, 150, "page_0069.png"]}
+{"t": 868.44, "methode": "progres", "args": [70, 150, "page_0070.png"]}
+{"t": 872.85, "methode": "progres", "args": [71, 150, "page_0071.png"]}
+{"t": 874.43, "methode": "progres", "args": [72, 150, "page_0072.png"]}
+{"t": 875.92, "methode": "progres", "args": [73, 150, "page_0073.png"]}
+{"t": 877.41, "methode": "progres", "args": [74, 150, "page_0074.png"]}
+{"t": 878.92, "methode": "progres", "args": [75, 150, "page_0075.png"]}
+{"t": 880.42, "methode": "progres", "args": [76, 150, "page_0076.png"]}
+{"t": 881.86, "methode": "progres", "args": [77, 150, "page_0077.png"]}
+{"t": 881.86, "methode": "progres", "args": [78, 150, "page_0078.png"]}
+{"t": 881.87, "methode": "progres", "args": [79, 150, "page_0079.png"]}
+{"t": 883.31, "methode": "progres", "args": [80, 150, "page_0080.png"]}
+{"t": 884.88, "methode": "progres", "args": [81, 150, "page_0081.png"]}
+{"t": 886.49, "methode": "progres", "args": [82, 150, "page_0082.png"]}
+{"t": 888.03, "methode": "progres", "args": [83, 150, "page_0083.png"]}
+{"t": 889.48, "methode": "progres", "args": [84, 150, "page_0084.png"]}
+{"t": 890.92, "methode": "progres", "args": [85, 150, "page_0085.png"]}
+{"t": 892.36, "methode": "progres", "args": [86, 150, "page_0086.png"]}
+{"t": 893.72, "methode": "progres", "args": [87, 150, "page_0087.png"]}
+{"t": 896.42, "methode": "progres", "args": [88, 150, "page_0088.png"]}
+{"t": 898.04, "methode": "progres", "args": [89, 150, "page_0089.png"]}
+{"t": 899.49, "methode": "progres", "args": [90, 150, "page_0090.png"]}
+{"t": 900.92, "methode": "progres", "args": [91, 150, "page_0091.png"]}
+{"t": 902.36, "methode": "progres", "args": [92, 150, "page_0092.png"]}
+{"t": 903.68, "methode": "progres", "args": [93, 150, "page_0093.png"]}
+{"t": 905.12, "methode": "progres", "args": [94, 150, "page_0094.png"]}
+{"t": 906.67, "methode": "progres", "args": [95, 150, "page_0095.png"]}
+{"t": 908.02, "methode": "progres", "args": [96, 150, "page_0096.png"]}
+{"t": 909.52, "methode": "progres", "args": [97, 150, "page_0097.png"]}
+{"t": 910.88, "methode": "progres", "args": [98, 150, "page_0098.png"]}
+{"t": 912.23, "methode": "progres", "args": [99, 150, "page_0099.png"]}
+{"t": 913.59, "methode": "progres", "args": [100, 150, "page_0100.png"]}
+{"t": 914.95, "methode": "progres", "args": [101, 150, "page_0101.png"]}
+{"t": 916.4, "methode": "progres", "args": [102, 150, "page_0102.png"]}
+{"t": 917.83, "methode": "progres", "args": [103, 150, "page_0103.png"]}
+{"t": 919.18, "methode": "progres", "args": [104, 150, "page_0104.png"]}
+{"t": 920.69, "methode": "progres", "args": [105, 150, "page_0105.png"]}
+{"t": 921.99, "methode": "progres", "args": [106, 150, "page_0106.png"]}
+{"t": 923.34, "methode": "progres", "args": [107, 150, "page_0107.png"]}
+{"t": 924.65, "methode": "progres", "args": [108, 150, "page_0108.png"]}
+{"t": 927.06, "methode": "progres", "args": [109, 150, "page_0109.png"]}
+{"t": 927.06, "methode": "progres", "args": [110, 150, "page_0110.png"]}
+{"t": 927.06, "methode": "progres", "args": [111, 150, "page_0111.png"]}
+{"t": 931.58, "methode": "progres", "args": [112, 150, "page_0112.png"]}
+{"t": 933.08, "methode": "progres", "args": [113, 150, "page_0113.png"]}
+{"t": 934.57, "methode": "progres", "args": [114, 150, "page_0114.png"]}
+{"t": 936.07, "methode": "progres", "args": [115, 150, "page_0115.png"]}
+{"t": 937.58, "methode": "progres", "args": [116, 150, "page_0116.png"]}
+{"t": 939.14, "methode": "progres", "args": [117, 150, "page_0117.png"]}
+{"t": 940.58, "methode": "progres", "args": [118, 150, "page_0118.png"]}
+{"t": 942.08, "methode": "progres", "args": [119, 150, "page_0119.png"]}
+{"t": 946.34, "methode": "progres", "args": [120, 150, "page_0120.png"]}
+{"t": 952.66, "methode": "progres", "args": [121, 150, "page_0121.png"]}
+{"t": 957.26, "methode": "progres", "args": [122, 150, "page_0122.png"]}
+{"t": 958.69, "methode": "progres", "args": [123, 150, "page_0123.png"]}
+{"t": 960.2, "methode": "progres", "args": [124, 150, "page_0124.png"]}
+{"t": 961.75, "methode": "progres", "args": [125, 150, "page_0125.png"]}
+{"t": 963.35, "methode": "progres", "args": [126, 150, "page_0126.png"]}
+{"t": 964.87, "methode": "progres", "args": [127, 150, "page_0127.png"]}
+{"t": 966.31, "methode": "progres", "args": [128, 150, "page_0128.png"]}
+{"t": 967.82, "methode": "progres", "args": [129, 150, "page_0129.png"]}
+{"t": 969.32, "methode": "progres", "args": [130, 150, "page_0130.png"]}
+{"t": 970.78, "methode": "progres", "args": [131, 150, "page_0131.png"]}
+{"t": 972.21, "methode": "progres", "args": [132, 150, "page_0132.png"]}
+{"t": 973.64, "methode": "progres", "args": [133, 150, "page_0133.png"]}
+{"t": 975.1, "methode": "progres", "args": [134, 150, "page_0134.png"]}
+{"t": 975.11, "methode": "progres", "args": [135, 150, "page_0135.png"]}
+{"t": 976.54, "methode": "progres", "args": [136, 150, "page_0136.png"]}
+{"t": 978.05, "methode": "progres", "args": [137, 150, "page_0137.png"]}
+{"t": 979.49, "methode": "progres", "args": [138, 150, "page_0138.png"]}
+{"t": 980.93, "methode": "progres", "args": [139, 150, "page_0139.png"]}
+{"t": 982.37, "methode": "progres", "args": [140, 150, "page_0140.png"]}
+{"t": 983.91, "methode": "progres", "args": [141, 150, "page_0141.png"]}
+{"t": 985.36, "methode": "progres", "args": [142, 150, "page_0142.png"]}
+{"t": 986.79, "methode": "progres", "args": [143, 150, "page_0143.png"]}
+{"t": 986.79, "methode": "progres", "args": [144, 150, "page_0144.png"]}
+{"t": 988.16, "methode": "progres", "args": [145, 150, "page_0145.png"]}
+{"t": 989.53, "methode": "progres", "args": [146, 150, "page_0146.png"]}
+{"t": 990.89, "methode": "progres", "args": [147, 150, "page_0147.png"]}
+{"t": 990.89, "methode": "progres", "args": [148, 150, "page_0148.png"]}
+{"t": 990.89, "methode": "progres", "args": [149, 150, "page_0149.png"]}
+{"t": 990.9, "methode": "progres", "args": [150, 150, "page_0150.png"]}
+{"t": 1080.76, "methode": "phase", "args": ["traduction", ""]}
+{"t": 1080.76, "methode": "stage", "args": ["Page 1/150 — page_0001.png (traduction)"]}
+{"t": 1080.76, "methode": "progres", "args": [1, 150, "page_0001.png"]}
+{"t": 1084.11, "methode": "stage", "args": ["Page 2/150 — page_0002.png (traduction)"]}
+{"t": 1084.11, "methode": "progres", "args": [2, 150, "page_0002.png"]}
+{"t": 1084.43, "methode": "stage", "args": ["Page 3/150 — page_0003.png (traduction)"]}
+{"t": 1084.43, "methode": "progres", "args": [3, 150, "page_0003.png"]}
+{"t": 1087.6, "methode": "stage", "args": ["Page 4/150 — page_0004.png (traduction)"]}
+{"t": 1087.6, "methode": "progres", "args": [4, 150, "page_0004.png"]}
+{"t": 1091.36, "methode": "stage", "args": ["Page 5/150 — page_0005.png (traduction)"]}
+{"t": 1091.36, "methode": "progres", "args": [5, 150, "page_0005.png"]}
+{"t": 1100.37, "methode": "stage", "args": ["Page 6/150 — page_0006.png (traduction)"]}
+{"t": 1100.37, "methode": "progres", "args": [6, 150, "page_0006.png"]}
+{"t": 1108.08, "methode": "stage", "args": ["Page 7/150 — page_0007.png (traduction)"]}
+{"t": 1108.08, "methode": "progres", "args": [7, 150, "page_0007.png"]}
+{"t": 1116.83, "methode": "stage", "args": ["Page 8/150 — page_0008.png (traduction)"]}
+{"t": 1116.83, "methode": "progres", "args": [8, 150, "page_0008.png"]}
+{"t": 1121.03, "methode": "stage", "args": ["Page 9/150 — page_0009.png (traduction)"]}
+{"t": 1121.03, "methode": "progres", "args": [9, 150, "page_0009.png"]}
+{"t": 1126.03, "methode": "stage", "args": ["Page 10/150 — page_0010.png (traduction)"]}
+{"t": 1126.03, "methode": "progres", "args": [10, 150, "page_0010.png"]}
+{"t": 1132.92, "methode": "stage", "args": ["Page 11/150 — page_0011.png (traduction)"]}
+{"t": 1132.92, "methode": "progres", "args": [11, 150, "page_0011.png"]}
+{"t": 1143.83, "methode": "stage", "args": ["Page 12/150 — page_0012.png (traduction)"]}
+{"t": 1143.83, "methode": "progres", "args": [12, 150, "page_0012.png"]}
+{"t": 1151.22, "methode": "stage", "args": ["Page 13/150 — page_0013.png (traduction)"]}
+{"t": 1151.22, "methode": "progres", "args": [13, 150, "page_0013.png"]}
+{"t": 1157.2, "methode": "stage", "args": ["Page 14/150 — page_0014.png (traduction)"]}
+{"t": 1157.2, "methode": "progres", "args": [14, 150, "page_0014.png"]}
+{"t": 1167.04, "methode": "stage", "args": ["Page 15/150 — page_0015.png (traduction)"]}
+{"t": 1167.04, "methode": "progres", "args": [15, 150, "page_0015.png"]}
+{"t": 1177.49, "methode": "stage", "args": ["Page 16/150 — page_0016.png (traduction)"]}
+{"t": 1177.49, "methode": "progres", "args": [16, 150, "page_0016.png"]}
+{"t": 1184.54, "methode": "stage", "args": ["Page 17/150 — page_0017.png (traduction)"]}
+{"t": 1184.54, "methode": "progres", "args": [17, 150, "page_0017.png"]}
+{"t": 1199.04, "methode": "stage", "args": ["Page 18/150 — page_0018.png (traduction)"]}
+{"t": 1199.04, "methode": "progres", "args": [18, 150, "page_0018.png"]}
+{"t": 1206.12, "methode": "stage", "args": ["Page 19/150 — page_0019.png (traduction)"]}
+{"t": 1206.12, "methode": "progres", "args": [19, 150, "page_0019.png"]}
+{"t": 1214.86, "methode": "stage", "args": ["Page 20/150 — page_0020.png (traduction)"]}
+{"t": 1214.86, "methode": "progres", "args": [20, 150, "page_0020.png"]}
+{"t": 1225.95, "methode": "stage", "args": ["Page 21/150 — page_0021.png (traduction)"]}
+{"t": 1225.95, "methode": "progres", "args": [21, 150, "page_0021.png"]}
+{"t": 1233.9, "methode": "stage", "args": ["Page 22/150 — page_0022.png (traduction)"]}
+{"t": 1233.9, "methode": "progres", "args": [22, 150, "page_0022.png"]}
+{"t": 1242.91, "methode": "stage", "args": ["Page 23/150 — page_0023.png (traduction)"]}
+{"t": 1242.91, "methode": "progres", "args": [23, 150, "page_0023.png"]}
+{"t": 1249.85, "methode": "stage", "args": ["Page 24/150 — page_0024.png (traduction)"]}
+{"t": 1249.85, "methode": "progres", "args": [24, 150, "page_0024.png"]}
+{"t": 1253.16, "methode": "stage", "args": ["Page 25/150 — page_0025.png (traduction)"]}
+{"t": 1253.16, "methode": "progres", "args": [25, 150, "page_0025.png"]}
+{"t": 1269.83, "methode": "stage", "args": ["Page 26/150 — page_0026.png (traduction)"]}
+{"t": 1269.83, "methode": "progres", "args": [26, 150, "page_0026.png"]}
+{"t": 1278.56, "methode": "stage", "args": ["Page 27/150 — page_0027.png (traduction)"]}
+{"t": 1278.56, "methode": "progres", "args": [27, 150, "page_0027.png"]}
+{"t": 1283.63, "methode": "stage", "args": ["Page 28/150 — page_0028.png (traduction)"]}
+{"t": 1283.63, "methode": "progres", "args": [28, 150, "page_0028.png"]}
+{"t": 1294.23, "methode": "stage", "args": ["Page 29/150 — page_0029.png (traduction)"]}
+{"t": 1294.23, "methode": "progres", "args": [29, 150, "page_0029.png"]}
+{"t": 1303.87, "methode": "stage", "args": ["Page 30/150 — page_0030.png (traduction)"]}
+{"t": 1303.87, "methode": "progres", "args": [30, 150, "page_0030.png"]}
+{"t": 1313.08, "methode": "stage", "args": ["Page 31/150 — page_0031.png (traduction)"]}
+{"t": 1313.08, "methode": "progres", "args": [31, 150, "page_0031.png"]}
+{"t": 1325.37, "methode": "stage", "args": ["Page 32/150 — page_0032.png (traduction)"]}
+{"t": 1325.37, "methode": "progres", "args": [32, 150, "page_0032.png"]}
+{"t": 1334.89, "methode": "stage", "args": ["Page 33/150 — page_0033.png (traduction)"]}
+{"t": 1334.89, "methode": "progres", "args": [33, 150, "page_0033.png"]}
+{"t": 1341.99, "methode": "stage", "args": ["Page 34/150 — page_0034.png (traduction)"]}
+{"t": 1341.99, "methode": "progres", "args": [34, 150, "page_0034.png"]}
+{"t": 1345.07, "methode": "stage", "args": ["Page 35/150 — page_0035.png (traduction)"]}
+{"t": 1345.07, "methode": "progres", "args": [35, 150, "page_0035.png"]}
+{"t": 1350.68, "methode": "stage", "args": ["Page 36/150 — page_0036.png (traduction)"]}
+{"t": 1350.68, "methode": "progres", "args": [36, 150, "page_0036.png"]}
+{"t": 1356.97, "methode": "stage", "args": ["Page 37/150 — page_0037.png (traduction)"]}
+{"t": 1356.97, "methode": "progres", "args": [37, 150, "page_0037.png"]}
+{"t": 1360.54, "methode": "stage", "args": ["Page 38/150 — page_0038.png (traduction)"]}
+{"t": 1360.54, "methode": "progres", "args": [38, 150, "page_0038.png"]}
+{"t": 1367.09, "methode": "stage", "args": ["Page 39/150 — page_0039.png (traduction)"]}
+{"t": 1367.09, "methode": "progres", "args": [39, 150, "page_0039.png"]}
+{"t": 1376.29, "methode": "stage", "args": ["Page 40/150 — page_0040.png (traduction)"]}
+{"t": 1376.29, "methode": "progres", "args": [40, 150, "page_0040.png"]}
+{"t": 1385.2, "methode": "stage", "args": ["Page 41/150 — page_0041.png (traduction)"]}
+{"t": 1385.2, "methode": "progres", "args": [41, 150, "page_0041.png"]}
+{"t": 1393.96, "methode": "stage", "args": ["Page 42/150 — page_0042.png (traduction)"]}
+{"t": 1393.96, "methode": "progres", "args": [42, 150, "page_0042.png"]}
+{"t": 1404.35, "methode": "stage", "args": ["Page 43/150 — page_0043.png (traduction)"]}
+{"t": 1404.35, "methode": "progres", "args": [43, 150, "page_0043.png"]}
+{"t": 1413.6, "methode": "stage", "args": ["Page 44/150 — page_0044.png (traduction)"]}
+{"t": 1413.6, "methode": "progres", "args": [44, 150, "page_0044.png"]}
+{"t": 1418.62, "methode": "stage", "args": ["Page 45/150 — page_0045.png (traduction)"]}
+{"t": 1418.62, "methode": "progres", "args": [45, 150, "page_0045.png"]}
+{"t": 1426.78, "methode": "stage", "args": ["Page 46/150 — page_0046.png (traduction)"]}
+{"t": 1426.78, "methode": "progres", "args": [46, 150, "page_0046.png"]}
+{"t": 1438.15, "methode": "stage", "args": ["Page 47/150 — page_0047.png (traduction)"]}
+{"t": 1438.15, "methode": "progres", "args": [47, 150, "page_0047.png"]}
+{"t": 1448.71, "methode": "stage", "args": ["Page 48/150 — page_0048.png (traduction)"]}
+{"t": 1448.71, "methode": "progres", "args": [48, 150, "page_0048.png"]}
+{"t": 1451.9, "methode": "stage", "args": ["Page 49/150 — page_0049.png (traduction)"]}
+{"t": 1451.9, "methode": "progres", "args": [49, 150, "page_0049.png"]}
+{"t": 1459.94, "methode": "stage", "args": ["Page 50/150 — page_0050.png (traduction)"]}
+{"t": 1459.94, "methode": "progres", "args": [50, 150, "page_0050.png"]}
+{"t": 1463.98, "methode": "stage", "args": ["Page 51/150 — page_0051.png (traduction)"]}
+{"t": 1463.98, "methode": "progres", "args": [51, 150, "page_0051.png"]}
+{"t": 1468.41, "methode": "stage", "args": ["Page 52/150 — page_0052.png (traduction)"]}
+{"t": 1468.41, "methode": "progres", "args": [52, 150, "page_0052.png"]}
+{"t": 1473.5, "methode": "stage", "args": ["Page 53/150 — page_0053.png (traduction)"]}
+{"t": 1473.5, "methode": "progres", "args": [53, 150, "page_0053.png"]}
+{"t": 1482.57, "methode": "stage", "args": ["Page 54/150 — page_0054.png (traduction)"]}
+{"t": 1482.57, "methode": "progres", "args": [54, 150, "page_0054.png"]}
+{"t": 1494.68, "methode": "stage", "args": ["Page 55/150 — page_0055.png (traduction)"]}
+{"t": 1494.68, "methode": "progres", "args": [55, 150, "page_0055.png"]}
+{"t": 1506.0, "methode": "stage", "args": ["Page 56/150 — page_0056.png (traduction)"]}
+{"t": 1506.0, "methode": "progres", "args": [56, 150, "page_0056.png"]}
+{"t": 1518.47, "methode": "stage", "args": ["Page 57/150 — page_0057.png (traduction)"]}
+{"t": 1518.47, "methode": "progres", "args": [57, 150, "page_0057.png"]}
+{"t": 1527.43, "methode": "stage", "args": ["Page 58/150 — page_0058.png (traduction)"]}
+{"t": 1527.43, "methode": "progres", "args": [58, 150, "page_0058.png"]}
+{"t": 1536.35, "methode": "stage", "args": ["Page 59/150 — page_0059.png (traduction)"]}
+{"t": 1536.35, "methode": "progres", "args": [59, 150, "page_0059.png"]}
+{"t": 1552.61, "methode": "stage", "args": ["Page 60/150 — page_0060.png (traduction)"]}
+{"t": 1552.61, "methode": "progres", "args": [60, 150, "page_0060.png"]}
+{"t": 1569.31, "methode": "stage", "args": ["Page 61/150 — page_0061.png (traduction)"]}
+{"t": 1569.31, "methode": "progres", "args": [61, 150, "page_0061.png"]}
+{"t": 1585.56, "methode": "stage", "args": ["Page 62/150 — page_0062.png (traduction)"]}
+{"t": 1585.56, "methode": "progres", "args": [62, 150, "page_0062.png"]}
+{"t": 1598.28, "methode": "stage", "args": ["Page 63/150 — page_0063.png (traduction)"]}
+{"t": 1598.28, "methode": "progres", "args": [63, 150, "page_0063.png"]}
+{"t": 1608.5, "methode": "stage", "args": ["Page 64/150 — page_0064.png (traduction)"]}
+{"t": 1608.5, "methode": "progres", "args": [64, 150, "page_0064.png"]}
+{"t": 1624.55, "methode": "stage", "args": ["Page 65/150 — page_0065.png (traduction)"]}
+{"t": 1624.55, "methode": "progres", "args": [65, 150, "page_0065.png"]}
+{"t": 1634.3, "methode": "stage", "args": ["Page 66/150 — page_0066.png (traduction)"]}
+{"t": 1634.3, "methode": "progres", "args": [66, 150, "page_0066.png"]}
+{"t": 1640.05, "methode": "stage", "args": ["Page 67/150 — page_0067.png (traduction)"]}
+{"t": 1640.05, "methode": "progres", "args": [67, 150, "page_0067.png"]}
+{"t": 1651.02, "methode": "stage", "args": ["Page 68/150 — page_0068.png (traduction)"]}
+{"t": 1651.02, "methode": "progres", "args": [68, 150, "page_0068.png"]}
+{"t": 1662.33, "methode": "stage", "args": ["Page 69/150 — page_0069.png (traduction)"]}
+{"t": 1662.33, "methode": "progres", "args": [69, 150, "page_0069.png"]}
+{"t": 1672.09, "methode": "stage", "args": ["Page 70/150 — page_0070.png (traduction)"]}
+{"t": 1672.09, "methode": "progres", "args": [70, 150, "page_0070.png"]}
+{"t": 1683.08, "methode": "stage", "args": ["Page 71/150 — page_0071.png (traduction)"]}
+{"t": 1683.08, "methode": "progres", "args": [71, 150, "page_0071.png"]}
+{"t": 1693.91, "methode": "stage", "args": ["Page 72/150 — page_0072.png (traduction)"]}
+{"t": 1693.91, "methode": "progres", "args": [72, 150, "page_0072.png"]}
+{"t": 1700.47, "methode": "stage", "args": ["Page 73/150 — page_0073.png (traduction)"]}
+{"t": 1700.47, "methode": "progres", "args": [73, 150, "page_0073.png"]}
+{"t": 1707.51, "methode": "stage", "args": ["Page 74/150 — page_0074.png (traduction)"]}
+{"t": 1707.51, "methode": "progres", "args": [74, 150, "page_0074.png"]}
+{"t": 1715.85, "methode": "stage", "args": ["Page 75/150 — page_0075.png (traduction)"]}
+{"t": 1715.85, "methode": "progres", "args": [75, 150, "page_0075.png"]}
+{"t": 1722.31, "methode": "stage", "args": ["Page 76/150 — page_0076.png (traduction)"]}
+{"t": 1722.31, "methode": "progres", "args": [76, 150, "page_0076.png"]}
+{"t": 1727.12, "methode": "stage", "args": ["Page 77/150 — page_0077.png (traduction)"]}
+{"t": 1727.12, "methode": "progres", "args": [77, 150, "page_0077.png"]}
+{"t": 1727.62, "methode": "stage", "args": ["Page 78/150 — page_0078.png (traduction)"]}
+{"t": 1727.62, "methode": "progres", "args": [78, 150, "page_0078.png"]}
+{"t": 1728.14, "methode": "stage", "args": ["Page 79/150 — page_0079.png (traduction)"]}
+{"t": 1728.14, "methode": "progres", "args": [79, 150, "page_0079.png"]}
+{"t": 1732.46, "methode": "stage", "args": ["Page 80/150 — page_0080.png (traduction)"]}
+{"t": 1732.46, "methode": "progres", "args": [80, 150, "page_0080.png"]}
+{"t": 1744.81, "methode": "stage", "args": ["Page 81/150 — page_0081.png (traduction)"]}
+{"t": 1744.81, "methode": "progres", "args": [81, 150, "page_0081.png"]}
+{"t": 1764.13, "methode": "stage", "args": ["Page 82/150 — page_0082.png (traduction)"]}
+{"t": 1764.13, "methode": "progres", "args": [82, 150, "page_0082.png"]}
+{"t": 1780.26, "methode": "stage", "args": ["Page 83/150 — page_0083.png (traduction)"]}
+{"t": 1780.26, "methode": "progres", "args": [83, 150, "page_0083.png"]}
+{"t": 1795.12, "methode": "stage", "args": ["Page 84/150 — page_0084.png (traduction)"]}
+{"t": 1795.12, "methode": "progres", "args": [84, 150, "page_0084.png"]}
+{"t": 1803.91, "methode": "stage", "args": ["Page 85/150 — page_0085.png (traduction)"]}
+{"t": 1803.91, "methode": "progres", "args": [85, 150, "page_0085.png"]}
+{"t": 1813.18, "methode": "stage", "args": ["Page 86/150 — page_0086.png (traduction)"]}
+{"t": 1813.18, "methode": "progres", "args": [86, 150, "page_0086.png"]}
+{"t": 1818.41, "methode": "stage", "args": ["Page 87/150 — page_0087.png (traduction)"]}
+{"t": 1818.41, "methode": "progres", "args": [87, 150, "page_0087.png"]}
+{"t": 1833.48, "methode": "stage", "args": ["Page 88/150 — page_0088.png (traduction)"]}
+{"t": 1833.48, "methode": "progres", "args": [88, 150, "page_0088.png"]}
+{"t": 1853.36, "methode": "stage", "args": ["Page 89/150 — page_0089.png (traduction)"]}
+{"t": 1853.36, "methode": "progres", "args": [89, 150, "page_0089.png"]}
+{"t": 1866.49, "methode": "stage", "args": ["Page 90/150 — page_0090.png (traduction)"]}
+{"t": 1866.49, "methode": "progres", "args": [90, 150, "page_0090.png"]}
+{"t": 1879.78, "methode": "stage", "args": ["Page 91/150 — page_0091.png (traduction)"]}
+{"t": 1879.78, "methode": "progres", "args": [91, 150, "page_0091.png"]}
+{"t": 1894.71, "methode": "stage", "args": ["Page 92/150 — page_0092.png (traduction)"]}
+{"t": 1894.71, "methode": "progres", "args": [92, 150, "page_0092.png"]}
+{"t": 1902.72, "methode": "stage", "args": ["Page 93/150 — page_0093.png (traduction)"]}
+{"t": 1902.72, "methode": "progres", "args": [93, 150, "page_0093.png"]}
+{"t": 1912.9, "methode": "stage", "args": ["Page 94/150 — page_0094.png (traduction)"]}
+{"t": 1912.9, "methode": "progres", "args": [94, 150, "page_0094.png"]}
+{"t": 1931.83, "methode": "stage", "args": ["Page 95/150 — page_0095.png (traduction)"]}
+{"t": 1931.83, "methode": "progres", "args": [95, 150, "page_0095.png"]}
+{"t": 1942.32, "methode": "stage", "args": ["Page 96/150 — page_0096.png (traduction)"]}
+{"t": 1942.32, "methode": "progres", "args": [96, 150, "page_0096.png"]}
+{"t": 1958.87, "methode": "stage", "args": ["Page 97/150 — page_0097.png (traduction)"]}
+{"t": 1958.87, "methode": "progres", "args": [97, 150, "page_0097.png"]}
+{"t": 1968.99, "methode": "stage", "args": ["Page 98/150 — page_0098.png (traduction)"]}
+{"t": 1968.99, "methode": "progres", "args": [98, 150, "page_0098.png"]}
+{"t": 1976.97, "methode": "stage", "args": ["Page 99/150 — page_0099.png (traduction)"]}
+{"t": 1976.97, "methode": "progres", "args": [99, 150, "page_0099.png"]}
+{"t": 1985.75, "methode": "stage", "args": ["Page 100/150 — page_0100.png (traduction)"]}
+{"t": 1985.75, "methode": "progres", "args": [100, 150, "page_0100.png"]}
+{"t": 1992.39, "methode": "stage", "args": ["Page 101/150 — page_0101.png (traduction)"]}
+{"t": 1992.39, "methode": "progres", "args": [101, 150, "page_0101.png"]}
+{"t": 2006.63, "methode": "stage", "args": ["Page 102/150 — page_0102.png (traduction)"]}
+{"t": 2006.63, "methode": "progres", "args": [102, 150, "page_0102.png"]}
+{"t": 2016.88, "methode": "stage", "args": ["Page 103/150 — page_0103.png (traduction)"]}
+{"t": 2016.88, "methode": "progres", "args": [103, 150, "page_0103.png"]}
+{"t": 2023.79, "methode": "stage", "args": ["Page 104/150 — page_0104.png (traduction)"]}
+{"t": 2023.79, "methode": "progres", "args": [104, 150, "page_0104.png"]}
+{"t": 2037.85, "methode": "stage", "args": ["Page 105/150 — page_0105.png (traduction)"]}
+{"t": 2037.85, "methode": "progres", "args": [105, 150, "page_0105.png"]}
+{"t": 2045.54, "methode": "stage", "args": ["Page 106/150 — page_0106.png (traduction)"]}
+{"t": 2045.54, "methode": "progres", "args": [106, 150, "page_0106.png"]}
+{"t": 2053.42, "methode": "stage", "args": ["Page 107/150 — page_0107.png (traduction)"]}
+{"t": 2053.42, "methode": "progres", "args": [107, 150, "page_0107.png"]}
+{"t": 2058.82, "methode": "stage", "args": ["Page 108/150 — page_0108.png (traduction)"]}
+{"t": 2058.82, "methode": "progres", "args": [108, 150, "page_0108.png"]}
+{"t": 2063.03, "methode": "stage", "args": ["Page 109/150 — page_0109.png (traduction)"]}
+{"t": 2063.03, "methode": "progres", "args": [109, 150, "page_0109.png"]}
+{"t": 2063.54, "methode": "stage", "args": ["Page 110/150 — page_0110.png (traduction)"]}
+{"t": 2063.54, "methode": "progres", "args": [110, 150, "page_0110.png"]}
+{"t": 2064.08, "methode": "stage", "args": ["Page 111/150 — page_0111.png (traduction)"]}
+{"t": 2064.08, "methode": "progres", "args": [111, 150, "page_0111.png"]}
+{"t": 2073.64, "methode": "stage", "args": ["Page 112/150 — page_0112.png (traduction)"]}
+{"t": 2073.64, "methode": "progres", "args": [112, 150, "page_0112.png"]}
+{"t": 2081.98, "methode": "stage", "args": ["Page 113/150 — page_0113.png (traduction)"]}
+{"t": 2081.98, "methode": "progres", "args": [113, 150, "page_0113.png"]}
+{"t": 2087.17, "methode": "stage", "args": ["Page 114/150 — page_0114.png (traduction)"]}
+{"t": 2087.17, "methode": "progres", "args": [114, 150, "page_0114.png"]}
+{"t": 2094.57, "methode": "stage", "args": ["Page 115/150 — page_0115.png (traduction)"]}
+{"t": 2094.57, "methode": "progres", "args": [115, 150, "page_0115.png"]}
+{"t": 2100.47, "methode": "stage", "args": ["Page 116/150 — page_0116.png (traduction)"]}
+{"t": 2100.47, "methode": "progres", "args": [116, 150, "page_0116.png"]}
+{"t": 2110.46, "methode": "stage", "args": ["Page 117/150 — page_0117.png (traduction)"]}
+{"t": 2110.46, "methode": "progres", "args": [117, 150, "page_0117.png"]}
+{"t": 2115.52, "methode": "stage", "args": ["Page 118/150 — page_0118.png (traduction)"]}
+{"t": 2115.52, "methode": "progres", "args": [118, 150, "page_0118.png"]}
+{"t": 2124.87, "methode": "stage", "args": ["Page 119/150 — page_0119.png (traduction)"]}
+{"t": 2124.87, "methode": "progres", "args": [119, 150, "page_0119.png"]}
+{"t": 2137.2, "methode": "stage", "args": ["Page 120/150 — page_0120.png (traduction)"]}
+{"t": 2137.2, "methode": "progres", "args": [120, 150, "page_0120.png"]}
+{"t": 2150.5, "methode": "stage", "args": ["Page 121/150 — page_0121.png (traduction)"]}
+{"t": 2150.5, "methode": "progres", "args": [121, 150, "page_0121.png"]}
+{"t": 2161.04, "methode": "stage", "args": ["Page 122/150 — page_0122.png (traduction)"]}
+{"t": 2161.04, "methode": "progres", "args": [122, 150, "page_0122.png"]}
+{"t": 2167.13, "methode": "stage", "args": ["Page 123/150 — page_0123.png (traduction)"]}
+{"t": 2167.13, "methode": "progres", "args": [123, 150, "page_0123.png"]}
+{"t": 2175.4, "methode": "stage", "args": ["Page 124/150 — page_0124.png (traduction)"]}
+{"t": 2175.4, "methode": "progres", "args": [124, 150, "page_0124.png"]}
+{"t": 2185.71, "methode": "stage", "args": ["Page 125/150 — page_0125.png (traduction)"]}
+{"t": 2185.71, "methode": "progres", "args": [125, 150, "page_0125.png"]}
+{"t": 2201.2, "methode": "stage", "args": ["Page 126/150 — page_0126.png (traduction)"]}
+{"t": 2201.2, "methode": "progres", "args": [126, 150, "page_0126.png"]}
+{"t": 2214.9, "methode": "stage", "args": ["Page 127/150 — page_0127.png (traduction)"]}
+{"t": 2214.9, "methode": "progres", "args": [127, 150, "page_0127.png"]}
+{"t": 2226.39, "methode": "stage", "args": ["Page 128/150 — page_0128.png (traduction)"]}
+{"t": 2226.39, "methode": "progres", "args": [128, 150, "page_0128.png"]}
+{"t": 2240.04, "methode": "stage", "args": ["Page 129/150 — page_0129.png (traduction)"]}
+{"t": 2240.04, "methode": "progres", "args": [129, 150, "page_0129.png"]}
+{"t": 2254.0, "methode": "stage", "args": ["Page 130/150 — page_0130.png (traduction)"]}
+{"t": 2254.0, "methode": "progres", "args": [130, 150, "page_0130.png"]}
+{"t": 2265.2, "methode": "stage", "args": ["Page 131/150 — page_0131.png (traduction)"]}
+{"t": 2265.2, "methode": "progres", "args": [131, 150, "page_0131.png"]}
+{"t": 2274.92, "methode": "stage", "args": ["Page 132/150 — page_0132.png (traduction)"]}
+{"t": 2274.92, "methode": "progres", "args": [132, 150, "page_0132.png"]}
+{"t": 2290.96, "methode": "stage", "args": ["Page 133/150 — page_0133.png (traduction)"]}
+{"t": 2290.96, "methode": "progres", "args": [133, 150, "page_0133.png"]}
+{"t": 2303.08, "methode": "stage", "args": ["Page 134/150 — page_0134.png (traduction)"]}
+{"t": 2303.08, "methode": "progres", "args": [134, 150, "page_0134.png"]}
+{"t": 2305.22, "methode": "stage", "args": ["Page 135/150 — page_0135.png (traduction)"]}
+{"t": 2305.22, "methode": "progres", "args": [135, 150, "page_0135.png"]}
+{"t": 2312.17, "methode": "stage", "args": ["Page 136/150 — page_0136.png (traduction)"]}
+{"t": 2312.17, "methode": "progres", "args": [136, 150, "page_0136.png"]}
+{"t": 2322.09, "methode": "stage", "args": ["Page 137/150 — page_0137.png (traduction)"]}
+{"t": 2322.09, "methode": "progres", "args": [137, 150, "page_0137.png"]}
+{"t": 2332.68, "methode": "stage", "args": ["Page 138/150 — page_0138.png (traduction)"]}
+{"t": 2332.68, "methode": "progres", "args": [138, 150, "page_0138.png"]}
+{"t": 2339.63, "methode": "stage", "args": ["Page 139/150 — page_0139.png (traduction)"]}
+{"t": 2339.63, "methode": "progres", "args": [139, 150, "page_0139.png"]}
+{"t": 2348.87, "methode": "stage", "args": ["Page 140/150 — page_0140.png (traduction)"]}
+{"t": 2348.87, "methode": "progres", "args": [140, 150, "page_0140.png"]}
+{"t": 2358.76, "methode": "stage", "args": ["Page 141/150 — page_0141.png (traduction)"]}
+{"t": 2358.76, "methode": "progres", "args": [141, 150, "page_0141.png"]}
+{"t": 2367.54, "methode": "stage", "args": ["Page 142/150 — page_0142.png (traduction)"]}
+{"t": 2367.54, "methode": "progres", "args": [142, 150, "page_0142.png"]}
+{"t": 2372.8, "methode": "stage", "args": ["Page 143/150 — page_0143.png (traduction)"]}
+{"t": 2372.8, "methode": "progres", "args": [143, 150, "page_0143.png"]}
+{"t": 2376.03, "methode": "stage", "args": ["Page 144/150 — page_0144.png (traduction)"]}
+{"t": 2376.03, "methode": "progres", "args": [144, 150, "page_0144.png"]}
+{"t": 2381.3, "methode": "stage", "args": ["Page 145/150 — page_0145.png (traduction)"]}
+{"t": 2381.3, "methode": "progres", "args": [145, 150, "page_0145.png"]}
+{"t": 2386.87, "methode": "stage", "args": ["Page 146/150 — page_0146.png (traduction)"]}
+{"t": 2386.87, "methode": "progres", "args": [146, 150, "page_0146.png"]}
+{"t": 2391.36, "methode": "stage", "args": ["Page 147/150 — page_0147.png (traduction)"]}
+{"t": 2391.36, "methode": "progres", "args": [147, 150, "page_0147.png"]}
+{"t": 2392.09, "methode": "stage", "args": ["Page 148/150 — page_0148.png (traduction)"]}
+{"t": 2392.09, "methode": "progres", "args": [148, 150, "page_0148.png"]}
+{"t": 2392.72, "methode": "stage", "args": ["Page 149/150 — page_0149.png (traduction)"]}
+{"t": 2392.72, "methode": "progres", "args": [149, 150, "page_0149.png"]}
+{"t": 2393.85, "methode": "stage", "args": ["Page 150/150 — page_0150.png (traduction)"]}
+{"t": 2393.85, "methode": "progres", "args": [150, 150, "page_0150.png"]}
+{"t": 2397.41, "methode": "phase", "args": ["finalisation", ""]}

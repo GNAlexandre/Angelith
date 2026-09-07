@@ -1,0 +1,52 @@
+# Configuration ruff — voir docs/COMMANDES.fr.md pour la commande.
+#
+# Pas de `pyproject.toml` : le projet n'est pas empaqueté et ne veut pas l'être
+# (cf. `core/version.py`). Ruff lit `ruff.toml` aussi bien.#
+# ⚠ MISE À JOUR 2.31.0 (2026-09-06), lot 37 : **la phrase ci-dessus est LEVÉE pour moitié.**
+# `pyproject.toml` EXISTE depuis ce lot — le projet est empaqueté (gel un-dossier, installeur).
+# Ce qui TIENT est la conclusion : cette configuration-ci ne déménage pas. Les deux outils
+# lisent leur fichier dédié en priorité, un lot d'empaquetage n'a pas à changer ce que le
+# linter accepte ni ce que la couverture mesure, et un déménagement gratuit se paierait en
+# diff illisible sur un fichier que la CI exécute à chaque push.
+#
+# ## Ce que cette configuration cherche, et ce qu'elle ne cherche pas
+#
+# Le dépôt portait déjà 50 `# noqa:` — E402, BLE001, D102, F401, B018 — écrits pour un
+# linter qui n'a jamais tourné. Le but ici est donc de RENDRE VRAIES ces suppressions, pas
+# d'imposer un style neuf à 57 000 lignes qui en ont déjà un.
+#
+# La sélection vise les DÉFAUTS (code mort, import fantôme, `raise` qui perd sa cause), pas
+# la mise en forme. Les familles écartées l'ont été sur mesure, pas au jugé :
+#
+#   E501  6 667 à 88 colonnes, 212 au-delà de 100. Autrement dit 99,6 % du dépôt tient déjà
+#         en 100 colonnes : `line-length` ci-dessous ACTE cette convention pour l'outillage,
+#         mais réécrire les 212 exceptions — souvent de la prose commentée — serait un diff
+#         de pur bruit. À reprendre fichier par fichier, pas en une fois.
+#   B023  28 occurrences, TOUTES dans la boucle par chapitre de `pipeline/orchestrator.py`,
+#         et toutes bénignes : la closure est consommée par `_run_blocks` DANS la même
+#         itération, elle ne survit jamais à son tour de boucle. Vérifié une à une.
+#   BLE001  44 `except Exception`. Le dépôt les défend nommément là où ils sont (`core/power.py`,
+#         `core/llm.py`, `core/reporter.py` — du best-effort où lever serait pire). 44 `noqa`
+#         pour acter ce qui est déjà documenté n'apprendrait rien.
+#   E702, E741, B905, I001, SIM, UP, C4  du style, sans défaut derrière. 
+#
+# Une famille écartée n'est pas une famille interdite : la rouvrir demande de traiter ses
+# occurrences, pas de les masquer.
+line-length = 100
+target-version = "py312"
+exclude = ["build", "sources", "manga_models", "__pycache__"]
+
+[lint]
+select = [
+    "E4",    # imports mal placés / groupés — ce que les `# noqa: E402` visent déjà
+    "E9",    # erreurs de syntaxe et d'exécution
+    "F",     # pyflakes : code mort, import fantôme, nom indéfini
+    "W",     # espaces en fin de ligne
+    "B011",  # `assert False` — effacé par `python -O`, donc un test qui ne teste rien
+    "B904",  # `raise` dans un `except` sans `from` : la cause d'origine est perdue
+]
+
+[lint.per-file-ignores]
+# Les tests nomment leurs cas en français, avec des majuscules qui portent l'intention
+# (`test_un_ruby_par_CARACTERE_enregistre_le_COMPOSE`). C'est délibéré et c'est lisible.
+"tests/*" = ["N802"]

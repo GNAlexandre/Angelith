@@ -275,6 +275,32 @@ def bande_de_texte(bandes: list[tuple[int, int, int, int]], pas: float) -> tuple
     return (haut, bas)
 
 
+def _fragments_entre_creux(bande: tuple[int, int, int, int],
+                           creux: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Les morceaux de colonne que les gouttières `creux` laissent entre elles, en `(y, y)`."""
+    _x0, _x1, y0, y1 = bande
+    fragments, curseur = [], y0
+    for a, b in creux:
+        if a > curseur:
+            fragments.append((curseur, a))
+        curseur = b
+    if curseur < y1:
+        fragments.append((curseur, y1))
+    return fragments
+
+
+def _est_mobilier(frag: tuple[int, int], court: float, haut: float, bas: float) -> bool:
+    """Court ET hors de la justification.
+
+    La brièveté ne suffit pas : mesuré page 100, la réplique `「は、はやく金を——」` se
+    termine par un `」` isolé derrière un long tiret, ce qui en fait un fragment court
+    séparé par une large gouttière — exactement le profil d'un numéro de page. Sans le
+    critère de position, la brique mangeait le crochet fermant."""
+    if (frag[1] - frag[0]) >= court:
+        return False
+    return frag[1] <= haut or frag[0] >= bas
+
+
 def elaguer(encre: np.ndarray, bande: tuple[int, int, int, int], pas: float,
             texte: tuple[float, float] | None = None):
     """Retire d'une colonne le mobilier qui lui est **collé** — `(colonne, [mobilier])`.
@@ -290,41 +316,24 @@ def elaguer(encre: np.ndarray, bande: tuple[int, int, int, int], pas: float,
     une gouttière d'une cellule et demie, n'appartient pas à la colonne. On n'élague qu'aux
     **extrémités** — un trou au milieu d'une colonne est un cas de typographie qu'on préfère
     laisser passer plutôt que de couper une phrase en deux."""
-    x0, x1, y0, y1 = bande
+    x0, x1, _y0, _y1 = bande
     if pas <= 0:
         return bande, []
     creux = [g for g in gouttieres(encre, bande) if (g[1] - g[0]) >= MOBILIER_ECART_FRAC * pas]
     if not creux:
         return bande, []
 
-    fragments, curseur = [], y0
-    for a, b in creux:
-        if a > curseur:
-            fragments.append((curseur, a))
-        curseur = b
-    if curseur < y1:
-        fragments.append((curseur, y1))
+    fragments = _fragments_entre_creux(bande, creux)
     if len(fragments) < 2:
         return bande, []
 
     court = MOBILIER_CASES_MAX * pas
     haut, bas = texte if texte else (float("inf"), float("-inf"))
 
-    def rejetable(frag: tuple[int, int]) -> bool:
-        """Court ET hors de la justification.
-
-        La brièveté ne suffit pas : mesuré page 100, la réplique `「は、はやく金を——」` se
-        termine par un `」` isolé derrière un long tiret, ce qui en fait un fragment court
-        séparé par une large gouttière — exactement le profil d'un numéro de page. Sans le
-        critère de position, la brique mangeait le crochet fermant."""
-        if (frag[1] - frag[0]) >= court:
-            return False
-        return frag[1] <= haut or frag[0] >= bas
-
     mobilier = []
-    while len(fragments) > 1 and rejetable(fragments[0]):
+    while len(fragments) > 1 and _est_mobilier(fragments[0], court, haut, bas):
         mobilier.append(fragments.pop(0))
-    while len(fragments) > 1 and rejetable(fragments[-1]):
+    while len(fragments) > 1 and _est_mobilier(fragments[-1], court, haut, bas):
         mobilier.append(fragments.pop())
     if not mobilier:
         return bande, []

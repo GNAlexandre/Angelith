@@ -60,6 +60,51 @@ _SEUIL_PIVOT = 0.15
 _CHAMPS_RENDUS = ("nom", "pluriel")
 
 
+#: Nom LISIBLE d'un code de langue, pour les messages envoyés au modèle. Un prompt qui dit
+#: « bulles en anglais » fait un travail que « bulles en [en] » ne fait pas : les modèles
+#: raisonnent sur des noms de langue, pas sur des codes ISO.
+NOMS: dict[str, str] = {
+    "jp": "japonais", "ja": "japonais",
+    "en": "anglais",
+    "fr": "français",
+    "es": "espagnol",
+    "zh": "chinois",
+    "ko": "coréen",
+    "de": "allemand",
+    "it": "italien",
+    "pt": "portugais",
+    "ru": "russe",
+}
+
+
+def nom_langue(code: str | None, defaut: str = "langue source") -> str:
+    """Nom lisible d'un code de langue (`"en"` → `"anglais"`).
+
+    Un code inconnu est rendu tel quel plutôt que masqué : `langues.dossiers` est éditable
+    par l'utilisateur, et voir son propre code dans le message vaut mieux qu'un « langue
+    source » générique qui n'apprend rien au modèle.
+
+    ⚠ Nommée `nom_langue` et non `nom` : `nom` est un CHAMP du glossaire, et ce module s'en
+    sert comme variable locale dans `reparer_entree` et `auditer`. Une fonction du même nom
+    y serait masquée — silencieusement, et seulement dans certaines branches."""
+    c = (code or "").strip().lower()
+    return NOMS.get(c) or (c if c else defaut)
+
+
+#: Voyelles devant lesquelles « de » s'élide. Le `h` d'« hébreu » est muet, comme tous ceux
+#: qu'on rencontre en nom de langue.
+_ELISION = "aeiouyhéèêàâîïôûAEIOUYH"
+
+
+def du_langue(code: str | None, defaut: str = "langue source") -> str:
+    """« du japonais », « de l'anglais » — l'article contracté qui va avec le nom.
+
+    Composer « du » + le nom rend « du anglais » une fois sur deux. Un message d'erreur qui
+    écorche la langue qu'il désigne se lit mal au moment précis où on le lit vite."""
+    n = nom_langue(code, defaut)
+    return f"de l'{n}" if n[:1] in _ELISION else f"du {n}"
+
+
 def contient_cjk(s: str) -> bool:
     return bool(CJK.search(s or ""))
 
@@ -213,19 +258,29 @@ def auditer(glossaire: dict) -> list[str]:
     return lignes
 
 
-def consigne_pivot_cjk() -> str:
+def consigne_pivot_cjk(pack=None) -> str:
     """Consigne injectée dans le MESSAGE du terminologue quand le pivot est CJK.
 
     Dans le message et non dans `prompts/terminologue.md` : ce prompt système est partagé
     avec la brique manga et lu à chaque bloc de chaque œuvre, dont la grande majorité a un
-    pivot latin. Une règle de romanisation n'y a rien à faire à demeure."""
+    pivot latin. Une règle de romanisation n'y a rien à faire à demeure.
+
+    ⚠ Seule la ligne `nom` dépend de la langue CIBLE — le reste (« pas de caractère japonais
+    dans `nom` », la forme des `termes_source`) vaut pour toute cible en alphabet latin. C'est
+    donc elle seule qu'un pack surcharge, et non la consigne entière : un pack anglais n'a
+    aucune raison de réécrire une règle qui ne le concerne pas."""
+    rendu = (
+        "- `nom` = ce que le lecteur FRANÇAIS lira. Toujours en alphabet latin. Romanisation "
+        "Hepburn s'il s'agit d'un nom propre (personnage, lieu, organisation) ; traduction "
+        "française s'il s'agit d'un nom commun, d'un concept, d'un titre ou d'une fonction."
+    )
+    if pack is not None:
+        rendu = pack.consigne("romanisation_rendu", rendu)
     return (
         "# LANGUE DU BLOC — IMPORTANT\n"
         "Ce bloc est ta SEULE source, et il n'est pas écrit en alphabet latin.\n"
         "Pour chaque entrée :\n"
-        "- `nom` = ce que le lecteur FRANÇAIS lira. Toujours en alphabet latin. Romanisation "
-        "Hepburn s'il s'agit d'un nom propre (personnage, lieu, organisation) ; traduction "
-        "française s'il s'agit d'un nom commun, d'un concept, d'un titre ou d'une fonction.\n"
+        + rendu + "\n"
         "- `termes_source` = la graphie d'origine, telle qu'elle apparaît dans le bloc.\n"
         "N'écris JAMAIS de caractère japonais ou chinois dans `nom` ni dans `variantes`.\n"
         "Exemple : `- Yaeyamabuki | termes_source: 八重山吹 | Agence de chasse aux dragons.`"

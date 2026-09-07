@@ -1,0 +1,154 @@
+{
+  "_commentaire": [
+    "Workflow ComfyUI au FORMAT API pour Qwen-Image-2512 (transformeur GGUF Q4_1).",
+    "Réglage de RÉFÉRENCE : 50 pas, cfg 4, sans LoRA d'accélération.",
+    "Les marqueurs %prompt%, %prompt_negatif%, %graine%, %largeur%, %hauteur%, %pas% et",
+    "%guidage% sont substitués par illustration/comfyui.py. Un marqueur SEUL dans un champ",
+    "prend le type de sa valeur (%graine% devient un entier), un marqueur dans une phrase est",
+    "interpolé en texte.",
+    "⚠ Ce fichier ne porte NI %reference_1% NI %masque_1% NI %image_controle% : le moteur",
+    "refusera donc explicitement ces canaux, avec leur motif, plutôt que de les ignorer.",
+    "Conditionner sur une image de référence est le sujet du PLAN-25, pas de celui-ci.",
+    "Dérivé du template officiel `image_qwen_Image_2512` de comfyui-workflow-templates 0.11.50,",
+    "avec UNETLoader remplacé par UnetLoaderGGUF (ComfyUI-GGUF, Apache-2.0).",
+    "⚠ `device: \"cpu\"` sur le CLIPLoader n'est PAS un repli pour petite carte, c'est le réglage MESURÉ le plus rapide sur 20 Go : l'encodeur pèse 7 910 Mio et le transformeur 12 284 Mio, soit 20 194 Mio pour 20 464 Mio de VRAM. Les garder tous deux sur la carte fait basculer ComfyUI en mode « lowvram » (707 patches) et le pas de débruitage passe de ~10 s à ~64 s. Encoder sur CPU coûte quelques secondes une fois et rend la carte au transformeur."
+  ],
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Transformeur Qwen-Image-2512 Q4_1 (GGUF)"
+    },
+    "inputs": {
+      "unet_name": "qwen-image-2512-Q4_1.gguf"
+    }
+  },
+  "2": {
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "Décalage de bruit — 3.1, valeur du template officiel"
+    },
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "shift": 3.1
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Encodeur de texte Qwen2.5-VL-7B — sur CPU (cf. commentaire)"
+    },
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "cpu"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Prompt"
+    },
+    "inputs": {
+      "text": "%prompt%",
+      "clip": [
+        "3",
+        0
+      ]
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Prompt négatif"
+    },
+    "inputs": {
+      "text": "%prompt_negatif%",
+      "clip": [
+        "3",
+        0
+      ]
+    }
+  },
+  "6": {
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "Toile"
+    },
+    "inputs": {
+      "width": "%largeur%",
+      "height": "%hauteur%",
+      "batch_size": 1
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Échantillonnage"
+    },
+    "inputs": {
+      "model": [
+        "2",
+        0
+      ],
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "latent_image": [
+        "6",
+        0
+      ],
+      "seed": "%graine%",
+      "steps": "%pas%",
+      "cfg": "%guidage%",
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE"
+    },
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Décodage"
+    },
+    "inputs": {
+      "samples": [
+        "7",
+        0
+      ],
+      "vae": [
+        "8",
+        0
+      ]
+    }
+  },
+  "10": {
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Sortie (récupérée puis MARQUÉE par Angelith)"
+    },
+    "inputs": {
+      "images": [
+        "9",
+        0
+      ],
+      "filename_prefix": "angelith"
+    }
+  }
+}

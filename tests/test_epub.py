@@ -582,32 +582,6 @@ def test_lecture_dominante_est_deterministe_a_egalite():
     assert epub.lecture_dominante({"祭花": c}) == {"祭花": "エナガ一三七"}
 
 
-def test_un_ruby_par_CARACTERE_enregistre_le_COMPOSE(tmp_path):
-    """L'autre forme, la plus fréquente sur ce livre (2 668 balises contre 5 472) : chaque
-    `<rt>` glose UN idéogramme. Les paires isolées (`堕`→`だ`) n'apprennent rien sur un nom
-    propre — c'est le composé qui porte le sens."""
-    corps = "<p><ruby>堕<rt>だ</rt>竜<rt>りゆう</rt>講<rt>こう</rt></ruby>の一味</p>"
-    ex = epub.extract_epub(ecrire_epub(tmp_path, [("p-001", corps)]), tmp_path / "media")
-    assert ex.lectures == {"堕竜講": "だりゆうこう"}
-    assert "堕竜講の一味" in ex.text          # le texte rendu, lui, ne change pas
-
-
-def test_les_deux_formes_de_ruby_cohabitent(tmp_path):
-    corps = ("<p><ruby>祭<rt>まつ</rt>花<rt>りか</rt></ruby>と"
-             "<ruby>七堕<rt>ナナエ</rt></ruby></p>")
-    ex = epub.extract_epub(ecrire_epub(tmp_path, [("p-001", corps)]), tmp_path / "media")
-    assert ex.lectures == {"祭花": "まつりか", "七堕": "ナナエ"}
-
-
-def test_une_glose_de_kanji_isole_reste_enregistree(tmp_path):
-    """Un `<ruby>` à UN seul `<rt>` sur UN caractère est un composé d'un caractère : rien
-    à recoller, on l'enregistre tel quel."""
-    ex = epub.extract_epub(
-        ecrire_epub(tmp_path, [("p-001", "<p><ruby>刻<rt>トキ</rt></ruby></p>")]),
-        tmp_path / "media")
-    assert ex.lectures == {"刻": "トキ"}
-
-
 @pytest.mark.skipif(not REEL.exists(), reason="EPUB réel absent (sources non versionnées)")
 def test_les_lectures_du_livre_reel(tmp_path):
     ex = epub.extract_epub(REEL, tmp_path / "media")

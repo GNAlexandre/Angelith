@@ -340,6 +340,57 @@ def limite_caracteres(text: str, max_chars: int, max_tokens: int | None) -> int:
     return max(1, min(max_chars, int(max_tokens / densite)))
 
 
+class _BlocEnCours:
+    """Le bloc en cours de constitution, et ceux déjà clos.
+
+    ⚠ C'étaient trois variables libres (`blocks`, `cur`, `size`) qu'un `nonlocal` reliait à
+    une fermeture `_flush`. Les tenir ensemble ne change rien au découpage : cela rend
+    seulement chaque branche lisible seule, au lieu d'obliger à remonter la fonction pour
+    savoir ce que « vider » touche."""
+
+    def __init__(self) -> None:
+        self.blocks: list[str] = []
+        self.cur: list[str] = []
+        self.size = 0
+
+    def vider(self) -> None:
+        """Clôt le bloc en cours, s'il y en a un."""
+        if self.cur:
+            self.blocks.append("\n\n".join(self.cur))
+            self.cur, self.size = [], 0
+
+    def ajouter(self, paragraphes: list[str], taille: int) -> None:
+        self.cur.extend(paragraphes)
+        self.size += taille
+
+
+def _ajouter_paragraphe_par_paragraphe(acc: _BlocEnCours, seg_paras: list[str],
+                                       max_chars: int) -> None:
+    """Contenu ordinaire (hors Partie), ou Partie trop grosse même avec la marge : repli sur
+    le découpage paragraphe par paragraphe historique.
+
+    `split_oversized` est TRANSPARENT tant qu'aucun paragraphe ne dépasse `max_chars` (il
+    renvoie `[p]`) : le découpage d'un texte sainement paragraphé est inchangé. Il ne
+    s'active que sur le cas pathologique d'un paragraphe géant, qui passait auparavant
+    entier et faisait exploser la taille du bloc."""
+    for p in seg_paras:
+        for q in split_oversized(p, max_chars):
+            if acc.cur and acc.size + len(q) > max_chars:
+                acc.vider()
+            acc.ajouter([q], len(q) + 2)
+
+
+def _ajouter_partie_entiere(acc: _BlocEnCours, seg_paras: list[str], seg_len: int,
+                            max_chars: int, max_with_tolerance: float) -> None:
+    """Partie qui rentre en entier (avec marge de tolérance si besoin) : jamais scindée
+    entre deux blocs."""
+    if acc.cur and acc.size + seg_len > max_with_tolerance:
+        acc.vider()
+    acc.ajouter(seg_paras, seg_len)
+    if acc.size > max_chars:
+        acc.vider()
+
+
 def split_blocks(text: str, max_chars: int, has_parts: bool = False,
                  part_tolerance: float = 0.20, *, max_tokens: int | None = None) -> list[str]:
     """Découpe `text` en blocs de `max_chars` caractères max. Si `has_parts` (le
@@ -360,41 +411,16 @@ def split_blocks(text: str, max_chars: int, has_parts: bool = False,
         return []
     max_chars = limite_caracteres(text, max_chars, max_tokens)
     max_with_tolerance = max_chars * (1 + part_tolerance)
-    blocks: list[str] = []
-    cur: list[str] = []
-    size = 0
 
-    def _flush() -> None:
-        nonlocal cur, size
-        if cur:
-            blocks.append("\n\n".join(cur))
-            cur, size = [], 0
-
+    acc = _BlocEnCours()
     for is_part, seg_paras in _segments_by_part(paras, has_parts):
         seg_len = sum(len(p) + 2 for p in seg_paras)
         if not is_part or seg_len > max_with_tolerance:
-            # Contenu ordinaire (hors Partie), ou Partie trop grosse même avec la
-            # marge : repli sur le découpage paragraphe par paragraphe historique.
-            for p in seg_paras:
-                # `split_oversized` est TRANSPARENT tant qu'aucun paragraphe ne dépasse
-                # `max_chars` (il renvoie [p]) : le découpage d'un texte sainement
-                # paragraphé est inchangé. Il ne s'active que sur le cas pathologique
-                # d'un paragraphe géant, qui passait auparavant entier et faisait
-                # exploser la taille du bloc.
-                for q in split_oversized(p, max_chars):
-                    if cur and size + len(q) > max_chars:
-                        _flush()
-                    cur.append(q); size += len(q) + 2
-            continue
-        # Partie qui rentre en entier (avec marge de tolérance si besoin) : jamais
-        # scindée entre deux blocs.
-        if cur and size + seg_len > max_with_tolerance:
-            _flush()
-        cur.extend(seg_paras); size += seg_len
-        if size > max_chars:
-            _flush()
-    _flush()
-    return blocks
+            _ajouter_paragraphe_par_paragraphe(acc, seg_paras, max_chars)
+        else:
+            _ajouter_partie_entiere(acc, seg_paras, seg_len, max_chars, max_with_tolerance)
+    acc.vider()
+    return acc.blocks
 
 
 def split_into_n(text: str, n: int) -> list[str]:
@@ -669,8 +695,8 @@ def apparier_chapitres(ref_bodies: list[str], pivot_sizes: list[int],
                      f"proportions" + (f" ({detail})" if detail else ""))
     if ecartees:
         perdu = sum(tailles[k] for k in ecartees)
-        notes.append(f"unité(s) de référence écartée(s) (hors corps, sans équivalent dans le "
-                     f"pivot) : n°" + ", ".join(str(k + 1) for k in ecartees)
+        notes.append("unité(s) de référence écartée(s) (hors corps, sans équivalent dans le "
+                     "pivot) : n°" + ", ".join(str(k + 1) for k in ecartees)
                      + f" — {perdu} caractère(s), {100 * perdu / total_ref:.1f} % du volume")
     return Appariement(groupes, indices, ecartees, notes)
 

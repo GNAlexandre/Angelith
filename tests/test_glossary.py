@@ -37,8 +37,8 @@ def test_save_no_yaml_anchors_regression():
     reloaded = yaml.safe_load(raw)
     assert len(reloaded["personnages"]) == 3
     # Les listes doivent être des objets INDÉPENDANTS (muter l'une ne doit pas affecter l'autre)
-    reloaded["personnages"][0]["variantes"].append("X")
-    assert reloaded["personnages"][1]["variantes"] == []
+    reloaded["personnages"][0]["cibles"]["fr"]["variantes"].append("X")
+    assert reloaded["personnages"][1]["cibles"]["fr"]["variantes"] == []
 
 
 def test_save_sections_separated_by_blank_line_and_banner():
@@ -56,7 +56,8 @@ def test_pluriel_field_roundtrip_save_load():
     g["creatures"] = [{"nom": "Leprechaun", "pluriel": "Leprechauns", "force": True}]
     glossary.save(g, "/tmp/test_pluriel_glossary.yaml")
     reloaded = yaml.safe_load(open("/tmp/test_pluriel_glossary.yaml", encoding="utf-8").read())
-    assert reloaded["creatures"][0]["pluriel"] == "Leprechauns"
+    # `pluriel` est un champ de RENDU : il descend sous `cibles.fr`.
+    assert reloaded["creatures"][0]["cibles"]["fr"]["pluriel"] == "Leprechauns"
 
 
 def test_pluriel_field_roundtrip_sectioned():

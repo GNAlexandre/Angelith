@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from pipeline import reporter
 from pipeline.reporter import Reporter, RichReporter
 
 
@@ -108,7 +109,13 @@ def test_perf_log_header_carries_version_date_and_command(tmp_path, monkeypatch)
     des perfs d'avant/après un changement de code."""
     from core.version import __version__
 
-    monkeypatch.setattr(sys, "argv", [r"C:\x\run_manga.py", "Mon Manga", "Vol.1", "--verbose"])
+    # ⚠ Le dossier est construit avec `Path`, donc NATIF à la plateforme. Ce test codait
+    # `C:\x\run_manga.py` : sur Linux, `\` n'est pas un séparateur, `Path(...).name` rend la
+    # chaîne entière — le code faisait ce qu'il fallait, c'est le chemin d'essai qui n'avait
+    # aucun sens sur cet OS. Le vrai `sys.argv[0]` est toujours natif.
+    dossier = tmp_path / "x"
+    monkeypatch.setattr(sys, "argv",
+                        [str(dossier / "run_manga.py"), "Mon Manga", "Vol.1", "--verbose"])
     log_path = tmp_path / "perf.log"
     Reporter().set_verbose_log(log_path)
 
@@ -117,7 +124,7 @@ def test_perf_log_header_carries_version_date_and_command(tmp_path, monkeypatch)
     assert len(entetes) == 1
     assert f"Angelith {__version__}" in entetes[0]
     assert "run_manga.py" in entetes[0]
-    assert r"C:\x" not in entetes[0]              # argv[0] réduit au nom du script
+    assert str(dossier) not in entetes[0]         # argv[0] réduit au nom du script
     assert '"Mon Manga"' in entetes[0]            # argument à espace : requotté, relançable
     assert datetime.date.today().isoformat() in entetes[0]
     # Pas de première ligne vide sur un fichier neuf.
@@ -377,3 +384,85 @@ def test_rich_reporter_suit_la_meme_regle(tmp_path, rich_reporter):
     rich_reporter.set_console_verbose(False)
     rich_reporter.verbose("ocr 0.40s")
     assert _lignes_perf(log_path) == ["ocr 0.40s"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROTATION DE perf.log
+#
+# Le fichier s'ouvre en "a" et les runs s'y empilent — c'est voulu. Mais sans plafond il
+# grossissait sur toute la vie du projet, et personne ne relit le début d'un fichier de 40 Mo.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_un_petit_log_n_est_pas_touche(tmp_path):
+    """L'empilement est tout l'intérêt du fichier : comparer deux runs se fait dans UN
+    fichier. On n'archive que quand il devient illisible."""
+    log = tmp_path / "perf.log"
+    log.write_text("run precedent\n", encoding="utf-8")
+
+    reporter._faire_tourner(log)
+
+    assert log.read_text(encoding="utf-8") == "run precedent\n"
+    assert not (tmp_path / "perf.log.1").exists()
+
+
+def test_au_dela_du_plafond_le_log_est_archive(tmp_path, monkeypatch):
+    monkeypatch.setattr(reporter, "TAILLE_MAX_LOG", 100)
+    log = tmp_path / "perf.log"
+    log.write_text("x" * 200, encoding="utf-8")
+
+    reporter._faire_tourner(log)
+
+    assert not log.exists()
+    assert (tmp_path / "perf.log.1").read_text(encoding="utf-8") == "x" * 200
+
+
+def test_les_archives_se_decalent_sans_s_ecraser(tmp_path, monkeypatch):
+    monkeypatch.setattr(reporter, "TAILLE_MAX_LOG", 100)
+    monkeypatch.setattr(reporter, "ARCHIVES_LOG", 3)
+    log = tmp_path / "perf.log"
+    for i in (1, 2):
+        (tmp_path / f"perf.log.{i}").write_text(f"archive {i}", encoding="utf-8")
+    log.write_text("y" * 200, encoding="utf-8")
+
+    reporter._faire_tourner(log)
+
+    assert (tmp_path / "perf.log.1").read_text(encoding="utf-8") == "y" * 200
+    assert (tmp_path / "perf.log.2").read_text(encoding="utf-8") == "archive 1"
+    assert (tmp_path / "perf.log.3").read_text(encoding="utf-8") == "archive 2"
+
+
+def test_la_plus_ancienne_archive_part(tmp_path, monkeypatch):
+    monkeypatch.setattr(reporter, "TAILLE_MAX_LOG", 100)
+    monkeypatch.setattr(reporter, "ARCHIVES_LOG", 2)
+    log = tmp_path / "perf.log"
+    for i in (1, 2):
+        (tmp_path / f"perf.log.{i}").write_text(f"archive {i}", encoding="utf-8")
+    log.write_text("z" * 200, encoding="utf-8")
+
+    reporter._faire_tourner(log)
+
+    assert (tmp_path / "perf.log.1").read_text(encoding="utf-8") == "z" * 200
+    assert (tmp_path / "perf.log.2").read_text(encoding="utf-8") == "archive 1"
+    assert not (tmp_path / "perf.log.3").exists()
+
+
+def test_un_echec_d_archivage_ne_coute_pas_le_log(tmp_path, monkeypatch):
+    """Sous Windows, un perf.log ouvert dans un éditeur ne se renomme pas. On doit continuer
+    d'écrire dans le fichier trop gros — c'est exactement le comportement d'avant."""
+    monkeypatch.setattr(reporter, "TAILLE_MAX_LOG", 100)
+    import os
+    monkeypatch.setattr(os, "replace", _lever)
+    log = tmp_path / "perf.log"
+    log.write_text("w" * 200, encoding="utf-8")
+
+    reporter._faire_tourner(log)          # ne doit pas lever
+
+    r = Reporter()
+    r.set_verbose_log(log)
+    r.verbose("la ligne passe quand meme")
+    r.close()
+    assert "la ligne passe quand meme" in log.read_text(encoding="utf-8")
+
+
+def _lever(*a, **k):
+    raise OSError("fichier verrouillé")

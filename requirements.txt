@@ -1,9 +1,41 @@
+# ⚠ ENVELOPPE depuis le lot 37 (2.31.0, 2026-09-06). Les dépendances sont déclarées une seule
+# fois, dans `pyproject.toml` ; ce fichier les appelle par leur EXTRA. Motif : le `.spec` de
+# PyInstaller, la CI et cinq fichiers ne peuvent pas être trois sources de vérité — le jour où
+# deux divergent, le gel manque un module et le symptôme est un `ImportError` chez
+# l'utilisateur, pas chez toi.
+#
+# ⚠ **Ce fichier ne disparaît pas**, et sa prose non plus : la CI, les procédures et le README
+# le citent nommément, et les mesures écrites plus bas ne sont écrites nulle part ailleurs.
+#
+# ⚠ **Ce qui change pour toi**, et le CHANGELOG le dit : `-e .` installe aussi `angelith`
+# lui-même, en mode éditable. Conséquence pratique : lance la commande **depuis la racine du
+# dépôt**, parce qu'un `-e .` d'un fichier de requirements se résout contre le RÉPERTOIRE
+# COURANT, pas contre le fichier.
+
 # Dépendances Python
-openai>=1.40          # client compatible LM Studio / Ollama
-pyyaml>=6.0           # config / glossaire
-pymupdf>=1.24         # extraction texte + images des PDF
-python-docx>=1.1      # détection de titres par mise en forme (police+gras) dans les .docx
-rich>=13.0            # interface console (app.py)
+# ⚠ PLAFONNÉ SOUS 3.0, et ce n'est pas de la frilosité. `openai` 3.x est bâti sur **httpx2**,
+# pas sur httpx. Or `core/llm.py` construit lui-même son `httpx.Timeout` — tout le
+# dimensionnement dérivé de `DEBIT_PLANCHER_DEFAUT` en dépend. Passé à un client httpx2, cet
+# objet atterrit dans un emplacement qui en attend un autre : la configuration résultante est
+# malformée au point que son `repr` lève `TypeError: unhashable type: 'Timeout'`.
+#
+# C'est précisément le défaut contre lequel `LLM.__init__` met en garde — un plafond de durée
+# retiré SILENCIEUSEMENT — et aucun test ne peut l'attraper, tous doublant le client. Lever le
+# plafond demande de porter `core/llm.py` sur httpx2 délibérément, pas de laisser pip décider.
+#
+# Ce que le socle porte — les lignes d'origine, gardées en prose, et le plafond ci-dessus est
+# recopié TEL QUEL dans `pyproject.toml` :
+#   openai>=1.40,<3      client compatible LM Studio / Ollama
+#   httpx>=0.27          importé DIRECTEMENT par `core/llm.py` (`httpx.Timeout`)
+#   pyyaml>=6.0          config / glossaire
+#   pymupdf>=1.24        extraction texte + images des PDF
+#   python-docx>=1.1     détection de titres par mise en forme (police+gras) dans les .docx
+#   rich>=13.0           interface console (app.py)
+-e .
+
+# Importé DIRECTEMENT par `core/llm.py` (`httpx.Timeout`). Il arrivait jusqu'ici en dépendance
+# transitive d'`openai` ; openai 3.x est passé à httpx2 et l'a emporté avec lui, cassant
+# `import httpx` sur toute installation neuve. Une dépendance qu'on importe se déclare.
 
 # Dépendances de DÉVELOPPEMENT (pas nécessaires pour faire tourner le pipeline,
 # seulement pour lancer la suite de tests : voir tests/README.md ou le README principal) :

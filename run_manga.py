@@ -65,9 +65,13 @@ from core import cli
 
 cli.configurer_stdout()
 
-from core import config as core_config
-from core.reporter import Reporter
-from core.version import ETAT_BRIQUES, __version__
+# ⚠ Les imports qui suivent sont VOLONTAIREMENT après l'appel ci-dessus : `configurer_stdout()`
+# réencode la sortie console, et tout module qui touche à stdout en l'important — `rich` au
+# premier chef — figerait l'ancien encodage. D'où les suppressions E402 de ce bloc.
+
+from core import config as core_config  # noqa: E402
+from core.reporter import Reporter  # noqa: E402
+from core.version import ETAT_BRIQUES, __version__  # noqa: E402
 
 # Étapes de `manga.checkpoints.STAGES`, recopiées ICI et non importées : `manga.checkpoints`
 # tire numpy et Pillow, ce qui ferait passer `--version`/`--list`/`--help` de 0,19 s à 0,46 s
@@ -116,6 +120,40 @@ def main() -> None:
                     help="ne (re)traite QUE la page N (1-indexée) — les autres pages sont "
                          "réutilisées depuis leur cache existant ; combine avec --from pour ne "
                          "relancer qu'une étape de cette page")
+    ap.add_argument("--langue", metavar="DOSSIER", default=None,
+                    help="force le dossier de langue SOURCE à lire (ex. ENG, JAP, FR). Sans "
+                         "cette option, la langue vient du sous-dossier "
+                         "sources/<Projet>/<Tome>/<format>/<LANGUE>/ ; s'il n'y en a pas, de "
+                         "`config.yaml > manga.langue_source` (jp). ⚠ elle choisit le MOTEUR "
+                         "D'OCR : manga-ocr ne sait lire que le japonais")
+    ap.add_argument("--format", dest="format_planche", choices=("manga", "webtoon"),
+                    default=None,
+                    help="force le format de planche. Il fixe le SENS DE LECTURE (manga : "
+                         "droite→gauche, webtoon : gauche→droite), donc l'ordre dans lequel "
+                         "les bulles sont numérotées pour le modèle. Sans cette option, il "
+                         "vient du sous-dossier manga/ ou webtoon/. ⚠ à ne pas confondre avec "
+                         "la langue : un scan anglais d'un manga se lit droite→gauche")
+    # ── Le découpage des bandes très allongées (2.25.0) ──────────────────────────────
+    #
+    # ⚠ Ces deux options existent d'abord pour l'INTERFACE. Le `PLAN-31` L31.7 demande que la
+    # destination « Webtoon » remonte les réglages de bande ; les exposer dans un panneau sans
+    # équivalent en ligne de commande aurait cassé la promesse de `gui/__init__.py` — « un tome
+    # retouché ici se relance à l'identique avec run_manga.py ». Elles sont donc déclarées ici
+    # ET servies par `_appliquer_options_lot`, comme `--lot` et `--think`.
+    ap.add_argument("--fenetre-hauteur", dest="fenetre_hauteur", type=int, metavar="PX",
+                    default=None,
+                    help="hauteur des fenêtres de détection, en pixels, pour les planches "
+                         "assez allongées pour être découpées (défaut : config.yaml > "
+                         "manga.detection.fenetre_hauteur, soit 2160 — deux fois la largeur "
+                         "d'une bande de webtoon). Sans effet sur une planche paginée, qui "
+                         "n'est jamais découpée")
+    ap.add_argument("--fenetre-recouvrement", dest="fenetre_recouvrement", type=int,
+                    metavar="PX", default=None,
+                    help="recouvrement entre deux fenêtres consécutives (défaut : 900). ⚠ Il "
+                         "doit rester ≥ la plus haute bulle attendue — mesurée à 833 px sur "
+                         "le corpus — sinon une bulle peut être coupée par toutes les "
+                         "coutures qui la traversent. Raboté à 80 %% de la hauteur de "
+                         "fenêtre par manga/detection.py")
     ap.add_argument("--conf", type=float, metavar="S", default=None,
                     help="relance la détection de la page --page à ce seuil de confiance "
                          "(exige --page, implique --from detection). L'écriture n'a lieu que "
@@ -175,31 +213,49 @@ def main() -> None:
     # Absents jusqu'au lot 2.6, et d'autant plus utiles ici : un tome de 150 planches avec
     # raisonnement activé dépasse les deux heures, donc se lance la nuit.
     cli.ajouter_flags_veille(ap)
+    cli.ajouter_flag_sans_llm(ap)
     args = ap.parse_args()
 
     config = cli.charger_config(args.config)
+    # ⚠ En mémoire, jamais dans le fichier (interdit 5). Le drapeau ne peut qu'ARMER le mode :
+    # ne pas le passer laisse `llm.actif` décider.
+    cli.appliquer_sans_llm(config, args.sans_llm)
 
     if "manga" not in config:
         ap.error(f"Aucune section « manga: » dans {args.config} — voir config.yaml.example "
                  f"ou la documentation pour l'ajouter.")
 
     if args.list:
+        # ⚠ **Le même inventaire que la bibliothèque de l'interface**, depuis le lot 34. Un
+        # seul modèle, deux affichages : `bibliotheque.py` calcule, cette CLI et la
+        # destination « Œuvres » se contentent de rendre. C'est la règle de couche du dépôt
+        # appliquée à l'endroit où on l'oublie le plus facilement.
+        #
+        # ⚠ La sortie est **iso** — elle a été comparée ligne à ligne, sur les 18 œuvres du
+        # corpus, avant et après le lot. Ce qu'imprime `_etat` reste le verdict de la brique
+        # MANGA (`manga/serie.py`), y compris sur un tome de roman, où il vaut « aucune image
+        # ni archive » : c'est la réponse juste à la question que pose `run_manga.py`. Le
+        # statut multi-brique, plus riche, ne sert qu'à la vue.
+        #
+        # ⚠ `Inventaire` est PARESSEUX : `--list` sans argument n'affiche que le nombre de
+        # tomes par projet, et ne paie donc aucun balayage de checkpoints.
         from pathlib import Path
-        from pipeline.sources import list_projects
-        from manga import serie
+
+        import bibliotheque as biblio
         chemins = _chemins(config)
         src, build_root = Path(chemins["sources"]), Path(chemins["build"])
+        inventaire = biblio.Inventaire(config)
 
         def _etat(projet: str, tome: str):
             """Verdict par chapitre, et non « le dossier de build existe ». C'est cette
             colonne qu'on lit avant de lancer une nuit : elle distingue un chapitre fini
             d'un chapitre arrêté à la planche 3."""
-            e = serie.etat_chapitre(src, build_root, projet, tome)
-            return serie.PUCES.get(e.statut, " "), e.detail
+            info = inventaire.tome(projet, tome)
+            return biblio.puce(info), biblio.detail_manga(info)
 
-        # `serie.lister_chapitres` et non `list_volumes` : l'ordre de lecture, pas l'ordre
-        # alphabétique — sans quoi Chap.10 s'affiche avant Chap.2.
-        cli.afficher_liste(list_projects, serie.lister_chapitres, src, build_root,
+        # L'ordre de lecture, pas l'ordre alphabétique — sans quoi Chap.10 s'affiche avant
+        # Chap.2 (cf. `bibliotheque.lister_tomes`).
+        cli.afficher_liste(inventaire.projets, inventaire.tomes, src, build_root,
                            args.projet, sous_dossier="manga", etat=_etat)
         sys.exit(0)
 
@@ -208,6 +264,7 @@ def main() -> None:
 
     if args.check:
         cli.avertir_config(config)
+        cli.bloc_langue(config)
         sys.exit(0 if _run_doctor(config) else 1)
 
     if args.stop:
@@ -235,8 +292,8 @@ def main() -> None:
                 sys.exit(0)
             print(f"Arrêt demandé pour la série « {args.projet} » — {len(poses)} chapitre(s) "
                   f"notifié(s) : {', '.join(poses)}.")
-            print(f"Le chapitre en cours finit sa planche, sauvegarde, assemble son archive, "
-                  f"puis s'arrête.")
+            print("Le chapitre en cours finit sa planche, sauvegarde, assemble son archive, "
+                  "puis s'arrête.")
             print(f"Relance « python run_manga.py \"{args.projet}\" --all » plus tard pour "
                   f"reprendre où tu t'es arrêté.")
             sys.exit(0)
@@ -347,7 +404,8 @@ def main() -> None:
         completed = process_volume(args.projet, args.tome, config, reporter=_make_reporter(args, config),
                                     force=args.force, restart_from=args.from_stage,
                                     only_page=args.page, conf_threshold=args.conf,
-                                    iou_threshold=args.iou)
+                                    iou_threshold=args.iou, langue=args.langue,
+                                    format_planche=args.format_planche)
         if not completed:
             interrupted = True
     except (StopRequested, KeyboardInterrupt):
@@ -382,6 +440,60 @@ def _appliquer_options_lot(ap, args, config: dict) -> None:
         config["manga"].setdefault("lot", {})["planches"] = args.lot
     if args.think is not None:
         config["manga"].setdefault("lot", {})["think"] = args.think
+    _appliquer_options_bande(ap, args, config)
+
+
+#: Plus haute bulle du corpus, en pixels. C'est la borne basse justifiée du recouvrement :
+#: en dessous, une bulle peut être coupée par TOUTES les coutures qui la traversent, et le
+#: rejet des détections coupées la perd alors pour de bon (cf. `manga/detection.py`).
+PLUS_HAUTE_BULLE = 833
+
+
+def _appliquer_options_bande(ap, args, config: dict) -> None:
+    """`--fenetre-hauteur` et `--fenetre-recouvrement`, écrits là où le run les lira.
+
+    ⚠ **Dans le bloc du FORMAT quand `--format` est donné**, et dans `manga.detection` sinon.
+    `manga/formats.py:config_format` fusionne `manga.detection` avec
+    `manga.formats.<format>.detection`, le second l'emportant : écrire toujours dans le premier
+    laisserait un bloc de format ajouté demain écraser silencieusement l'option de la ligne de
+    commande. On écrit donc au niveau le plus précis que le run va lire.
+
+    Les bornes refusent ce qui ne peut pas marcher plutôt que de le laisser produire un
+    résultat absurde en silence — c'est le patron de `--lot`, qui refuse au-delà de
+    `MAX_PLANCHES_LOT` en citant la mesure qui le justifie."""
+    hauteur, recouvrement = args.fenetre_hauteur, args.fenetre_recouvrement
+    if hauteur is None and recouvrement is None:
+        return
+    if hauteur is not None and not (512 <= hauteur <= 20000):
+        ap.error(f"--fenetre-hauteur doit être entre 512 et 20000 px (reçu {hauteur}). En "
+                 f"dessous de 512, aucune bulle n'entre entière dans une fenêtre — la plus "
+                 f"haute du corpus fait {PLUS_HAUTE_BULLE} px ; au-delà de 20000, une bande "
+                 f"ordinaire tient déjà dans une seule fenêtre et il n'y a plus rien à "
+                 f"découper.")
+    if recouvrement is not None and recouvrement < 0:
+        ap.error(f"--fenetre-recouvrement ne peut pas être négatif (reçu {recouvrement}).")
+    cible = config["manga"]
+    if args.format_planche:
+        cible = (cible.setdefault("formats", {})
+                 .setdefault(args.format_planche, {}))
+    detection = cible.setdefault("detection", {})
+    if hauteur is not None:
+        detection["fenetre_hauteur"] = hauteur
+    if recouvrement is not None:
+        detection["fenetre_recouvrement"] = recouvrement
+    # ⚠ La cohérence des DEUX est vérifiée après application, pas option par option : on peut
+    # n'en donner qu'une, et c'est alors celle de `config.yaml` qui sert de seconde borne.
+    h = int(detection.get("fenetre_hauteur")
+            or ((config["manga"].get("detection") or {}).get("fenetre_hauteur")) or 2160)
+    r = int(detection.get("fenetre_recouvrement")
+            if detection.get("fenetre_recouvrement") is not None
+            else ((config["manga"].get("detection") or {}).get("fenetre_recouvrement") or 900))
+    if r >= h:
+        ap.error(f"--fenetre-recouvrement ({r} px) doit rester strictement inférieur à la "
+                 f"hauteur de fenêtre ({h} px) : à l'égalité, le pas de découpage tombe à "
+                 f"zéro. manga/detection.py rabote de toute façon au-delà de 80 % de la "
+                 f"hauteur — un recouvrement de 2159 px sur 2160 produirait 7 841 fenêtres "
+                 f"pour une seule bande.")
 
 
 def _relettrage_cible(etat, tout_refaire: bool):
@@ -431,7 +543,7 @@ def _run_all_chapitres(args, config: dict) -> int:
 
     chemins = _chemins(config)
     src, build_root = Path(chemins["sources"]), Path(chemins["build"])
-    etats_avant = serie.etats_serie(src, build_root, args.projet)
+    etats_avant = serie.etats_serie(src, build_root, args.projet, config)
     if not etats_avant:
         print(f"Aucun chapitre trouvé pour « {args.projet} » sous {src / args.projet}")
         return 1
@@ -529,7 +641,8 @@ def _run_all_chapitres(args, config: dict) -> int:
                     force=args.force,
                     restart_from="rendu" if cible_relettrage else args.from_stage,
                     only_pages=cible_relettrage or None,
-                    conf_threshold=args.conf, iou_threshold=args.iou)
+                    conf_threshold=args.conf, iou_threshold=args.iou,
+                    langue=args.langue, format_planche=args.format_planche)
             except (StopRequested, KeyboardInterrupt):
                 raise                   # l'arrêt propre reste franc : il vise la SÉRIE
             except (Exception, SystemExit) as err:
@@ -557,21 +670,21 @@ def _run_all_chapitres(args, config: dict) -> int:
         # ⚠ Le bilan est écrit AVANT `finalize_power` : avec `--shutdown`, celui-ci programme
         # l'extinction puis dort tout le délai. Un rapport écrit après ne serait jamais écrit.
         code = _cloturer_serie(args.projet, src, build_root, resultats,
-                               time.perf_counter() - t_serie, interrupted, _dire)
+                               time.perf_counter() - t_serie, interrupted, _dire, config)
         cli.shielded_unload(config, models_used, base_url=llm_manga.get("base_url"))
         cli.finalize_power(args, inhibitor, interrupted=interrupted)
     return code
 
 
 def _cloturer_serie(projet: str, src, build_root, resultats, duree_s: float,
-                    interrupted: bool, dire) -> int:
+                    interrupted: bool, dire, config: dict | None = None) -> int:
     """Bilan de fin de série : rapport sur disque, tableau à l'écran, code de sortie.
 
     L'état est **relu depuis le disque**, pas déduit des retours de `process_volume` : un
     chapitre peut se terminer normalement en ayant laissé trois planches en échec, et c'est
     `pages_out/` qui le dit, pas le code de retour."""
     from manga import serie
-    etats = serie.etats_serie(src, build_root, projet)
+    etats = serie.etats_serie(src, build_root, projet, config)
     chemin = _ecrire_rapport_serie(build_root, projet, etats, resultats, duree_s, interrupted)
 
     dire(f"\n— Bilan de la série « {projet} » —")
@@ -722,12 +835,21 @@ def _run_glossaire(args, config: dict, *, extraction: bool) -> int:
             try:
                 termine = glossaire_manga.run_extract_glossary(
                     args.projet, tome, config, reporter=reporter, force=args.force,
-                    restart_from=args.from_stage, only_page=args.page)
+                    restart_from=args.from_stage, only_page=args.page,
+                    langue=args.langue, format_planche=args.format_planche)
             except (StopRequested, KeyboardInterrupt):
                 raise                   # l'arrêt propre vise l'ŒUVRE, pas un chapitre
             except (Exception, SystemExit) as err:
                 # `SystemExit` au même titre : c'est ce que lèvent un dossier de chapitre vide
                 # et un modèle ONNX introuvable. Des accidents de chapitre, pas de commande.
+                #
+                # ⚠ Mais seulement quand il porte un MESSAGE. `SystemExit` sert ici de canal
+                # d'erreur de domaine (`sys.exit("modèle introuvable")`) ; un `sys.exit(2)`,
+                # lui, porte un CODE et reste ce qu'il a toujours été — une demande d'arrêt de
+                # la commande. L'avaler faisait continuer la série au chapitre suivant en
+                # affichant l'accident, alors que quelqu'un venait de demander qu'on s'arrête.
+                if isinstance(err, SystemExit) and not isinstance(err.code, str):
+                    raise
                 echecs.append(tome)
                 print(f"⚠ « {tome} » a échoué ({type(err).__name__} : {err}) — l'extraction "
                       f"continue au chapitre suivant.")
@@ -826,75 +948,18 @@ def _run_psd_test(config: dict, chemin: str) -> bool:
 
 
 def _run_doctor(config: dict) -> bool:
-    """Diagnostic de l'environnement manga : section de config, dépendances Python
-    additionnelles, modèle de détection, connexion Ollama (réutilise
-    `pipeline.llm.test_connection`)."""
-    from pathlib import Path
-    ok = True
+    """Diagnostic de l'environnement manga. **Le corps a déménagé dans `manga/doctor.py`.**
 
-    print("— Section config.yaml > manga —")
-    mcfg = config.get("manga")
-    if not mcfg:
-        print("❌ Section « manga: » absente de config.yaml.")
-        return False
-    required = ["modeles", "temperatures", "detection"]
-    missing = [k for k in required if k not in mcfg]
-    if missing:
-        print(f"❌ Clé(s) manquante(s) dans manga: {missing}")
-        ok = False
-    else:
-        print("✓ Toutes les clés principales sont présentes.")
+    ⚠ Il vivait ici, et l'interface graphique faisait `from run_manga import _run_doctor` :
+    la fenêtre dépendait d'une CLI. C'est l'inversion de couche que le lot 2.6 avait déjà
+    défaite côté light novel (`pipeline/doctor.py`), et qu'`app.py` écrit noir sur blanc —
+    « le diagnostic appartient à la BRIQUE qu'il examine, pas à une CLI ».
 
-    if not cli.section_dependances(
-            [("numpy", "numpy"), ("onnxruntime", "onnxruntime"),
-             ("manga_ocr", "manga-ocr"), ("PIL", "pillow")],
-            "`pip install -r requirements-manga.txt`"):
-        ok = False
-
-    print("\n— Modèle de détection de bulles —")
-    det_cfg = mcfg.get("detection", {})
-    model_path = Path(det_cfg.get("model_path", ""))
-    if model_path.exists():
-        print(f"✓ modèle trouvé : {model_path} ({model_path.stat().st_size // (1024*1024)} Mo)")
-    elif det_cfg.get("telechargement_auto", True):
-        # Le diagnostic TÉLÉCHARGE plutôt que de signaler : c'est justement le moment où
-        # l'utilisateur prépare sa machine, pas au milieu d'un tome de 150 planches.
-        from manga import models
-        try:
-            models.assurer_detecteur(model_path, url=det_cfg.get("model_url") or models.DETECTEUR_URL,
-                                     dire=print)
-        except SystemExit as err:
-            print(f"❌ {err}")
-            ok = False
-    else:
-        print(f"❌ modèle introuvable : {model_path or '(non défini)'} — voir manga_models/README.md.")
-        print("  → manga.detection.telechargement_auto: true le récupérerait tout seul.")
-        ok = False
-
-    print("\n— Police de lettrage —")
-    from manga.typeset import resolve_font
-    from manga.psd import nom_postscript
-    try:
-        police = resolve_font((mcfg.get("typeset") or {}).get("font_path") or None)
-        print(f"✓ police trouvée : {police}")
-        if "psd" in ((mcfg.get("rendu") or {}).get("formats") or []) \
-                and str((mcfg.get("rendu") or {}).get("psd_texte", "rasterise")) == "type":
-            # Les calques de type d'un PSD ne portent PAS la police : ils la nomment. Photoshop
-            # substitue en silence celle qu'il ne trouve pas — le calque reste éditable, mais le
-            # lettrage change sans explication.
-            print(f"  → les calques de texte du PSD déclareront « {nom_postscript(police)} » : "
-                  f"installe cette police côté système avant d'ouvrir les PSD dans Photoshop "
-                  f"(cf. templates/fonts/README.md).")
-    except SystemExit as err:
-        print(f"❌ {err}")
-        ok = False
-
-    probe_config = dict(config, llm=core_config.section(config, "manga", "llm"),
-                        modeles=mcfg.get("modeles", {}),
-                        temperatures=mcfg.get("temperatures", {}))
-    if not cli.section_ollama(probe_config):
-        ok = False
-    return cli.conclure(ok)
+    Ce point d'entrée reste : il est cité dans la docstring de la CLI, appelé par `app.py` et
+    par `gui/fenetre.py`, et sa sortie console est un contrat scripté. Il ne fait plus qu'une
+    chose, et c'est le but."""
+    from manga.doctor import run_doctor
+    return run_doctor(config)
 
 
 if __name__ == "__main__":

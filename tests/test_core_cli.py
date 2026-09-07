@@ -307,3 +307,43 @@ def test_le_dry_run_n_ecrit_toujours_aucun_fichier(tmp_path):
 
     make_reporter(Reporter(), tmp_path / "b", verbose=True, dry_run=True)
     assert not (tmp_path / "b").exists()
+
+
+# --- signature de `afficher_liste` contre ses appelants -------------------------------
+
+def test_aucun_appelant_ne_depasse_les_positionnels_de_afficher_liste():
+    """`run_ocr.py --list` levait un `TypeError` : un `None` était passé en 6e POSITIONNEL
+    alors que `afficher_liste` porte un `*` — `sous_dossier` et `etat` sont keyword-only.
+
+    ⚠ Le test ne vise pas ce fichier-là mais la FAMILLE. Trois entrées de ligne de commande
+    appellent cette fonction avec cinq arguments dans le même ordre ; ajouter un paramètre
+    keyword-only est indolore à la lecture et casse silencieusement l'appelant qui passait
+    déjà par la position. Aucun test n'exerçait `run_ocr.py --list`, donc la casse a vécu.
+    On lie ici la signature à tous ses appels, plutôt que d'ajouter un test par entrée."""
+    import inspect
+
+    signature = inspect.signature(cli.afficher_liste)
+    positionnels = [n for n, p in signature.parameters.items()
+                    if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+
+    appels = []
+    for module in ("run.py", "run_manga.py", "run_ocr.py", "app.py"):
+        chemin = RACINE / module
+        if not chemin.is_file():
+            continue
+        arbre = ast.parse(chemin.read_text(encoding="utf-8"))
+        for noeud in ast.walk(arbre):
+            if not isinstance(noeud, ast.Call):
+                continue
+            cible = noeud.func
+            nom = cible.attr if isinstance(cible, ast.Attribute) else getattr(cible, "id", "")
+            if nom != "afficher_liste":
+                continue
+            appels.append((module, noeud.lineno, len(noeud.args)))
+
+    assert appels, "aucun appel trouvé : le test ne garde plus rien"
+    for module, ligne, n_positionnels in appels:
+        assert n_positionnels <= len(positionnels), (
+            f"{module}:{ligne} passe {n_positionnels} arguments positionnels à "
+            f"afficher_liste, qui n'en accepte que {len(positionnels)} "
+            f"({', '.join(positionnels)}) — les suivants sont keyword-only.")

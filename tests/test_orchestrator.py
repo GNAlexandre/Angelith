@@ -4,7 +4,6 @@
 """Tests du cœur de orchestrator.py : garde-fous déterministes (emballement, perte de
 mots), retry à température réduite, remplacement `force`/pluriel, et --chapitre N."""
 import re
-import shutil
 from pathlib import Path
 
 import pytest
@@ -13,7 +12,7 @@ import yaml
 from pipeline import glossary
 from pipeline.orchestrator import (
     _ATX_ANY, _RESPLIT_REASONS, _aggregate_llm_stats, _close_llm_clients, _enforce_force,
-    _est_tokens, _keep_images, _match_case, _out_cap, _repair_headings, _salvage_repetition,
+    _keep_images, _match_case, _out_cap, _repair_headings, _salvage_repetition,
     _try_with_temp_retry, _wire_reporter, _word_count, process_volume,
 )
 
@@ -33,8 +32,8 @@ def test_word_count_basic():
 
 # --- Comptage de mots sur un pivot CJK -------------------------------------------- #
 #
-# Bloc japonais et sa traduction, calés sur les proportions mesurées au ch03 de Qian Wan
-# Zhang : un bloc sain rend un ratio de 1,10 à 1,33, un bloc tronqué de 0,16 à 0,26.
+# Bloc japonais et sa traduction, calés sur les proportions mesurées au ch03 de roman P : un
+# bloc sain rend un ratio de 1,10 à 1,33, un bloc tronqué de 0,16 à 0,26.
 # Six paragraphes DISTINCTS de chaque côté : un bloc fait de six fois le même paragraphe
 # serait diagnostiqué « repetition » avant d'atteindre `perte_mots` (cf. l'ordre de
 # `_MOTIFS_LN`), et le test ne mesurerait pas ce qu'il croit.
@@ -648,6 +647,10 @@ def chapitre_project(tmp_path, monkeypatch):
     cfg["chemins"]["build"] = str(tmp_path / "build")
     cfg["chemins"]["style_guide"] = str(root / "style_guide.md")
     cfg["chemins"]["prompts"] = str(root / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    cfg.setdefault("langues", {})["packs"] = str(root / "langues")
     # Connexion LLM DÉLIBÉRÉMENT figée ici, indépendamment de ce que contient le
     # config.yaml réel (que l'utilisateur édite pour SON setup) : ce test vérifie le
     # comportement de --chapitre avec des agents simulés (aucun appel réseau réel),
@@ -657,8 +660,9 @@ def chapitre_project(tmp_path, monkeypatch):
                  "endpoints": {}}
     cfg["modeles"] = {n: "qwen/qwen3.5" for n in
                       ["terminologue", "traducteur", "correcteur", "mise_en_page", "glossariste"]}
-    cfg["rendu"]["reference_docx"] = str(root / "templates" / "reference.docx")
-    cfg["rendu"]["epub_css"] = str(root / "templates" / "epub.css")
+    # Gabarits : NON renseignés, donc servis par le pack de langue cible — c'est le
+    # chemin réel depuis que `langues/fr/templates/` les porte. Les pointer à la main
+    # testerait un chemin que plus personne n'emprunte.
     return cfg
 
 
@@ -820,14 +824,23 @@ def test_force_report_lists_refusals_for_review(chapitre_project, tmp_path, monk
 # --------------------------------------------------------------------------- #
 
 class _RecordingReporter:
-    """Reporter minimal qui garde une trace de tout ce qui passe par verbose()."""
+    """Reporter minimal qui garde une trace de tout ce qui passe par verbose().
+
+    ⚠ **Il double le protocole ENTIER, pas seulement ce qu'il écoute.** Un double qui
+    s'écarte du protocole qu'il double ne teste plus rien, et il tombe le jour où
+    l'orchestrateur appelle une méthode de plus — ce que le lot 32 a fait avec `phase`.
+    `tests/test_reporter_protocole.py` garde désormais cette correspondance."""
     def __init__(self):
         self.verbose_msgs = []
+        self.phases = []
 
     def volume(self, plan): pass
     def chapter(self, idx, total, title): pass
     def stage(self, name): pass
     def block(self, idx, total): pass
+    def progres(self, courant, total, objet=""): pass
+    def phase(self, identifiant, libelle=""): self.phases.append(identifiant)
+    def warn(self, msg): pass
     def info(self, msg): pass
     def verbose(self, msg): self.verbose_msgs.append(msg)
     def finish(self, outputs): pass
@@ -917,13 +930,18 @@ def _resplit_project(tmp_path, monkeypatch):
     cfg["chemins"]["build"] = str(tmp_path / "build")
     cfg["chemins"]["style_guide"] = str(root / "style_guide.md")
     cfg["chemins"]["prompts"] = str(root / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    cfg.setdefault("langues", {})["packs"] = str(root / "langues")
     cfg["langues"]["optimiser_apres_terminologie"] = False
     cfg["llm"] = {"base_url": "http://localhost:1234/v1", "api_key": "test", "timeout": 60,
                  "max_retries": 1, "extra_directive": "", "think": False, "endpoints": {}}
     cfg["modeles"] = {n: "qwen/qwen3.5" for n in
                       ["terminologue", "traducteur", "correcteur", "mise_en_page", "glossariste"]}
-    cfg["rendu"]["reference_docx"] = str(root / "templates" / "reference.docx")
-    cfg["rendu"]["epub_css"] = str(root / "templates" / "epub.css")
+    # Gabarits : NON renseignés, donc servis par le pack de langue cible — c'est le
+    # chemin réel depuis que `langues/fr/templates/` les porte. Les pointer à la main
+    # testerait un chemin que plus personne n'emprunte.
     return cfg
 
 
@@ -1063,13 +1081,18 @@ def _misaligned_project(tmp_path, monkeypatch):
     cfg["chemins"]["build"] = str(tmp_path / "build")
     cfg["chemins"]["style_guide"] = str(root / "style_guide.md")
     cfg["chemins"]["prompts"] = str(root / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    cfg.setdefault("langues", {})["packs"] = str(root / "langues")
     cfg["langues"]["optimiser_apres_terminologie"] = False
     cfg["llm"] = {"base_url": "http://localhost:1234/v1", "api_key": "test", "timeout": 60,
                  "max_retries": 1, "extra_directive": "", "think": False, "endpoints": {}}
     cfg["modeles"] = {n: "qwen/qwen3.5" for n in
                       ["terminologue", "traducteur", "correcteur", "mise_en_page", "glossariste"]}
-    cfg["rendu"]["reference_docx"] = str(root / "templates" / "reference.docx")
-    cfg["rendu"]["epub_css"] = str(root / "templates" / "epub.css")
+    # Gabarits : NON renseignés, donc servis par le pack de langue cible — c'est le
+    # chemin réel depuis que `langues/fr/templates/` les porte. Les pointer à la main
+    # testerait un chemin que plus personne n'emprunte.
     return cfg
 
 
@@ -1185,13 +1208,18 @@ def _images_project(tmp_path, monkeypatch):
     cfg["chemins"]["build"] = str(tmp_path / "build")
     cfg["chemins"]["style_guide"] = str(root / "style_guide.md")
     cfg["chemins"]["prompts"] = str(root / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    cfg.setdefault("langues", {})["packs"] = str(root / "langues")
     cfg["langues"]["optimiser_apres_terminologie"] = False
     cfg["llm"] = {"base_url": "http://localhost:1234/v1", "api_key": "test", "timeout": 60,
                  "max_retries": 1, "extra_directive": "", "think": False, "endpoints": {}}
     cfg["modeles"] = {n: "qwen/qwen3.5" for n in
                       ["terminologue", "traducteur", "correcteur", "mise_en_page", "glossariste"]}
-    cfg["rendu"]["reference_docx"] = str(root / "templates" / "reference.docx")
-    cfg["rendu"]["epub_css"] = str(root / "templates" / "epub.css")
+    # Gabarits : NON renseignés, donc servis par le pack de langue cible — c'est le
+    # chemin réel depuis que `langues/fr/templates/` les porte. Les pointer à la main
+    # testerait un chemin que plus personne n'emprunte.
     return cfg
 
 
@@ -1260,12 +1288,17 @@ def test_process_volume_terminologie_does_not_rerender_glossary_on_noop_blocks(t
     cfg["chemins"]["build"] = str(tmp_path / "build")
     cfg["chemins"]["style_guide"] = str(root / "style_guide.md")
     cfg["chemins"]["prompts"] = str(root / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    cfg.setdefault("langues", {})["packs"] = str(root / "langues")
     cfg["llm"] = {"base_url": "http://localhost:1234/v1", "api_key": "test", "timeout": 60,
                  "max_retries": 1, "extra_directive": "", "think": False, "endpoints": {}}
     cfg["modeles"] = {n: "qwen/qwen3.5" for n in
                       ["terminologue", "traducteur", "correcteur", "mise_en_page", "glossariste"]}
-    cfg["rendu"]["reference_docx"] = str(root / "templates" / "reference.docx")
-    cfg["rendu"]["epub_css"] = str(root / "templates" / "epub.css")
+    # Gabarits : NON renseignés, donc servis par le pack de langue cible — c'est le
+    # chemin réel depuis que `langues/fr/templates/` les porte. Les pointer à la main
+    # testerait un chemin que plus personne n'emprunte.
 
     _install_counting_agent(monkeypatch)
 
@@ -1293,10 +1326,10 @@ def test_process_volume_terminologie_does_not_rerender_glossary_on_noop_blocks(t
 def test_extract_glossary_resumes_from_checkpoint(tmp_path, monkeypatch):
     """La reprise de --extract-glossary : un bloc déjà en cache est re-mergé sans
     rappeler le LLM, et les checkpoints sont purgés après un run complet."""
-    import yaml, shutil
+    import yaml
     from pathlib import Path
     from pipeline import orchestrator as orch
-    from pipeline import agents as agents_mod, control
+    from pipeline import agents as agents_mod
     from pipeline.reporter import Reporter
     from pipeline.control import StopRequested
 
@@ -1312,6 +1345,10 @@ def test_extract_glossary_resumes_from_checkpoint(tmp_path, monkeypatch):
     cfg["chemins"]["build"] = str(tmp_path / "build")
     cfg["chemins"]["style_guide"] = str(root / "style_guide.md")
     cfg["chemins"]["prompts"] = str(root / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    cfg.setdefault("langues", {})["packs"] = str(root / "langues")
     cfg["langues"]["optimiser_apres_terminologie"] = False
     cfg["llm"]["endpoints"] = {}
     cfg["modeles"] = {n: "m" for n in
@@ -1369,6 +1406,10 @@ def test_extract_glossary_skips_optimization_on_resumed_chapter(tmp_path, monkey
     cfg["chemins"]["build"] = str(tmp_path / "build")
     cfg["chemins"]["style_guide"] = str(root / "style_guide.md")
     cfg["chemins"]["prompts"] = str(root / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    cfg.setdefault("langues", {})["packs"] = str(root / "langues")
     cfg["langues"]["optimiser_apres_terminologie"] = True     # optimisation ACTIVE
     cfg["llm"]["endpoints"] = {}
     cfg["modeles"] = {n: "m" for n in
@@ -1699,13 +1740,18 @@ def _projet_pivot_jp(tmp_path, monkeypatch):
     cfg["chemins"]["build"] = str(tmp_path / "build")
     cfg["chemins"]["style_guide"] = str(root / "style_guide.md")
     cfg["chemins"]["prompts"] = str(root / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    cfg.setdefault("langues", {})["packs"] = str(root / "langues")
     cfg["langues"]["optimiser_apres_terminologie"] = False
     cfg["llm"] = {"base_url": "http://localhost:1234/v1", "api_key": "test", "timeout": 60,
                   "max_retries": 1, "extra_directive": "", "think": False, "endpoints": {}}
     cfg["modeles"] = {n: "qwen/qwen3.5" for n in
                       ["terminologue", "traducteur", "correcteur", "mise_en_page", "glossariste"]}
-    cfg["rendu"]["reference_docx"] = str(root / "templates" / "reference.docx")
-    cfg["rendu"]["epub_css"] = str(root / "templates" / "epub.css")
+    # Gabarits : NON renseignés, donc servis par le pack de langue cible — c'est le
+    # chemin réel depuis que `langues/fr/templates/` les porte. Les pointer à la main
+    # testerait un chemin que plus personne n'emprunte.
     return cfg
 
 
@@ -1869,7 +1915,6 @@ def test_le_traducteur_ne_recoit_pas_les_entrees_non_romanisees(tmp_path, monkey
 
 
 def test_le_rapport_liste_les_entrees_a_romaniser(tmp_path, monkeypatch):
-    import pipeline.agents as agents_mod
     cfg = _resplit_project(tmp_path, monkeypatch)
     glo = Path(cfg["chemins"]["sources"]) / "Resplit" / "glossaire.yaml"
     glo.parent.mkdir(parents=True, exist_ok=True)

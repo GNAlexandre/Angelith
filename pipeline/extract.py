@@ -22,7 +22,21 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.marqueurs import (  # noqa: F401  (réexport : voir la note ci-dessous)
+    IMG_MARKER,
+    make_marker,
+    split_marker,
+    strip_images,
+)
+
 from . import formatting
+
+# ⚠ Le CONTRAT du marqueur `<!-- IMG: … -->` vit dans `core/marqueurs.py` depuis le lot 23.
+# `core/` n'a pas le droit d'importer `pipeline/` — deux tests le vérifient — et
+# `core/illustrations.py` a besoin du même analyseur. Réécrire un second analyseur du même
+# format serait la mauvaise sortie : deux analyseurs divergent le jour où le format bouge.
+# Les quatre noms sont réexportés ici tels quels, donc
+# `from pipeline.extract import split_marker` désigne exactement le même objet qu'avant.
 
 # Défauts de détection par mise en forme (police+gras), utilisés si `config.yaml >
 # decoupage.mise_en_forme` ne fournit pas (ou que partiellement) ces clés — voir
@@ -52,33 +66,18 @@ def _normalize_repeat_key(text: str) -> str:
 
 def _normalize_exact_key(text: str) -> str:
     """Clé de récurrence EXACTE (casse/espaces normalisés, chiffres CONSERVÉS) pour
-    détecter un sous-titre décoratif répété (ex. « Miss Medic's Diary at War ») sans
+    détecter un sous-titre décoratif répété (ex. « Miss roman S's Diary at War ») sans
     confondre de vrais titres distincts qui contiennent un numéro (« Year 1938,
     Summer 1 » vs « Summer 2 » ne doivent PAS être vus comme des doublons)."""
     return re.sub(r"\s+", " ", text.strip().lower())
 
 
-IMG_MARKER = "<!-- IMG: {} -->"
 # Tolère les espaces dans le chemin (Pandoc le fait quand le dossier en contient),
 # un éventuel titre "..." et des chevrons <...>. Le groupe 2 capture les attributs
 # Pandoc (ex. {width="2.5in" height="1.46in"}) : la TAILLE D'AFFICHAGE d'origine du
 # document source, sinon perdue (l'image ressortirait à sa taille native = souvent
 # bien trop grande pour un simple séparateur).
 _IMG_RE = re.compile(r"!\[[^\]]*\]\(\s*(.+?)\s*\)(\{[^}]*\})?", re.DOTALL)
-
-
-def make_marker(path: str, attrs: str = "") -> str:
-    """Construit un marqueur IMG, avec la taille d'origine encodée si connue
-    (`path|{width=... height=...}`) — voir `split_marker` pour le sens inverse."""
-    return IMG_MARKER.format(f"{path}|{attrs}" if attrs else path)
-
-
-def split_marker(raw: str) -> tuple[str, str]:
-    """Sépare un contenu de marqueur `path` ou `path|attrs` → (path, attrs)."""
-    if "|" in raw:
-        path, attrs = raw.split("|", 1)
-        return path.strip(), attrs.strip()
-    return raw.strip(), ""
 
 
 @dataclass
@@ -290,6 +289,69 @@ def _extract_pdf(path: Path, media_dir: Path, extract_images: bool = True,
     page_dicts = [page.get_text("dict") for page in doc]
 
     # ---- Passe A : statistiques globales (corps de texte, paliers, filigrane) ----
+    block_info, size_weights, bold_sizes, repeat_pages = _stats_des_blocs(page_dicts, doc, cfg)
+
+    body = formatting.body_size(size_weights)
+    tiers = formatting.cluster_heading_tiers(bold_sizes, body, cfg["ratio_taille_titre"])
+
+    footer_threshold = max(2, round(n_pages * cfg["footer_frac_pages"]))
+    footer_keys = {key for key, pages in repeat_pages.items() if len(pages) >= footer_threshold}
+
+    heading_tier, footer_blocks = _paliers_et_pieds(block_info, tiers, footer_keys,
+                                                    excluded_titles)
+
+    # ---- Passe B : émission (logique existante, réutilise page_dicts déjà calculé) ----
+    out_lines: list[str] = []
+    images: list[str] = []
+    seen_xref: dict[int, str] = {}
+    stem = path.stem.replace(" ", "_")
+
+    for pno, page in enumerate(doc):
+        items = _items_de_page(page, page_dicts[pno], pno, block_info=block_info,
+                               footer_blocks=footer_blocks, heading_tier=heading_tier,
+                               extract_images=extract_images)
+        for _, _, kind, payload in sorted(items, key=lambda t: (round(t[0]), round(t[1]))):
+            if kind == "text":
+                out_lines.append(payload)
+                continue
+            ligne = _emettre_image(doc, payload, pno=pno, stem=stem, media_dir=media_dir,
+                                   seen_xref=seen_xref, images=images)
+            if ligne is not None:
+                out_lines.append(ligne)
+
+        out_lines.append("")  # séparation de page
+
+    doc.close()
+    return Extracted(text="\n".join(out_lines), images=images)
+
+
+def _info_du_bloc(b: dict, page_height: float, band: float) -> dict | None:
+    """Ce qu'on retient d'UN bloc MuPDF, ou `None` s'il n'est pas du texte lisible."""
+    if b.get("type", 0) != 0:
+        return None
+    spans = [span for line in b.get("lines", []) for span in line.get("spans", [])]
+    text = "".join(span.get("text", "") for span in spans).strip()
+    if not text:
+        return None
+    chars = sum(len(span.get("text", "")) for span in spans) or 1
+    bold_chars = sum(len(span.get("text", "")) for span in spans if _is_bold_span(span))
+    bbox = b.get("bbox", [0, 0, 0, 0])
+    return {
+        "text": text,
+        "size": max((span.get("size", 0.0) for span in spans), default=0.0),
+        "bold": bold_chars / chars >= 0.8,
+        "footer_band": bbox[1] < band or bbox[3] > page_height - band,
+        "chars": chars,
+    }
+
+
+def _stats_des_blocs(page_dicts: list[dict], doc,
+                     cfg: dict) -> tuple[dict, list, list, dict]:
+    """Passe A : tout ce qui est GLOBAL au document et qu'un bloc seul ne peut pas dire —
+    la taille du corps de texte, les candidats palier de titre, et les textes qui reviennent
+    de page en page (filigrane, pied de page).
+
+    Renvoie `(infos par bloc, poids de taille, tailles en gras, pages par texte répété)`."""
     size_weights: list[tuple[float, int]] = []                 # pour formatting.body_size
     bold_sizes: list[float] = []                                # candidats palier de titre
     block_info: dict[tuple[int, int], dict] = {}                # (pno, bi) -> infos du bloc
@@ -299,124 +361,117 @@ def _extract_pdf(path: Path, media_dir: Path, extract_images: bool = True,
         page_height = pd.get("height") or doc[pno].rect.height
         band = page_height * cfg["footer_bande_page"]
         for bi, b in enumerate(pd.get("blocks", [])):
-            if b.get("type", 0) != 0:
+            info = _info_du_bloc(b, page_height, band)
+            if info is None:
                 continue
-            spans = [span for line in b.get("lines", []) for span in line.get("spans", [])]
-            text = "".join(span.get("text", "") for span in spans).strip()
-            if not text:
-                continue
-            chars = sum(len(span.get("text", "")) for span in spans) or 1
-            bold_chars = sum(len(span.get("text", "")) for span in spans if _is_bold_span(span))
-            is_bold = bold_chars / chars >= 0.8
-            size = max((span.get("size", 0.0) for span in spans), default=0.0)
-            bbox = b.get("bbox", [0, 0, 0, 0])
-            in_footer_band = bbox[1] < band or bbox[3] > page_height - band
-            size_weights.append((size, chars))
-            if is_bold:
-                bold_sizes.append(size)
-            block_info[(pno, bi)] = {
-                "text": text, "size": size, "bold": is_bold, "footer_band": in_footer_band,
-            }
-            repeat_pages[_normalize_repeat_key(text)].add(pno)
+            size_weights.append((info["size"], info["chars"]))
+            if info["bold"]:
+                bold_sizes.append(info["size"])
+            block_info[(pno, bi)] = info
+            repeat_pages[_normalize_repeat_key(info["text"])].add(pno)
+    return block_info, size_weights, bold_sizes, repeat_pages
 
-    body = formatting.body_size(size_weights)
-    tiers = formatting.cluster_heading_tiers(bold_sizes, body, cfg["ratio_taille_titre"])
 
-    footer_threshold = max(2, round(n_pages * cfg["footer_frac_pages"]))
-    footer_keys = {key for key, pages in repeat_pages.items() if len(pages) >= footer_threshold}
+def _niveau_de_titre(info: dict, tiers: list[float], excluded_titles: set[str],
+                     doublons: dict[str, int]) -> int | None:
+    """Le palier de titre d'un bloc, ou `None` si ce n'en est pas un.
 
-    # Doublons EXACTS de texte à un palier de titre (hors filigrane) : un sous-titre
-    # décoratif répété n'est jamais un vrai titre de chapitre/partie unique.
-    tier_dup_counts: dict[str, int] = defaultdict(int)
+    Trois refus avant la mesure de taille : un bloc non gras ou trop long, un titre que la
+    configuration exclut nommément, et un texte EXACTEMENT répété à un palier de titre — un
+    sous-titre décoratif répété (ex. « Miss roman S's Diary at War ») n'est jamais un vrai
+    titre de chapitre unique."""
+    if not info["bold"] or len(info["text"]) > 120:
+        return None
+    if info["text"].strip().lower() in excluded_titles:
+        return None
+    if doublons.get(_normalize_exact_key(info["text"]), 0) >= 2:
+        return None
+    for level, tier_size in enumerate(tiers, start=1):
+        if abs(info["size"] - tier_size) <= 0.5:
+            return level
+    return None
+
+
+def _paliers_et_pieds(block_info: dict, tiers: list[float], footer_keys: set[str],
+                      excluded_titles: set[str]) -> tuple[dict, set]:
+    """Classe chaque bloc : pied de page à retirer, titre promu, ou corps de texte."""
+    # Doublons EXACTS de texte à un palier de titre (hors filigrane).
+    doublons: dict[str, int] = defaultdict(int)
     for info in block_info.values():
         if info["bold"] and len(info["text"]) <= 120 and any(
                 abs(info["size"] - t) <= 0.5 for t in tiers):
-            tier_dup_counts[_normalize_exact_key(info["text"])] += 1
+            doublons[_normalize_exact_key(info["text"])] += 1
 
     heading_tier: dict[tuple[int, int], int] = {}
     footer_blocks: set[tuple[int, int]] = set()
     for key, info in block_info.items():
-        footer_key = _normalize_repeat_key(info["text"])
-        if info["footer_band"] and footer_key in footer_keys:
+        if info["footer_band"] and _normalize_repeat_key(info["text"]) in footer_keys:
             footer_blocks.add(key)
             continue
-        if not info["bold"] or len(info["text"]) > 120:
+        niveau = _niveau_de_titre(info, tiers, excluded_titles, doublons)
+        if niveau:
+            heading_tier[key] = niveau
+    return heading_tier, footer_blocks
+
+
+def _items_de_page(page, pd: dict, pno: int, *, block_info: dict, footer_blocks: set,
+                   heading_tier: dict,
+                   extract_images: bool) -> list[tuple[float, float, str, object]]:
+    """Les éléments d'une page, NON triés : `(y, x, genre, charge)`.
+
+    Blocs texte en ordre de lecture par position — filigrane/pied de page retiré entièrement,
+    titre détecté par mise en forme promu en `#`/`##` — puis les images, localisées par leur
+    rectangle."""
+    items: list[tuple[float, float, str, object]] = []
+    for bi, b in enumerate(pd.get("blocks", [])):
+        if b.get("type", 0) != 0 or (pno, bi) in footer_blocks:
             continue
-        if info["text"].strip().lower() in excluded_titles:
+        info = block_info.get((pno, bi))
+        if info is None:
             continue
-        if tier_dup_counts[_normalize_exact_key(info["text"])] >= 2:
-            continue  # sous-titre décoratif répété (ex. "Miss Medic's Diary at War")
-        for level, tier_size in enumerate(tiers, start=1):
-            if abs(info["size"] - tier_size) <= 0.5:
-                heading_tier[key] = level
-                break
+        bbox = b.get("bbox", [0, 0, 0, 0])
+        level = heading_tier.get((pno, bi))
+        txt = f"{'#' * level} {info['text']}" if level else info["text"]
+        items.append((bbox[1], bbox[0], "text", txt))
+    if not extract_images:
+        return items
+    for im in page.get_images(full=True):
+        xref = im[0]
+        try:
+            rects = page.get_image_rects(xref) or [None]
+        except Exception:
+            rects = [None]
+        for r in rects:
+            items.append((r.y0 if r is not None else 1e9,
+                          r.x0 if r is not None else 0, "image", (xref, r)))
+    return items
 
-    # ---- Passe B : émission (logique existante, réutilise page_dicts déjà calculé) ----
-    out_lines: list[str] = []
-    images: list[str] = []
-    seen_xref: dict[int, str] = {}
-    stem = path.stem.replace(" ", "_")
 
-    for pno, page in enumerate(doc):
-        pd = page_dicts[pno]
-        items: list[tuple[float, float, str, object]] = []
-        # Blocs texte (ordre de lecture par position) : filigrane/pied de page retiré
-        # entièrement, titre détecté par mise en forme promu en `#`/`##`.
-        for bi, b in enumerate(pd.get("blocks", [])):
-            if b.get("type", 0) != 0 or (pno, bi) in footer_blocks:
-                continue
-            info = block_info.get((pno, bi))
-            if info is None:
-                continue
-            bbox = b.get("bbox", [0, 0, 0, 0])
-            txt = info["text"]
-            level = heading_tier.get((pno, bi))
-            if level:
-                txt = f"{'#' * level} {txt}"
-            items.append((bbox[1], bbox[0], "text", txt))
-        # Images de la page, localisées par leur rectangle (si on les garde).
-        if extract_images:
-            for im in page.get_images(full=True):
-                xref = im[0]
-                try:
-                    rects = page.get_image_rects(xref) or [None]
-                except Exception:
-                    rects = [None]
-                for r in rects:
-                    y = r.y0 if r is not None else 1e9
-                    x = r.x0 if r is not None else 0
-                    items.append((y, x, "image", (xref, r)))
+def _emettre_image(doc, payload, *, pno: int, stem: str, media_dir: Path,
+                   seen_xref: dict[int, str], images: list[str]) -> str | None:
+    """Écrit une image de la page et rend la ligne de marqueur, ou `None` si illisible.
 
-        for _, _, kind, payload in sorted(items, key=lambda t: (round(t[0]), round(t[1]))):
-            if kind == "text":
-                out_lines.append(payload)
-                continue
-            xref, rect = payload
-            if xref in seen_xref:
-                out_lines.append("\n" + seen_xref[xref] + "\n")
-                continue
-            try:
-                info = doc.extract_image(xref)
-            except Exception:
-                continue
-            ext = info.get("ext", "png")
-            rel = f"media/{stem}_p{pno + 1}_x{xref}.{ext}"
-            (media_dir / Path(rel).name).write_bytes(info["image"])
-            # Taille d'AFFICHAGE d'origine sur la page (le rectangle, en points PDF
-            # → pouces), pas la taille native du fichier — sinon l'image ressort à
-            # sa résolution native, potentiellement bien plus grande que voulu.
-            attrs = ""
-            if rect is not None and rect.width > 0 and rect.height > 0:
-                attrs = f'{{width="{rect.width / 72:.3f}in" height="{rect.height / 72:.3f}in"}}'
-            marker = make_marker(rel, attrs)
-            seen_xref[xref] = marker
-            images.append(rel)
-            out_lines.append("\n" + marker + "\n")
-
-        out_lines.append("")  # séparation de page
-
-    doc.close()
-    return Extracted(text="\n".join(out_lines), images=images)
+    Une image déjà vue n'est PAS réécrite : elle reprend son marqueur, sinon la même
+    illustration ressortirait autant de fois qu'elle est réutilisée dans le tome."""
+    xref, rect = payload
+    if xref in seen_xref:
+        return "\n" + seen_xref[xref] + "\n"
+    try:
+        info = doc.extract_image(xref)
+    except Exception:
+        return None
+    rel = f"media/{stem}_p{pno + 1}_x{xref}.{info.get('ext', 'png')}"
+    (media_dir / Path(rel).name).write_bytes(info["image"])
+    # Taille d'AFFICHAGE d'origine sur la page (le rectangle, en points PDF → pouces), pas la
+    # taille native du fichier — sinon l'image ressort à sa résolution native, potentiellement
+    # bien plus grande que voulu.
+    attrs = ""
+    if rect is not None and rect.width > 0 and rect.height > 0:
+        attrs = f'{{width="{rect.width / 72:.3f}in" height="{rect.height / 72:.3f}in"}}'
+    marker = make_marker(rel, attrs)
+    seen_xref[xref] = marker
+    images.append(rel)
+    return "\n" + marker + "\n"
 
 
 # --------------------------------------------------------------------------- #
@@ -492,8 +547,3 @@ def extract(path: str | Path, media_dir: str | Path, extract_images: bool = True
         return _extract_texte(path, media_dir, extract_images=extract_images)
     raise RuntimeError(
         f"Format non pris en charge : {path.name} (docx, pdf, epub, txt, md attendus)")
-
-
-def strip_images(text: str) -> str:
-    """Retire les marqueurs d'images (texte propre pour les sources de référence)."""
-    return re.sub(r"^\s*<!-- IMG: .*? -->\s*$", "", text, flags=re.MULTILINE)

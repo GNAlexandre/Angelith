@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import config as config_mod
+from .langues import resoudre_pack
 from .llm import LLM
 
 # Les cinq agents du pipeline light novel. Liste FIXE, et non « les clés de `modeles` » :
@@ -165,7 +166,11 @@ def build_agents(config: dict, llm=None, dry_run: bool = False, *,
         if etiquette_llm != "llm" else []
     blocs_llm.append(("llm", config.get("llm") or {}))
 
-    prompts_dir = Path(config["chemins"]["prompts"])
+    # Les prompts viennent du PACK DE LANGUE CIBLE, plus de `chemins.prompts` directement.
+    # C'est le seul site du dépôt qui les ouvre — light novel et manga passent tous deux par
+    # ici (cf. `docs/mesures/inventaire-couplage-fr.md`, §1). Sans pack installé, `resoudre_pack`
+    # rend le mode compatibilité, qui sert exactement `chemins.prompts` : rien ne change.
+    pack = resoudre_pack(config)
     modeles = racine["modeles"]
     temperatures = racine.get("temperatures") or {}
     extra = llm_cfg.get("extra_directive", "")
@@ -243,7 +248,7 @@ def build_agents(config: dict, llm=None, dry_run: bool = False, *,
         else:
             modele = spec
             agent_llm, think, budget = _client_defaut()
-        agents[nom] = agent_cls(nom, prompts_dir / f"{nom}.md", agent_llm, modele,
+        agents[nom] = agent_cls(nom, pack.prompt(nom), agent_llm, modele,
                                 _temperature(nom), extra_directive=extra, dry_run=dry_run,
                                 thinking=_raisonne(think), thinking_budget=budget)
     return agents

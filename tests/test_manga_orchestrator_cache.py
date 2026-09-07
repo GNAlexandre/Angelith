@@ -45,6 +45,10 @@ def _config(tmp_path: Path) -> dict:
     # tout le reste est en cache — 110 s d'inférence ONNX par appel, mesurées au profileur.
     config["manga"]["onomatopees"]["actif"] = False
     config["chemins"]["prompts"] = str(ROOT / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    config.setdefault("langues", {})["packs"] = str(ROOT / "langues")
     config.setdefault("options", {})["dry_run"] = True
     return config
 

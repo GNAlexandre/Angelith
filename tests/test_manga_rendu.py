@@ -21,7 +21,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from manga import rendu, typeset
+from manga import rendu
 from manga.clean import analyze_bubble
 from manga.detection import BubbleRegion
 

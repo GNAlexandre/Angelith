@@ -324,7 +324,7 @@ class LLM:
                         f"Modèle « {model} » introuvable côté Ollama.\n"
                         f"  → vérifie le nom exact avec `ollama ls` et corrige config.yaml > modeles.\n"
                         f"  → si le modèle a un tag (ex. « {model}:latest »), le code le résout "
-                        f"normalement seul ; si l'erreur persiste, mets le nom complet AVEC le tag.")
+                        f"normalement seul ; si l'erreur persiste, mets le nom complet AVEC le tag.") from None
             if attempt < self.max_retries:
                 self.stats["retries"] += 1
                 wait = 3 * (attempt + 1)
@@ -356,69 +356,101 @@ class LLM:
         raise RuntimeError(f"Échec de l'appel LLM après {self.max_retries + 1} tentatives : {last_err}")
 
 
-def test_connection(config: dict) -> bool:
+def _connu(model: str, ids: list[str]) -> bool:
+    """Ollama nomme ses modèles avec un tag (`modele:latest`). On matche en ignorant le tag
+    manquant côté config : « qwen3.5-9b-yumetrad » ↔ « qwen3.5-9b-yumetrad:latest »."""
+    return model in ids or any(i.split(":", 1)[0] == model for i in ids)
+
+
+def _resolu(model: str, ids: list[str]) -> str:
+    """L'id RÉEL côté Ollama (avec son tag) pour un modèle configuré sans tag."""
+    if model in ids:
+        return model
+    return next((i for i in ids if i.split(":", 1)[0] == model), model)
+
+
+def _modeles_voulus(config: dict) -> set[str]:
+    """Les modèles que `config.yaml > modeles` réclame, agents désactivés exclus
+    (`modeles.<agent>: null`)."""
+    voulus = {(m["model"] if isinstance(m, dict) else m) for m in config["modeles"].values()}
+    return {m for m in voulus if m}
+
+
+def _verifier_modeles(wanted: set[str], ids: list[str], ecrire=print) -> list[str]:
+    """Rend les modèles MANQUANTS, et les écrit au passage.
+
+    ⚠ `ecrire` est un paramètre depuis le lot 36 : `core/diagnostic.py` a besoin du CONSTAT
+    (la liste), la console a besoin du TEXTE, et une capture de `stdout` aurait fait attendre
+    l'utilisateur douze secondes avant la première ligne. Le défaut `print` garde la sortie de
+    `run.py --check` inchangée, octet pour octet."""
+    missing = sorted({m for m in wanted if not _connu(m, ids)})
+    if missing:
+        ecrire(f"⚠ Modèles configurés absents d'Ollama : {missing}")
+        ecrire("  → `ollama pull <modèle>` (ou `ollama create`), ou ajuste config.yaml > modeles.")
+    else:
+        ecrire("✓ Tous les modèles de config.yaml sont disponibles.")
+    return missing
+
+
+def _essai_de_generation(client, test_model: str, ecrire=print) -> bool:
+    """Mini-génération de contrôle. Purement informative : un serveur qui répond mais génère
+    mal reste un serveur joignable, donc rien ici ne change le verdict.
+
+    Rend True si la génération a produit du texte — le constat que `core/diagnostic.py`
+    consomme ; le texte, lui, part par `ecrire` (cf. `_verifier_modeles`)."""
+    try:
+        r = client.chat.completions.create(
+            model=test_model, max_tokens=64, temperature=0,
+            messages=[{"role": "user", "content": "Réponds uniquement par le mot : OK"}],
+            extra_body={"reasoning_effort": "none"},   # coupe le raisonnement (endpoint OpenAI d'Ollama)
+        )
+        msg = r.choices[0].message
+    except Exception as err:
+        ecrire(f"⚠ Le serveur répond mais la génération échoue : {err}")
+        return False
+
+    out = (msg.content or "").strip()
+    if out:
+        ecrire(f"✓ Génération OK avec « {test_model} » → {out!r}")
+        return True
+    reasoning = getattr(msg, "reasoning", None) or getattr(msg, "reasoning_content", None)
+    if reasoning:
+        ecrire(f"⚠ « {test_model} » a mis sa réponse dans le champ `reasoning` et laissé "
+               f"`content` vide — le raisonnement n'a pas été coupé.")
+        ecrire("  → mets à jour Ollama (`reasoning_effort` requiert une version récente), "
+               "ou ajoute `PARAMETER think false` dans ton Modelfile puis `ollama create`.")
+    else:
+        ecrire(f"⚠ « {test_model} » a répondu vide (ni content ni reasoning). "
+               f"Vérifie le num_ctx du Modelfile.")
+    return False
+
+
+def test_connection(config: dict, ecrire=print) -> bool:
     """Teste le serveur Ollama : joignabilité, modèles disponibles, mini-génération.
-    Renvoie True si le serveur répond."""
+    Renvoie True si le serveur répond.
+
+    ⚠ `ecrire` par défaut à `print` : la sortie de `run.py --test-llm`, de `run.py --check` et
+    de `run_manga.py --check` est inchangée. `core/diagnostic.py` passe un collecteur pour
+    obtenir les mêmes lignes SANS les imprimer — cf. `sonder_llm` là-bas."""
     base = config["llm"]["base_url"]
-    print(f"Test de connexion → {base}")
+    ecrire(f"Test de connexion → {base}")
     client = OpenAI(base_url=base, api_key=config["llm"].get("api_key", "ollama"), timeout=30)
 
     try:
         ids = [m.id for m in client.models.list().data]
     except Exception as err:
-        print("❌ Serveur injoignable.")
-        print("   • Démarre Ollama : `ollama serve` (ou l'app Ollama).")
-        print(f"   • base_url attendu dans config.yaml : {base}")
-        print(f"   • détail : {err}")
+        ecrire("❌ Serveur injoignable.")
+        ecrire("   • Démarre Ollama : `ollama serve` (ou l'app Ollama).")
+        ecrire(f"   • base_url attendu dans config.yaml : {base}")
+        ecrire(f"   • détail : {err}")
         return False
 
-    print(f"✓ Serveur joignable. Modèles disponibles : {ids or '(aucun)'}")
+    ecrire(f"✓ Serveur joignable. Modèles disponibles : {ids or '(aucun)'}")
+    wanted = _modeles_voulus(config)
+    _verifier_modeles(wanted, ids, ecrire)
 
-    # Ollama nomme ses modèles avec un tag (`modele:latest`). On matche en ignorant le
-    # tag manquant côté config : « qwen3.5-9b-yumetrad » ↔ « qwen3.5-9b-yumetrad:latest ».
-    def _known(model: str) -> bool:
-        if model in ids:
-            return True
-        return any(i == model or i.split(":", 1)[0] == model for i in ids)
-
-    configured = {role: m for role, m in config["modeles"].items()}
-    wanted = {(m["model"] if isinstance(m, dict) else m) for m in configured.values()}
-    wanted = {m for m in wanted if m}      # ignore les agents désactivés (modeles.<agent>: null)
-    missing = sorted({m for m in wanted if not _known(m)})
-    if missing:
-        print(f"⚠ Modèles configurés absents d'Ollama : {missing}")
-        print("  → `ollama pull <modèle>` (ou `ollama create`), ou ajuste config.yaml > modeles.")
-    else:
-        print("✓ Tous les modèles de config.yaml sont disponibles.")
-
-    def _resolve(model: str) -> str:
-        """Renvoie l'id réel côté Ollama (avec tag) pour un modèle configuré sans tag."""
-        if model in ids:
-            return model
-        return next((i for i in ids if i.split(":", 1)[0] == model), model)
-
-    test_model = next((_resolve(m) for m in wanted if _known(m)), ids[0] if ids else None)
+    test_model = next((_resolu(m, ids) for m in wanted if _connu(m, ids)),
+                      ids[0] if ids else None)
     if test_model:
-        try:
-            r = client.chat.completions.create(
-                model=test_model, max_tokens=64, temperature=0,
-                messages=[{"role": "user", "content": "Réponds uniquement par le mot : OK"}],
-                extra_body={"reasoning_effort": "none"},   # coupe le raisonnement (endpoint OpenAI d'Ollama)
-            )
-            msg = r.choices[0].message
-            out = (msg.content or "").strip()
-            if out:
-                print(f"✓ Génération OK avec « {test_model} » → {out!r}")
-            else:
-                reasoning = getattr(msg, "reasoning", None) or getattr(msg, "reasoning_content", None)
-                if reasoning:
-                    print(f"⚠ « {test_model} » a mis sa réponse dans le champ `reasoning` et laissé "
-                          f"`content` vide — le raisonnement n'a pas été coupé.")
-                    print("  → mets à jour Ollama (`reasoning_effort` requiert une version récente), "
-                          "ou ajoute `PARAMETER think false` dans ton Modelfile puis `ollama create`.")
-                else:
-                    print(f"⚠ « {test_model} » a répondu vide (ni content ni reasoning). "
-                          f"Vérifie le num_ctx du Modelfile.")
-        except Exception as err:
-            print(f"⚠ Le serveur répond mais la génération échoue : {err}")
+        _essai_de_generation(client, test_model, ecrire)
     return True

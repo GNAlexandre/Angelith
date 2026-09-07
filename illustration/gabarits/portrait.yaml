@@ -1,0 +1,329 @@
+# ============================================================
+#  Gabarit « portrait » — la GRAMMAIRE du modèle d'image.
+#
+#  ⚠ Ce fichier n'est PAS un prompt de pack de langue, et la
+#  distinction commande son emplacement (PLAN-26 L26.1) :
+#
+#  · `langues/<code>/prompts/` porte la VOIX D'UN TOME. Ce qui
+#    s'y trouve s'adresse au LLM local et change le caractère
+#    de la traduction ; `git checkout <tag> -- langues/` doit
+#    reproduire un tome au mot près.
+#  · `illustration/gabarits/` porte la SYNTAXE D'UN MODÈLE.
+#    Ce qui s'y trouve s'adresse à `Qwen-Image-Edit-2511`, ne
+#    dépend d'aucune langue de traduction, et se périme quand
+#    le modèle change — pas quand l'œuvre change.
+#
+#  Les mettre au même endroit ferait dépendre la reproduction
+#  d'un tome de la version d'un modèle d'image. Séparez.
+#
+#  ⚠ Le champ TEXTE n'est qu'UN des canaux du moteur. Les
+#  images de référence portent l'identité, les masques la
+#  position ; ce fichier ne décrit que le texte et sa forme.
+#  Cf. README-ILLUSTRATION-23-27.md §4 ter.
+# ============================================================
+
+version: 1
+nom: portrait
+
+# ────────────────────────────────────────────────────────────
+#  Le prompt NÉGATIF, terme par terme, AVEC SON MOTIF.
+#
+#  ⚠ C'est le seul endroit où écrire ce que l'œuvre n'est PAS,
+#  et le PLAN-26 L26.2 exige que chaque terme porte sa raison :
+#  « retirer un terme est un choix, pas une faute », et un
+#  utilisateur ne peut choisir que s'il sait pourquoi le terme
+#  est là. Un prompt négatif sans motifs est une liste que
+#  personne n'ose toucher.
+#
+#  ⚠ Il est court DÉLIBÉRÉMENT, et son efficacité réelle sur le
+#  graphe livré est MESURÉE — voir docs/mesures/. Le graphe
+#  porte la LoRA Lightning, distillée sans guidage libre de
+#  classifieur : à `cfg 1,0` la branche négative n'est pas
+#  évaluée (lot 25, §5.1). Ces termes sont écrits pour le jour
+#  où le graphe changera, et ce fait est publié plutôt que tu :
+#  un prompt négatif présenté comme actif alors qu'il ne l'est
+#  pas serait un chiffre sans son dénominateur.
+# ────────────────────────────────────────────────────────────
+negatif:
+- terme: {fr: texte, en: text}
+  motif: >-
+    le modèle SAIT écrire, et il écrit spontanément. Un faux japonais ou un faux français
+    dans une illustration est un défaut visible qu'aucune retouche ne rattrape. Le risque
+    est doublé ici : les références validées du corpus sont des COUVERTURES, qui portent le
+    titre en grandes lettres (cf. illustration/identite.py:TITRE_DANS_LES_PIXELS).
+- terme: {fr: filigrane, en: watermark}
+  motif: >-
+    les corpus d'entraînement en portent, et un filigrane inventé sur une image qu'on veut
+    montrer comme sienne est une revendication de droits qui n'existe pas.
+- terme: {fr: logo, en: logo}
+  motif: >-
+    même raison que le filigrane, et le cas est constaté : core/illustrations.py classe les
+    couvertures à part parce qu'« une couverture porte un logo d'éditeur et un bandeau de
+    prix ». Ces pixels-là partent dans le conditionnement.
+- terme: {fr: cadre de case, en: comic panel border}
+  motif: >-
+    le périmètre arrêté est « un personnage seul » — pas une planche, pas une grille. Une
+    case dessinée autour du personnage ferait de la sortie une fausse planche de manga.
+- terme: {fr: bulle de dialogue, en: speech bubble}
+  motif: >-
+    même raison que le cadre de case, et elle est plus forte : une bulle vide appelle un
+    typesetting que la brique ne fait pas, et une bulle remplie ramène le défaut « texte ».
+- terme: {fr: plusieurs personnages, en: multiple characters}
+  motif: >-
+    mesuré au lot 25 (§5.3) : à UNE référence qui est une page entière, le modèle rend un
+    COLLAGE où le personnage apparaît deux fois. C'est le défaut le plus fréquent observé,
+    et le seul de cette liste qui ait un chiffre avant ce lot.
+- terme: {fr: mains déformées, en: deformed hands}
+  motif: >-
+    hérité du prompt du lot 24, conservé sans mesure propre. ⚠ Aucun relevé de ce dépôt ne
+    dit qu'il change quoi que ce soit : il est ici parce qu'il y était, et le dire vaut
+    mieux que de le faire passer pour un choix.
+
+# ────────────────────────────────────────────────────────────
+#  Par langue. Le modèle est multilingue mais son entraînement
+#  ne l'est pas également : FR contre EN est MESURÉ (PLAN-26
+#  critère 7), pas supposé.
+# ────────────────────────────────────────────────────────────
+langues:
+
+  fr:
+    # Le SUJET, accordé. « une femme seul » serait un accord faux dans un dépôt dont le
+    # glossaire existe parce que « le genre commande les accords » (core/glossary.py).
+    # ⚠ `inconnu` est le défaut, et l'abstention est délibérée : core/bible.py note qu'« une
+    # valeur fausse ici coûte plus qu'une valeur absente ».
+    sujets:
+      feminin: une femme seule
+      masculin: un homme seul
+      inconnu: un personnage seul
+
+    # Le CADRAGE. Il ne vient jamais du texte — c'est un choix de l'utilisateur (PLAN-26
+    # étape 0, ligne « cadrage : choisi par l'utilisateur, pas par le texte »).
+    cadrages:
+      visage: en gros plan, cadré sur le visage
+      buste: en buste, cadré à mi-corps
+      pied: en pied, le personnage entier
+
+    # Comment un attribut CITÉ de la bible devient un fragment de prompt. L'ordre de lecture
+    # est celui de core/bible.py : du plus stable (les cheveux) au plus circonstanciel.
+    attributs:
+      age_apparent: '{}'
+      cheveux: cheveux {}
+      yeux: yeux {}
+      tenue: porte {}
+      signes: '{}'
+
+    # Le DÉCOR, et c'est le seul champ du gabarit qu'un descripteur ACCUSE.
+    #
+    # ⚠ Mesuré au lot 26 : la part d'aplats de l'image générée vaut 0,6300 contre 0,3669
+    # pour le tome — c'est le seul descripteur qui ait EMPIRÉ pendant que la moyenne
+    # progressait. Le PLAN-29 L29.4 en nomme la cause probable, et elle est de notre fait :
+    # « sur fond neutre » DEMANDE une grande surface d'une seule teinte. Le tome n'en a pas
+    # autant ; ses fonds sont tramés, hachurés, ou sommairement décorés.
+    #
+    # ⚠ **Le défaut reste `neutre`, et c'est délibéré** : au 2026-09-03 aucune mesure ne
+    # désigne un remplaçant, et le dépôt ne change pas un prompt sur une hypothèse. Les trois
+    # variantes existent pour que la mesure PUISSE se faire (une commande, trois images) ;
+    # le critère 5 du plan dit que le gabarit retenu sera celui que la mesure désigne.
+    decors:
+      neutre: sur fond neutre
+      trame: sur un fond tramé
+      sommaire: dans un décor sommaire, à peine esquissé
+      # ⚠ La chaîne vide n'est pas « pas de décor » : c'est « le prompt ne dit rien du
+      # décor », donc le modèle choisit. Les deux sont des mesures différentes et la variante
+      # existe pour qu'on puisse les distinguer.
+      aucun: ""
+    decor: sur fond neutre
+
+    # ⚠ Les mots par lesquels la SIGNATURE MESURÉE du tome entre dans le prompt — l'approche 1
+    # de l'étape 0.2 du PLAN-26. Les nombres viennent de `core/illustrations.py:signature`,
+    # mesurés sur les illustrations du tome ; ces mots ne font que les TRADUIRE.
+    #
+    # ⚠ CE QUI EST MESURÉ ET CE QUI NE L'EST PAS, et il ne faut pas les confondre : le
+    # descripteur est mesuré, le SEUIL qui décide du mot ne l'est pas. Il est posé, ici, en
+    # tiers de l'échelle [0, 1], et il est écrit pour qu'on puisse le contester. Ce qui est
+    # jugé, c'est l'effet de la phrase entière sur l'image produite — pas la justesse du seuil.
+    registre:
+      couleur_non: en noir et blanc
+      couleur_oui: en couleur
+      saturation_basse: palette désaturée
+      saturation_haute: palette saturée
+      trait_dense: trait marqué, dessin très travaillé
+      trait_fin: trait fin
+      aplats_dominants: larges aplats uniformes
+      contraste_fort: contrastes tranchés
+
+    # Étiquettes de la forme « catégories » (PLAN-26 étape 0.3).
+    etiquettes:
+      sujet: Sujet
+      cadrage: Cadrage
+      apparence: Apparence
+      decor: Décor
+      style: Style
+      scene: Scène
+
+    # La désignation en prose des images de référence. Le modèle d'édition ne reçoit pas ses
+    # références comme des tenseurs anonymes : la carte de Qwen-Image-Edit-2511 les nomme
+    # dans le texte (« la personne de l'image 2 »). Une référence branchée mais jamais citée
+    # est une référence à moitié utilisée, et rien ne le signalerait.
+    designation_une: >-
+      Le personnage est celui de l'image 1 : garde son visage, sa coiffure et sa tenue.
+    designation_plusieurs: >-
+      Le personnage est celui montré dans {images} : garde son visage, sa coiffure et sa
+      tenue, cohérents entre ces images.
+    image_n: l'image {n}
+
+    # ⚠ L'ANCRE DE STYLE est désignée SÉPARÉMENT, et c'est la règle 0 du PLAN-26 L26.0 :
+    # `references` et `ancrages_style` sont deux usages du MÊME canal d'images, et « les
+    # mélanger sans le dire produit une image dont on ne sait pas ce qui a raté ». Le canal
+    # ne sait pas distinguer les deux ; le TEXTE, si.
+    ancrage_une: >-
+      Suis le style graphique de {images} — son trait, sa palette, sa matière — sans en
+      reprendre aucun personnage.
+    ancrage_plusieurs: >-
+      Suis le style graphique de {images} — leur trait, leur palette, leur matière — sans en
+      reprendre aucun personnage.
+
+    # ⚠ LE FILTRE DE PURETÉ, et c'est le garde-fou du critère 4 du PLAN-26.
+    #
+    # Le LLM local n'a le droit de reformuler QUE la scène — pose, geste, expression,
+    # lumière. Les attributs d'apparence viennent de la bible, mot pour mot, jamais du
+    # modèle. Un passage reformulé qui contient l'un de ces mots est REJETÉ EN ENTIER, avec
+    # son motif, plutôt que rogné : le dépôt traite déjà « un cadre à moitié valide » comme
+    # absent plutôt que corrigé (illustration/identite.py:_cadre), parce qu'une phrase
+    # tronquée reste fausse.
+    #
+    # ⚠ CE QUE CE FILTRE N'ATTRAPE PAS, et il faut le savoir : une paraphrase qui évite ce
+    # vocabulaire — « une chevelure de blé mûr » — passerait. Le filtre est un vocabulaire
+    # fermé, donc il est franchissable par périphrase. Ce qui n'est PAS franchissable, c'est
+    # la charpente : les fragments d'attribut sont construits depuis bible.apparence et rien
+    # d'autre, et aucun texte de modèle n'y entre. Le filtre protège la CLAUSE DE SCÈNE ;
+    # la charpente protège les ATTRIBUTS.
+    mots_attribut:
+    - cheveux
+    - chevelure
+    - coiffure
+    - mèche
+    - chauve
+    - blond
+    - brun
+    - roux
+    - châtain
+    - yeux
+    - oeil
+    - œil
+    - prunelle
+    - iris
+    - barbe
+    - moustache
+    - cicatrice
+    - tatouage
+    - lunettes
+    - bandeau
+    - uniforme
+    - armure
+    - robe
+    - veste
+    - manteau
+    - chemise
+    - tunique
+    - blouse
+    - costume
+    - vêtu
+    - porte
+    - ans
+    - âge
+
+  en:
+    sujets:
+      feminin: a lone woman
+      masculin: a lone man
+      inconnu: a lone character
+
+    cadrages:
+      visage: close-up, framed on the face
+      buste: bust shot, framed at mid-body
+      pied: full-length, the whole character
+
+    attributs:
+      age_apparent: '{}'
+      cheveux: '{} hair'
+      yeux: '{} eyes'
+      tenue: wearing {}
+      signes: '{}'
+
+    # Cf. le bloc `decors` du français : le défaut reste `neutre`, les variantes existent
+    # pour que le critère 5 du PLAN-29 puisse être mesuré.
+    decors:
+      neutre: against a plain background
+      trame: against a screen-toned background
+      sommaire: in a sparse, sketched setting
+      aucun: ""
+    decor: against a plain background
+
+    registre:
+      couleur_non: in black and white
+      couleur_oui: in colour
+      saturation_basse: desaturated palette
+      saturation_haute: saturated palette
+      trait_dense: heavy linework, densely drawn
+      trait_fin: fine linework
+      aplats_dominants: large flat areas
+      contraste_fort: sharp contrast
+
+    etiquettes:
+      sujet: Subject
+      cadrage: Camera
+      apparence: Appearance
+      decor: Environment
+      style: Style
+      scene: Scene
+
+    designation_une: >-
+      The character is the one in image 1: keep their face, hair and outfit.
+    designation_plusieurs: >-
+      The character is the one shown in {images}: keep their face, hair and outfit,
+      consistent across these images.
+    image_n: image {n}
+
+    ancrage_une: >-
+      Follow the graphic style of {images} — its line, its palette, its texture — without
+      reusing any character from it.
+    ancrage_plusieurs: >-
+      Follow the graphic style of {images} — their line, their palette, their texture —
+      without reusing any character from them.
+
+    mots_attribut:
+    - hair
+    - haircut
+    - bald
+    - blond
+    - blonde
+    - brown
+    - ginger
+    - redhead
+    - eyes
+    - eye
+    - iris
+    - beard
+    - moustache
+    - mustache
+    - scar
+    - tattoo
+    - glasses
+    - headband
+    - uniform
+    - armour
+    - armor
+    - dress
+    - jacket
+    - coat
+    - shirt
+    - tunic
+    - gown
+    - suit
+    - wearing
+    - wears
+    - dressed
+    - years old
+    - age
+    - aged

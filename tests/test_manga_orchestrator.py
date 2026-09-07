@@ -37,6 +37,10 @@ def _base_config(tmp_path):
     # 110 s d'inférence ONNX par planche (profilé). `test_manga_text_detection.py` la couvre.
     config["manga"]["onomatopees"]["actif"] = False
     config["chemins"]["prompts"] = str(ROOT / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    config.setdefault("langues", {})["packs"] = str(ROOT / "langues")
     config.setdefault("options", {})["dry_run"] = True
     return config
 
@@ -321,7 +325,17 @@ def test_une_relance_de_seuils_SANS_gain_ne_touche_a_rien(tmp_path, synthetic_ma
 
 # --------------------------------------------------------------------------- #
 # Lot 14 — le contexte inter-planches, lu depuis les checkpoints
+#
+# ⚠ Depuis le lot 15, chaque ligne porte son ORIGINE (« - Planche N−1 : … ») et le budget est
+# RÉPARTI entre les planches au lieu d'être tronqué globalement. Ces tests comparent donc les
+# répliques, pas les lignes brutes ; la forme de l'étiquette est testée par
+# `tests/test_manga_prompt_planche.py`, qui est l'endroit où elle compte.
 # --------------------------------------------------------------------------- #
+
+
+def _repliques(lignes):
+    """Le texte seul, débarrassé de son étiquette d'origine."""
+    return [ligne.split(" : ", 1)[-1] for ligne in lignes]
 
 def test_le_contexte_vient_des_planches_qui_PRECEDENT(tmp_path):
     """Sans état de boucle : les trois cas (run complet, run partiel, `--page N`) donnent le
@@ -332,8 +346,9 @@ def test_le_contexte_vient_des_planches_qui_PRECEDENT(tmp_path):
     for page, textes in ((1, ["Un", "Deux"]), (2, ["Trois"]), (3, ["Quatre", "Cinq"])):
         checkpoints.save_traduction(checkpoints.page_checkpoint_dir(tmp_path, page), textes)
 
-    assert _contexte_precedent(tmp_path, 4, 3, 18) == ["Un", "Deux", "Trois", "Quatre", "Cinq"]
-    assert _contexte_precedent(tmp_path, 4, 1, 18) == ["Quatre", "Cinq"]
+    assert _repliques(_contexte_precedent(tmp_path, 4, 3, 18)) == [
+        "Un", "Deux", "Trois", "Quatre", "Cinq"]
+    assert _repliques(_contexte_precedent(tmp_path, 4, 1, 18)) == ["Quatre", "Cinq"]
 
 
 def test_le_contexte_est_amorce_sur_une_planche_ISOLEE(tmp_path):
@@ -343,7 +358,7 @@ def test_le_contexte_est_amorce_sur_une_planche_ISOLEE(tmp_path):
     from manga.orchestrator_manga import _contexte_precedent
 
     checkpoints.save_traduction(checkpoints.page_checkpoint_dir(tmp_path, 2), ["Bonjour"])
-    assert _contexte_precedent(tmp_path, 3, 3, 18) == ["Bonjour"]
+    assert _repliques(_contexte_precedent(tmp_path, 3, 3, 18)) == ["Bonjour"]
 
 
 def test_une_planche_SAUTEE_ne_transmet_plus_un_contexte_perime(tmp_path):
@@ -355,10 +370,14 @@ def test_une_planche_SAUTEE_ne_transmet_plus_un_contexte_perime(tmp_path):
 
     checkpoints.save_traduction(checkpoints.page_checkpoint_dir(tmp_path, 12), ["Vieux"])
     checkpoints.save_traduction(checkpoints.page_checkpoint_dir(tmp_path, 39), ["Récent"])
-    assert _contexte_precedent(tmp_path, 40, 3, 18) == ["Récent"]
+    assert _repliques(_contexte_precedent(tmp_path, 40, 3, 18)) == ["Récent"]
 
 
 def test_le_contexte_est_plafonne(tmp_path):
+    """Le plafond tient toujours — c'est ce qui empêche une planche bavarde de gonfler le
+    prompt. ⚠ Ici une seule planche précède, elle prend donc tout le budget ; c'est quand
+    plusieurs se partagent la fenêtre que la répartition du lot 15 se voit (cf.
+    `tests/test_manga_prompt_planche.py`)."""
     from manga import checkpoints
     from manga.orchestrator_manga import _contexte_precedent
 
@@ -384,4 +403,5 @@ def test_le_contexte_transmet_l_orthographe_FORCEE(tmp_path):
     gloss = {"personnages": [{"nom": "Mitsukage", "force": True, "interdits": ["Mikage"]}]}
     checkpoints.save_traduction(checkpoints.page_checkpoint_dir(tmp_path, 1),
                                 ["Mikage arrive"])
-    assert _contexte_precedent(tmp_path, 2, 3, 18, gloss) == ["Mitsukage arrive"]
+
+    assert _repliques(_contexte_precedent(tmp_path, 2, 3, 18, gloss)) == ["Mitsukage arrive"]

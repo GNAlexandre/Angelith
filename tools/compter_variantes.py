@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import collections
 import difflib
-import json
 import re
 import sys
 from pathlib import Path
@@ -36,6 +35,7 @@ from core import glossary                        # noqa: E402
 from core.cli import charger_config, configurer_stdout   # noqa: E402
 from core.glossary import ENTITY_CATS            # noqa: E402
 from manga import terminology                    # noqa: E402
+from tools import _banc_commun                   # noqa: E402
 
 # Le lexique des têtes de phrase françaises et le comptage à frontières de mot vivaient ici.
 # Ils servent maintenant AUSSI au pipeline (`manga/terminology.py` détecte la dérive sans
@@ -54,22 +54,15 @@ def _lire_tome(build_dir: Path, brut: bool = False):
     de corriger une orthographe et de relancer `--from rendu` sans appel LLM). Mesurer le
     cache brut ne dirait donc rien de ce que le lecteur voit. `brut=True` le fait exprès, pour
     comparer avant/après."""
-    for d in sorted((build_dir / ".checkpoints").glob("page_*")):
-        qa, tr = d / "qa.json", d / "traduction.json"
+    for planche in _banc_commun.planches(build_dir):
         fr = None
-        if not brut and qa.exists():
-            try:
-                bulles = json.loads(qa.read_text(encoding="utf-8")).get("bulles") or []
-                fr = [b.get("traduction") or "" for b in bulles]
-            except (json.JSONDecodeError, OSError, AttributeError):
-                fr = None
+        if not brut and planche.qa is not None:
+            fr = [b.get("traduction") or "" for b in (planche.qa.get("bulles") or [])]
         if fr is None:
-            if not tr.exists():
+            if planche.traduction is None:
                 continue
-            fr = json.loads(tr.read_text(encoding="utf-8"))
-        oc = d / "ocr.json"
-        yield (int(d.name.split("_")[1]),
-               json.loads(oc.read_text(encoding="utf-8")) if oc.exists() else [], fr)
+            fr = planche.traduction
+        yield planche.numero, planche.ocr or [], fr
 
 
 def _familles(glo: dict) -> list[tuple[str, list[str]]]:
@@ -178,8 +171,7 @@ def main() -> int:
         return 2
     projet, tome = args[0], args[1]
     config = charger_config(args[2] if len(args) > 2 else "config.yaml")
-    chemins = core_config.section(config, "manga", "chemins")
-    build_dir = Path(chemins["build"]) / projet / tome / "manga"
+    build_dir = _banc_commun.build_dir_de(_banc_commun.racine_build(config), projet, tome)
     if not build_dir.exists():
         print(f"Rien à mesurer : {build_dir} n'existe pas.")
         return 1
@@ -190,7 +182,8 @@ def main() -> int:
                else "texte réellement dessiné (qa.json, après forçage)")
     print(f"{projet} / {tome} — {len(pages)} page(s) · source : {origine}\n")
 
-    gpath = (Path(chemins["sources"]) / projet
+    chemins = core_config.section(config, "manga", "chemins")
+    gpath = (_banc_commun.racine_sources(config) / projet
              / chemins.get("glossaire_fichier", "glossaire.yaml"))
     glo = glossary.load(gpath)
     if glo:

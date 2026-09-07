@@ -33,7 +33,7 @@ def test_extract_archive_raises_if_no_images(tmp_path):
         zf.writestr("readme.txt", b"pas une image")
     try:
         ingest.extract_archive(archive, tmp_path / "staging")
-        assert False, "devrait lever SystemExit (aucune image)"
+        raise AssertionError("devrait lever SystemExit (aucune image)")
     except SystemExit:
         pass
 
@@ -43,7 +43,7 @@ def test_extract_archive_unsupported_format(tmp_path):
     bogus.write_bytes(b"")
     try:
         ingest.extract_archive(bogus, tmp_path / "staging")
-        assert False, "devrait lever SystemExit (format non supporté)"
+        raise AssertionError("devrait lever SystemExit (format non supporté)")
     except SystemExit:
         pass
 

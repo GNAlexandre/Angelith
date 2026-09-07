@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from gui.cache_apercu import CacheApercu, poids_apercu, signature
+from gui.cache_apercu import (CacheApercu, fenetre_retenue, fenetre_tenable,
+                              poids_apercu, signature)
 
 
 @dataclass
@@ -183,3 +184,78 @@ def test_le_poids_compte_les_calques_et_le_fond():
 
 def test_un_apercu_sans_calque_ne_pese_rien():
     assert poids_apercu(_ApercuFactice()) == 0
+
+
+# --------------------------------------------------------------------------- #
+#  Le plafond et la fenêtre de préchargement, réconciliés — `PLAN-35` L35.3
+# --------------------------------------------------------------------------- #
+#
+# ⚠ Ce que ces tests empêchent de revenir est MESURÉ, pas supposé : au rang 60 d'un tome de
+# 118 planches, avec la fenêtre ±10 et le plafond de 120 Mo par défaut, l'éditeur composait
+# **137 aperçus pour en garder 12** en 120 s, indéfiniment, sur un panneau que personne ne
+# touchait. Après le frein : **13 pour 12**. Tout est dans
+# `docs/mesures/retouche-2026-09-05.md`.
+
+
+def test_poids_moyen_est_zero_tant_que_rien_n_est_compose():
+    """On ne bride pas sur un poids qu'on n'a pas mesuré — c'est la règle du dépôt."""
+    assert CacheApercu().poids_moyen() == 0.0
+
+
+def test_poids_moyen_suit_le_contenu_du_cache():
+    cache = CacheApercu()
+    cache.poser(("a",), _apercu(n_calques=1, cote=10))
+    cache.poser(("b",), _apercu(n_calques=3, cote=10))
+    assert cache.poids_moyen() == pytest.approx((1 + 3) * 10 * 10 * 4 / 2)
+
+
+def test_sans_poids_mesure_la_fenetre_n_est_pas_bridee():
+    assert fenetre_tenable(120 * 1024 * 1024, 0.0, 21) == 21
+
+
+def test_la_fenetre_est_ramenee_a_ce_que_le_plafond_garde():
+    """**Le test qui aurait échoué avant le lot 35.** 21 planches à 9,35 Mo, plafond 120 Mo."""
+    assert fenetre_tenable(120 * 1024 * 1024, 9.35 * 1024 * 1024, 21) == 12
+
+
+def test_une_fenetre_qui_tient_deja_n_est_pas_touchee():
+    assert fenetre_tenable(120 * 1024 * 1024, 1.0 * 1024 * 1024, 11) == 11
+
+
+def test_une_bande_webtoon_ne_tient_qu_a_trois():
+    """35,2 Mo par bande mesurés le 2026-09-05 — une seule bande au corpus, également le
+    seul volume à source latine."""
+    assert fenetre_tenable(120 * 1024 * 1024, 35.2 * 1024 * 1024, 9) == 3
+
+
+def test_on_garde_toujours_au_moins_une_planche():
+    """Même règle que `_evincer`, et pour la même raison : sinon l'écran resterait vide."""
+    assert fenetre_tenable(10, 10_000_000.0, 21) == 1
+
+
+def test_la_fenetre_retenue_garde_la_courante():
+    assert 60 in fenetre_retenue(list(range(50, 71)), 60, 5)
+
+
+def test_la_fenetre_retenue_avance_avant_de_reculer():
+    """On lit un manga en avançant : à capacité impaire, la suivante prime la précédente."""
+    assert fenetre_retenue(list(range(1, 22)), 11, 4) == [10, 11, 12, 13]
+
+
+def test_la_fenetre_retenue_reste_triee_dans_l_ordre_de_la_pellicule():
+    retenus = fenetre_retenue(list(range(1, 22)), 11, 7)
+    assert retenus == sorted(retenus)
+
+
+def test_une_fenetre_plus_courte_que_la_capacite_passe_entiere():
+    assert fenetre_retenue([1, 2, 3], 2, 10) == [1, 2, 3]
+
+
+def test_une_courante_hors_pellicule_ne_coupe_pas_le_prechargement():
+    """Une planche filtrée hors de la bande : rendre une liste vide arrêterait tout
+    préchargement jusqu'au prochain clic."""
+    assert fenetre_retenue([1, 2, 3, 4], 99, 2) == [1, 2]
+
+
+def test_la_capacite_est_au_moins_un():
+    assert fenetre_retenue([1, 2, 3], 2, 0) == [2]

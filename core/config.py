@@ -125,10 +125,31 @@ def verifier(config: dict, *, connues=None, libres=None) -> list[str]:
     à défaut silencieux : écrire `manga.typeset.font_paht` laisse le run se dérouler
     entièrement avec la police par défaut, sans un mot, et rien ne le rattrape après coup.
     C'est ce silence-là qu'on casse, pas le droit de l'utilisateur à lancer son run."""
-    from .config_schema import CLES_CONNUES, CLES_LIBRES
+    from .config_schema import CLES_CONNUES, CLES_LIBRES, NATURES, nature_de
     connues = CLES_CONNUES if connues is None else connues
     libres = CLES_LIBRES if libres is None else libres
     avertissements: list[str] = []
+
+    def verifier_valeur(chemin: str, valeur) -> None:
+        """Contrôle la VALEUR d'une clé reconnue.
+
+        `CLES_CONNUES` attrape `font_paht` ; elle ne dit rien de `conf_threshold: "0.35"`
+        (une chaîne) ni de `taille_min: -5`. Ces valeurs passaient sans un mot, puis
+        cassaient loin de leur cause — ou ne cassaient pas et produisaient silencieusement
+        un mauvais rendu sur 150 planches.
+
+        ⚠ `None` est TOUJOURS accepté : c'est la façon dont ce fichier écrit « laisse le
+        défaut » (`modeles.correcteur: null` désactive l'agent), et le refuser casserait des
+        configs saines."""
+        if valeur is None:
+            return
+        nature = nature_de(chemin)
+        if nature is None:
+            return
+        predicat, attendu = NATURES[nature]
+        if not predicat(valeur):
+            avertissements.append(
+                f"valeur douteuse : {chemin} = {valeur!r} — attendu {attendu}")
 
     def parcourir(bloc, prefixe: str = "") -> None:
         """⚠ On **s'arrête** à la première clé inconnue au lieu de descendre dedans.
@@ -146,8 +167,11 @@ def verifier(config: dict, *, connues=None, libres=None) -> list[str]:
                     f"clé inconnue : {chemin}"
                     + (f" — vouliez-vous dire {proche} ?" if proche else ""))
                 continue
-            if chemin not in libres:
-                parcourir(valeur, chemin + ".")
+            if isinstance(valeur, dict):
+                if chemin not in libres:
+                    parcourir(valeur, chemin + ".")
+            else:
+                verifier_valeur(chemin, valeur)
 
     parcourir(config or {})
     return sorted(avertissements)

@@ -24,14 +24,12 @@ le second qu'il l'est aussi **entre** les lettres.
 """
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 pytest.importorskip("PySide6", reason="interface graphique : pip install -r requirements-gui.txt")
 
 from PIL import Image                                                        # noqa: E402
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt                       # noqa: E402
-from PySide6.QtGui import QPixmap                                            # noqa: E402
 from PySide6.QtWidgets import (QApplication, QGraphicsSceneMouseEvent,       # noqa: E402
                                QGraphicsView)
 
@@ -417,3 +415,129 @@ def test_un_trace_minuscule_reste_un_clic_maladroit(scene):
     recu = _capter(scene.zone_dessinee)
     _tracer(scene, (300, 60), (302, 62))
     assert recu == []
+
+
+# --------------------------------------------------------------------------- #
+#  L'alternative CLAVIER aux gestes de canevas — PLAN-19 L19.6.6
+# --------------------------------------------------------------------------- #
+#
+# ⚠ Ce que ces tests NE couvrent pas, et c'est écrit plutôt que prétendu : **dessiner** une
+# zone au clavier. Le plan le demandait explicitement — « livrez le déplacement et le
+# retaillage ; écrivez que le dessin n'est pas couvert ». Il n'y a donc ni test ni code pour
+# tracer une bulle sans souris, et `test_le_clavier_ne_sait_pas_dessiner` le VERROUILLE :
+# le jour où quelqu'un croit le contraire, il échoue.
+
+def test_les_fleches_deplacent_la_zone_choisie(scene):
+    scene.choisir(0)
+    avant = scene.zone(0).rect_scene()
+    assert scene.deplacer_zone_courante(10, -4) is True
+    apres = scene.zone(0).rect_scene()
+    assert apres.left() == pytest.approx(avant.left() + 10)
+    assert apres.top() == pytest.approx(avant.top() - 4)
+    assert apres.size() == avant.size(), "un déplacement ne change pas la taille"
+
+
+def test_les_fleches_retaillent_par_le_coin_bas_droit(scene):
+    """Le coin haut-gauche est l'ancre : c'est celui qu'on regarde en ajustant une bulle, et
+    une ancre au centre ferait glisser la zone sous les doigts à chaque cran."""
+    scene.choisir(0)
+    avant = scene.zone(0).rect_scene()
+    assert scene.retailler_zone_courante(12, 8) is True
+    apres = scene.zone(0).rect_scene()
+    assert apres.topLeft() == avant.topLeft()
+    assert apres.width() == pytest.approx(avant.width() + 12)
+    assert apres.height() == pytest.approx(avant.height() + 8)
+
+
+def test_le_geste_au_clavier_n_ecrit_rien_avant_le_depot(scene):
+    """⚠ **Le point qui décide si la fonction est utilisable.** `zone_retaillee` réécrit
+    `regions.json`, `masks.png` et repeint la planche nettoyée — de l'ordre de la seconde. Une
+    écriture par flèche rendrait le geste impraticable et empilerait vingt pas d'historique
+    pour un déplacement de vingt pixels. C'est la mécanique du glisser : beaucoup de
+    « en cours », un seul dépôt."""
+    scene.choisir(0)
+    en_cours, depots = _capter(scene.zone_en_cours), _capter(scene.zone_retaillee)
+    for _ in range(20):
+        scene.deplacer_zone_courante(1, 0)
+    assert len(en_cours) == 20
+    assert depots == [], "aucune écriture pendant le geste"
+    assert scene.deposer_zone_courante() is True
+    assert len(depots) == 1
+
+
+def test_le_clavier_ne_sort_pas_la_zone_de_la_planche(scene):
+    """Une bulle poussée hors de l'image ferait lever `ErreurEdition` au dépôt — c'est-à-dire
+    une centaine de flèches plus tard, quand on ne sait plus laquelle a fauté."""
+    scene.choisir(0)
+    for _ in range(400):
+        scene.deplacer_zone_courante(-10, -10)
+    boite = scene.zone(0).rect_scene()
+    assert boite.left() >= -0.01 and boite.top() >= -0.01
+    for _ in range(400):
+        scene.deplacer_zone_courante(10, 10)
+    boite = scene.zone(0).rect_scene()
+    assert boite.right() <= scene.sceneRect().right() + 0.01
+    assert boite.bottom() <= scene.sceneRect().bottom() + 0.01
+
+
+def test_le_clavier_refuse_de_degenerer_la_zone(scene):
+    """Sous `_TAILLE_MIN_TRACE`, la boîte serait refusée au dépôt. On plancher ici, pendant le
+    geste, où l'utilisateur voit ce qu'il fait — comme pour une poignée tirée à la souris."""
+    scene.choisir(0)
+    for _ in range(100):
+        scene.retailler_zone_courante(-10, -10)
+    boite = scene.zone(0).rect_scene()
+    assert boite.width() >= sp._TAILLE_MIN_TRACE
+    assert boite.height() >= sp._TAILLE_MIN_TRACE
+
+
+def test_le_clavier_ne_fait_rien_sans_zone_choisie(scene):
+    scene.choisir(-1)
+    assert scene.deplacer_zone_courante(5, 5) is False
+    assert scene.retailler_zone_courante(5, 5) is False
+    assert scene.deposer_zone_courante() is False
+
+
+def test_le_clavier_ne_fait_rien_quand_la_scene_est_inerte(scene):
+    """« Comparer au rendu du pipeline » et un run en cours coupent l'interaction. Le clavier
+    doit s'arrêter là où la souris s'arrête, sinon il devient un second chemin d'écriture que
+    le verrou ne couvre pas."""
+    scene.choisir(0)
+    scene.regler_interaction(False)
+    assert scene.deplacer_zone_courante(5, 5) is False
+    assert scene.retailler_zone_courante(5, 5) is False
+
+
+def test_le_clavier_ne_sait_pas_dessiner(scene):
+    """⚠ **Le périmètre, verrouillé.** Dessiner une zone au clavier demande une notion de
+    curseur dans la scène ; ce n'est pas livré, et le plan demandait de l'écrire plutôt que
+    de le prétendre. Aucune méthode de la scène ne trace sans souris."""
+    scene.choisir(-1)
+    assert not [n for n in dir(scene)
+                if n.startswith("dessiner_") or n.startswith("tracer_")]
+    dessinees = _capter(scene.zone_dessinee)
+    scene.deplacer_zone_courante(5, 5)
+    scene.retailler_zone_courante(5, 5)
+    assert dessinees == []
+
+
+def test_la_vue_rend_les_fleches_au_panneau_quand_une_zone_est_choisie(scene):
+    """⚠ `QGraphicsView` hérite de `QAbstractScrollArea`, qui FAIT DÉFILER sur les flèches.
+    Sans redirection, l'alternative clavier était inatteignable : la vue mangeait la touche
+    avant que le panneau la voie."""
+    from PySide6.QtGui import QKeyEvent
+
+    vue = sp.VuePlanche(scene)
+    scene.choisir(0)
+    ev = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Left, Qt.NoModifier)
+    ev.accept()
+    vue.keyPressEvent(ev)
+    assert not ev.isAccepted(), "la flèche doit remonter au panneau"
+
+    # Sans zone choisie, les flèches redeviennent le défilement — encore ce qu'on veut sur un
+    # webtoon de 9 551 px de haut.
+    scene.choisir(-1)
+    ev2 = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Left, Qt.NoModifier)
+    ev2.accept()
+    vue.keyPressEvent(ev2)
+    assert ev2.isAccepted()

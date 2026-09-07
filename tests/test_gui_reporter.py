@@ -200,7 +200,20 @@ def test_une_tache_qui_leve_ne_tue_pas_le_fil(qt_app):
 
     assert espion.fins[0][2] is False and "zone hors planche" in espion.fins[0][3]
     assert espion.fins[1][2] is True, "la tâche suivante s'exécute quand même"
-    assert any(n == "warn" and "ValueError" in m for n, m in espion.lignes)
+
+    # ⚠ **Le nom de classe a changé de canal** (`PLAN-19` L19.7). Il partait en « warn », donc
+    # dans le journal ET dans la barre d'état : `ValueError` était la seule chose que
+    # l'utilisateur voyait d'un échec. Il est excellent dans un rapport de bug et inutilisable
+    # au moment où l'on cherche quoi faire.
+    #
+    # Deux lignes désormais, et le test garde les deux :
+    # · le canal « verbose » porte le détail technique, pour le rapport de bug ;
+    # · le message de `fin` — qui, lui, remonte à l'écran — porte ce qui a échoué et ce qu'on
+    #   peut tenter, sans nommer une classe Python.
+    assert any(n == "verbose" and "ValueError" in m for n, m in espion.lignes),         "le détail technique doit rester dans le journal"
+    visible = espion.fins[0][3]
+    assert "ValueError" not in visible, "l'écran ne montre pas un nom de classe Python"
+    assert "édition de zone" in visible and "journal" in visible.lower()
 
 
 def test_les_demandes_identiques_sont_fusionnees(qt_app):
@@ -315,3 +328,47 @@ def test_un_relettrage_ne_precharge_aucun_modele(tmp_path, monkeypatch):
         tache_run(brique="manga", projet="P", tome="V", config=config,
                   reporter=espion.reporter, depuis=depuis).fonction()
         assert precharges == [attendu], f"--from {depuis}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CANAL DE PROGRESSION CHIFFRÉ
+#
+# La barre lisait l'avancement dans le LIBELLÉ humain de `stage`, à l'expression régulière.
+# `Reporter.progres` le dit en chiffres. Le repli par regex reste en place pour les libellés
+# non instrumentés — ces deux tests verrouillent le fait que les deux marchent.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_progres_emet_la_progression():
+    from gui.travailleur import ReporterQt, SignauxTravail
+
+    signaux = SignauxTravail()
+    vus = []
+    signaux.progression.connect(lambda c, t: vus.append((c, t)))
+
+    ReporterQt(signaux).progres(12, 131)
+
+    assert vus == [(12, 131)]
+
+
+def test_le_repli_par_libelle_reste_actif():
+    """Un libellé non instrumenté doit continuer d'alimenter la barre : retirer le repli en
+    même temps que l'on ajoute le canal ferait un trou sur toutes les étapes non converties."""
+    from gui.travailleur import ReporterQt, SignauxTravail
+
+    signaux = SignauxTravail()
+    vus = []
+    signaux.progression.connect(lambda c, t: vus.append((c, t)))
+
+    ReporterQt(signaux).stage("Page 12/131 — page_0012.png (ocr)")
+
+    assert vus == [(12, 131)]
+
+
+def test_progres_fait_partie_du_contrat_reporter():
+    """Même garde que pour le reste de `ReporterQt` : un orchestrateur qui appelle `progres`
+    sur un `Reporter` de base ne doit pas faire tomber un run de 150 planches."""
+    from core.reporter import Reporter, RichReporter
+    from gui.travailleur import ReporterQt
+
+    for classe in (Reporter, RichReporter, ReporterQt):
+        assert callable(getattr(classe, "progres", None)), classe.__name__

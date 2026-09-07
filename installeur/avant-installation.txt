@@ -1,0 +1,62 @@
+CE QUE CETTE INSTALLATION NE CONTIENT PAS
+=========================================
+
+Angelith traduit en local : rien de ce que vous traitez ne sort de votre machine. La
+contrepartie est que les modeles, eux, ne sont pas dans ce paquet. Lisez cette page
+maintenant plutot que de le decouvrir au sixieme ecran.
+
+Ce paquet contient l'application, ses prompts, ses gabarits et sa configuration. Il ne
+contient AUCUN des elements suivants :
+
+  * AUCUN poids de detection de bulles. Le detecteur en place est sous GPL-3.0 et entraine
+    sur Manga109-s : il n'est pas redistribuable. L'application sait le telecharger depuis sa
+    source, et vous demande votre accord avant, en affichant sa licence.
+
+  * AUCUN modele de langue. Angelith parle a un serveur local (Ollama ou LM Studio) que vous
+    installez separement, avec le modele de votre choix. L'application ne demarre aucun
+    service a votre place.
+
+  * AUCUN modele d'OCR. Le lecteur japonais se recupere depuis sa source au premier usage
+    (une connexion reseau, une seule fois), avec votre accord.
+
+  * NI Pandoc, NI WeasyPrint, NI unrar, NI ComfyUI. Pandoc est necessaire aux sorties DOCX et
+    EPUB du light novel ; WeasyPrint au PDF ; unrar aux archives .cbr ; ComfyUI a la brique
+    d'illustration, qui est experimentale.
+
+  * AUCUNE oeuvre. Le tome de demonstration propose au premier lancement est synthetique : il
+    est genere, il n'est l'oeuvre de personne.
+
+QUOI FAIRE APRES L'INSTALLATION
+-------------------------------
+
+Lancez Angelith et ouvrez la page Diagnostic. Elle liste ce qui manque, ce que chaque manque
+coute, et le geste exact pour y remedier — avec un bouton quand Angelith peut le faire
+lui-meme, et un lien quand c'est a vous.
+
+OU VONT VOS FICHIERS
+--------------------
+
+  * l'application          : ce dossier d'installation, en lecture seule a l'usage ;
+  * vos reglages           : %LOCALAPPDATA%\Angelith  (votre config.yaml, la disposition de
+                             la fenetre, les poids telecharges) ;
+  * vos oeuvres            : Documents\Angelith\sources et Documents\Angelith\build.
+
+La desinstallation ne supprime que l'application. Elle vous demandera si vous voulez aussi
+effacer vos reglages ; elle ne touche jamais a vos oeuvres ni a vos tomes traduits.
+
+AVERTISSEMENT WINDOWS
+---------------------
+
+Ce programme n'est pas signe par un certificat de code. Windows SmartScreen affichera donc un
+avertissement au premier lancement de chaque nouvelle version, et vous devrez choisir
+« Informations complementaires » puis « Executer quand meme ». C'est le comportement normal
+pour un binaire non signe : nous preferons l'annoncer ici plutot que vous laisser le
+decouvrir. L'empreinte SHA-256 de chaque fichier publie est jointe a la release, et permet de
+verifier que ce que vous avez telecharge est bien ce qui a ete construit.
+
+LICENCE
+-------
+
+Angelith est un logiciel libre sous AGPL-3.0-or-later. Le code source est disponible sur
+https://github.com/GNAlexandre/Angelith. Les licences des bibliotheques et des polices
+embarquees sont dans le fichier NOTICE, installe a cote de l'application.

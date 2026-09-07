@@ -79,7 +79,13 @@ def test_le_changelog_porte_la_regle_de_numerotation():
 # Les briques de traitement du dépôt, et le script qui les lance. `gui.py` et `app.py` n'y
 # figurent pas : ce sont des FAÇADES, sans chemin de traitement propre — leur degré de
 # confiance est celui des briques qu'elles pilotent (cf. la note de `core/version.py`).
-BRIQUES = {"ln": "run.py", "manga": "run_manga.py", "scan": "run_ocr.py"}
+BRIQUES = {"ln": "run.py", "manga": "run_manga.py", "scan": "run_ocr.py",
+           "illustration": "run_illustration.py"}
+
+#: Les etats admis, du plus sur au moins sur. L'ordre compte : un etat qui n'est pas dans
+#: cette liste est un mot invente, et un mot invente ne dit rien a qui decide d'engager deux
+#: heures de GPU sur la foi de la ligne `--version`.
+ETATS = ("stable", "beta", "experimental")
 
 
 def test_etat_des_briques_declare_toutes_les_briques():
@@ -87,6 +93,21 @@ def test_etat_des_briques_declare_toutes_les_briques():
     or c'est sur cette ligne qu'on décide d'engager deux heures d'OCR ou de GPU."""
     assert set(ETAT_BRIQUES) == set(BRIQUES)
     assert all(isinstance(v, str) and v for v in ETAT_BRIQUES.values())
+
+
+def test_chaque_etat_est_un_mot_connu():
+    """« experimental » est arrive avec la brique d'illustration (2.15.0), et il est plus bas
+    que « beta » : le moteur reel n'a jamais tourne, et le defaut du depot est un moteur
+    factice. Un etat invente ne dirait rien a qui lit cette ligne pour decider."""
+    inconnus = {b: e for b, e in ETAT_BRIQUES.items() if e not in ETATS}
+    assert not inconnus, inconnus
+
+
+def test_la_brique_d_illustration_est_sous_beta():
+    """Le PLAN-24 L24.1 l'exige : un mot NOUVEAU et PLUS BAS que `beta`. Si quelqu'un la fait
+    passer en beta, ce test doit tomber, parce que la mesure du moteur reel n'est toujours pas
+    faite (cf. docs/mesures/socle-generatif-2026-08-29.md)."""
+    assert ETATS.index(ETAT_BRIQUES["illustration"]) > ETATS.index("beta")
 
 
 def test_chaque_brique_a_son_point_d_entree():

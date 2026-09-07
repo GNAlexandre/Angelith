@@ -38,11 +38,15 @@ de la caler précisément sur les bords.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
+from PySide6.QtGui import QBrush, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsLineItem, QGraphicsPixmapItem,
                                QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem,
                                QGraphicsView)
+
+from . import theme
 
 # Modes de l'outil. `MODE_CHOISIR` est le repos : on sélectionne, on ne dessine rien.
 MODE_CHOISIR = "choisir"
@@ -51,11 +55,17 @@ MODE_ELLIPSE = "ellipse"
 MODE_MODIFIER = "modifier"
 MODE_SCINDER = "scinder"
 
-_COULEUR_ZONE = QColor(70, 150, 255)
-_COULEUR_CHOISIE = QColor(255, 170, 40)
-_COULEUR_VIDE = QColor(230, 80, 80)          # bulle sans réplique : elle se voit de loin
-_COULEUR_MAIN = QColor(120, 210, 120)        # réplique reprise à la main
-_COULEUR_TRACE = QColor(255, 255, 255)
+# ⚠ Les cinq couleurs de zone étaient déclarées ICI, en `QColor(70, 150, 255)` et consorts.
+# Elles vivent maintenant dans `gui/theme.py`, sous les rôles `zone`, `zone_choisie`,
+# `zone_vide`, `zone_main`, `zone_trace` — et elles sont IDENTIQUES dans les deux thèmes,
+# parce qu'elles ne se lisent pas sur le chrome mais sur le canevas, qui reste sombre.
+# Elles sont demandées à l'appel et non gardées en constante : une constante de module serait
+# figée au premier import, donc avant que `theme.appliquer` ait posé quoi que ce soit.
+_ROLE_ZONE = "zone"
+_ROLE_CHOISIE = "zone_choisie"
+_ROLE_VIDE = "zone_vide"                     # bulle sans réplique : elle se voit de loin
+_ROLE_MAIN = "zone_main"                     # réplique reprise à la main
+_ROLE_TRACE = "zone_trace"
 
 # Sous cette taille en pixels de planche, un glisser est un clic maladroit et non un tracé.
 _TAILLE_MIN_TRACE = 6
@@ -137,19 +147,18 @@ class ZoneItem(QGraphicsRectItem):
 
     def _appliquer(self, choisie: bool) -> None:
         if choisie:
-            couleur, epaisseur = _COULEUR_CHOISIE, 4
+            role, epaisseur = _ROLE_CHOISIE, 4
         elif self.etat == "vide":
-            couleur, epaisseur = _COULEUR_VIDE, 3
+            role, epaisseur = _ROLE_VIDE, 3
         elif self.etat == "manuelle":
-            couleur, epaisseur = _COULEUR_MAIN, 3
+            role, epaisseur = _ROLE_MAIN, 3
         else:
-            couleur, epaisseur = _COULEUR_ZONE, 2
-        stylo = QPen(couleur, epaisseur)
+            role, epaisseur = _ROLE_ZONE, 2
+        stylo = QPen(theme.qcolor(role), epaisseur)
         stylo.setCosmetic(True)       # épaisseur constante à l'écran quel que soit le zoom
         self.setPen(stylo)
-        remplissage = QColor(couleur)
-        remplissage.setAlpha(48 if choisie else 20)
-        self.setBrush(QBrush(remplissage))
+        alpha = theme.ALPHAS["zone_remplissage_choisie" if choisie else "zone_remplissage"]
+        self.setBrush(QBrush(theme.qcolor(role, alpha)))
 
     def marquer(self, choisie: bool) -> None:
         self._appliquer(choisie)
@@ -184,10 +193,10 @@ class PoigneeItem(QGraphicsRectItem):
         self.setAcceptHoverEvents(True)
         self.setCursor(_CURSEURS_POIGNEE[ancre])
         self.setZValue(4)
-        stylo = QPen(QColor(30, 30, 34), 1)
+        stylo = QPen(theme.qcolor("poignee_contour"), 1)
         stylo.setCosmetic(True)
         self.setPen(stylo)
-        self.setBrush(QBrush(_COULEUR_CHOISIE))
+        self.setBrush(QBrush(theme.qcolor(_ROLE_CHOISIE)))
         self._depart: QRectF | None = None
 
     def mousePressEvent(self, event) -> None:
@@ -311,6 +320,44 @@ class CalqueTexteItem(QGraphicsPixmapItem):
 
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Cache du fond de planche
+#
+# `charger()` est rappelé à CHAQUE rechargement — après une édition de zone, une relecture,
+# une retraduction — et redécodait le PNG pleine page à chaque fois. Sur un webtoon de
+# 1000 × 9551 px, c'est le poste le plus lourd du rechargement, et le plus inutile : les
+# pixels n'ont pas bougé si `repeindre_clean` n'est pas passé.
+#
+# La clé porte le `mtime` : quand la planche nettoyée est réécrite, la clé change et le cache
+# se rafraîchit tout seul. Un cache sur le seul chemin afficherait l'ancienne image après une
+# repeinte — un bug bien pire que la lenteur qu'il corrige.
+#
+# Deux entrées suffisent (la planche courante et celle qu'on vient de quitter) : chaque
+# QPixmap pèse plusieurs dizaines de Mo sur un webtoon.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CACHE_FOND: dict[tuple, QPixmap] = {}
+_CACHE_FOND_MAX = 2
+
+
+def _pixmap_cache(chemin) -> QPixmap:
+    """Le fond de planche, décodé une seule fois par version du fichier."""
+    chemin = Path(chemin)
+    try:
+        cle = (str(chemin), chemin.stat().st_mtime_ns)
+    except OSError:
+        return QPixmap(str(chemin))
+    pixmap = _CACHE_FOND.get(cle)
+    if pixmap is None:
+        pixmap = QPixmap(str(chemin))
+        if pixmap.isNull():
+            return pixmap                      # ne pas mettre un échec en cache
+        while len(_CACHE_FOND) >= _CACHE_FOND_MAX:
+            _CACHE_FOND.pop(next(iter(_CACHE_FOND)))
+        _CACHE_FOND[cle] = pixmap
+    return pixmap
+
+
 class ScenePlanche(QGraphicsScene):
     """Scène d'une planche. Émet ce que l'utilisateur a fait, jamais ce qu'il faut en faire —
     la décision (et l'écriture) appartiennent à l'éditeur."""
@@ -360,7 +407,7 @@ class ScenePlanche(QGraphicsScene):
         self.index_courant = -1
 
         if chemin_image is not None:
-            pixmap = QPixmap(str(chemin_image))
+            pixmap = _pixmap_cache(chemin_image)
             if not pixmap.isNull():
                 self._fond = self.addPixmap(pixmap)
                 self._fond.setZValue(-10)
@@ -376,21 +423,57 @@ class ScenePlanche(QGraphicsScene):
             if numeros:
                 self._poser_numero(bulle.index, x0, y0)
 
+    def rafraichir_theme(self) -> None:
+        """Redonne au contenu déjà dessiné les couleurs du jeu COURANT.
+
+        ⚠ Aucune règle QSS n'atteint un `QGraphicsItem` : la feuille de style habille des
+        widgets, et la scène n'en contient aucun. Ce qui est peint ici l'a été avec la couleur
+        que le token portait AU MOMENT de la construction ; sans cette reprise, une bascule de
+        thème laisserait la planche telle quelle.
+
+        ⚠ **Et aujourd'hui, cette méthode ne change rien à l'écran** — c'est voulu et c'est
+        mesuré : les neuf rôles du canevas (`theme.ROLES_CANEVAS`) sont IDENTIQUES dans les
+        deux thèmes, parce que le canevas reste sombre dans les deux. Elle existe pour que le
+        jour où un troisième thème toucherait à l'un d'eux, il n'y ait pas un chemin de mise à
+        jour à découvrir. `test_le_canevas_ne_change_pas_avec_le_theme` garde la première
+        moitié de cette phrase."""
+        for item in self.items():
+            if isinstance(item, ZoneItem):
+                item.marquer(item.index == self.index_courant)
+            elif isinstance(item, PoigneeItem):
+                stylo = QPen(theme.qcolor("poignee_contour"), 1)
+                stylo.setCosmetic(True)
+                item.setPen(stylo)
+                item.setBrush(QBrush(theme.qcolor(_ROLE_CHOISIE)))
+            elif isinstance(item, QGraphicsSimpleTextItem):
+                item.setBrush(QBrush(theme.qcolor("numero_texte")))
+                fonte = item.font()
+                fonte.setPointSizeF(theme.corps("titre"))
+                item.setFont(fonte)
+                for enfant in item.childItems():
+                    if isinstance(enfant, QGraphicsEllipseItem):
+                        enfant.setBrush(QBrush(theme.qcolor(
+                            "numero_fond", theme.ALPHAS["numero_fond"])))
+
     def _poser_numero(self, index: int, x: float, y: float) -> None:
         """Le numéro de la bulle DANS L'ORDRE DE LECTURE. C'est l'information la plus utile de
         tout l'écran : c'est cet ordre qui aligne `ocr.json` et `traduction.json`, et une
         inversion se voit d'un coup d'œil ici alors qu'elle est invisible sur la page rendue."""
         etiquette = QGraphicsSimpleTextItem(str(index + 1))
-        etiquette.setBrush(QBrush(QColor(20, 20, 20)))
+        etiquette.setBrush(QBrush(theme.qcolor("numero_texte")))
         fonte = etiquette.font()
-        fonte.setPointSizeF(16)
+        # ⚠ `setPointSizeF(16)` était une taille ABSOLUE : le numéro d'ordre de lecture — « la
+        # plus utile de tout l'écran » — ne suivait ni le réglage système ni le facteur DPI.
+        # Le rang `titre` de l'échelle le fait, et `ItemIgnoresTransformations` garde comme
+        # avant sa taille constante au zoom.
+        fonte.setPointSizeF(theme.corps("titre"))
         fonte.setBold(True)
         etiquette.setFont(fonte)
         etiquette.setFlag(QGraphicsSimpleTextItem.ItemIgnoresTransformations, True)
         etiquette.setPos(x, y)
         etiquette.setZValue(3)
         fond = QGraphicsEllipseItem(-4, -2, 26, 24, etiquette)
-        fond.setBrush(QBrush(QColor(255, 210, 90, 230)))
+        fond.setBrush(QBrush(theme.qcolor("numero_fond", theme.ALPHAS["numero_fond"])))
         fond.setPen(QPen(Qt.NoPen))
         fond.setZValue(-1)
         self.addItem(etiquette)
@@ -508,6 +591,73 @@ class ScenePlanche(QGraphicsScene):
             item.setPos(_point_ancre(boite, item.ancre))
 
     # ------------------------------------------------------------------ #
+    # Clavier — l'alternative aux gestes de souris (L19.6.6)
+    # ------------------------------------------------------------------ #
+    #
+    # ⚠ **Ce qui est couvert, et ce qui ne l'est pas.** Déplacer et retailler la zone
+    # SÉLECTIONNÉE se font aux flèches. **Dessiner une zone au clavier n'est pas couvert** —
+    # c'est un autre problème, qui demande une notion de curseur dans la scène, et le
+    # `PLAN-19` demandait explicitement de l'écrire plutôt que de le prétendre.
+    #
+    # Les deux gestes passent par le MÊME chemin que la souris : ils repeignent le cadre et
+    # émettent `zone_en_cours`, jamais `zone_retaillee`. Le dépôt reste au relâchement, que
+    # l'éditeur simule par une temporisation — sans quoi chaque flèche déclencherait une
+    # réécriture de `regions.json`, `masks.png` et de la planche nettoyée, soit de l'ordre de
+    # la seconde par pression de touche.
+
+    def deplacer_zone_courante(self, dx: float, dy: float) -> bool:
+        """Translate la zone choisie. `True` si quelque chose a bougé."""
+        boite = self._boite_courante()
+        if boite is None:
+            return False
+        return self._poser_en_cours(boite.translated(dx, dy))
+
+    def retailler_zone_courante(self, dlargeur: float, dhauteur: float) -> bool:
+        """Change la taille de la zone choisie par ses arêtes droite et basse.
+
+        Le coin haut-gauche est l'ancre : c'est celui qu'on regarde quand on ajuste une bulle,
+        et une ancre au centre ferait glisser la zone sous les doigts à chaque cran."""
+        boite = self._boite_courante()
+        if boite is None:
+            return False
+        vise = QRectF(boite)
+        vise.setWidth(boite.width() + dlargeur)
+        vise.setHeight(boite.height() + dhauteur)
+        if vise.width() < _TAILLE_MIN_TRACE or vise.height() < _TAILLE_MIN_TRACE:
+            return False
+        return self._poser_en_cours(vise)
+
+    def _boite_courante(self) -> QRectF | None:
+        """La boîte de la zone choisie, si elle est manipulable."""
+        zone = self._zones.get(self.index_courant)
+        if zone is None or not self.interactif:
+            return None
+        return zone.rect_scene()
+
+    def _poser_en_cours(self, boite: QRectF) -> bool:
+        """Repeint le cadre et annonce le geste EN COURS. **N'écrit rien.**"""
+        limite = self.sceneRect()
+        if not limite.isEmpty():
+            # On plafonne dans la planche : une bulle poussée hors de l'image ferait lever
+            # `ErreurEdition` au dépôt, c'est-à-dire une centaine de flèches plus tard.
+            if boite.width() > limite.width() or boite.height() > limite.height():
+                return False
+            dx = min(0.0, limite.right() - boite.right()) + max(0.0, limite.left() - boite.left())
+            dy = min(0.0, limite.bottom() - boite.bottom()) + max(0.0, limite.top() - boite.top())
+            boite = boite.translated(dx, dy)
+        self.poser_boite_zone(self.index_courant, boite)
+        self.zone_en_cours.emit(self.index_courant, boite)
+        return True
+
+    def deposer_zone_courante(self) -> bool:
+        """Dépose ce que le clavier a construit — l'équivalent du relâchement de souris."""
+        boite = self._boite_courante()
+        if boite is None:
+            return False
+        self.zone_retaillee.emit(self.index_courant, boite)
+        return True
+
+    # ------------------------------------------------------------------ #
     # Souris
     # ------------------------------------------------------------------ #
 
@@ -598,7 +748,7 @@ class ScenePlanche(QGraphicsScene):
     # ------------------------------------------------------------------ #
 
     def _nouveau_trace(self, point: QPointF):
-        stylo = QPen(_COULEUR_TRACE, 2, Qt.DashLine)
+        stylo = QPen(theme.qcolor(_ROLE_TRACE), 2, Qt.DashLine)
         stylo.setCosmetic(True)
         if self.mode == MODE_SCINDER:
             item = QGraphicsLineItem(QLineF(point, point))
@@ -671,7 +821,32 @@ class VuePlanche(QGraphicsView):
         self.setRenderHint(QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.NoDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setBackgroundBrush(QBrush(QColor(40, 40, 44)))
+        # ⚠ Le canevas reste SOMBRE dans les deux thèmes — c'est la décision de l'étape 0 du
+        # `PLAN-19`, et `test_le_canevas_ne_change_pas_avec_le_theme` la garde. Un fond sombre
+        # autour d'une planche évite d'éblouir et fait ressortir le dessin ; ce qui n'était pas
+        # acceptable était que le formulaire d'à côté soit clair PAR ACCIDENT.
+        self.setBackgroundBrush(QBrush(theme.qcolor("canevas_fond")))
+
+    #: Les quatre flèches — ce que la vue laisse remonter quand une zone est sélectionnée.
+    _FLECHES = (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down)
+
+    def keyPressEvent(self, event) -> None:
+        """Rend les flèches au panneau **quand il y a une zone à déplacer**.
+
+        ⚠ `QGraphicsView` hérite de `QAbstractScrollArea`, qui FAIT DÉFILER sur les flèches.
+        Sans cette redirection, l'alternative clavier aux gestes de canevas (L19.6.6) était
+        inatteignable : la vue mangeait la touche avant que le panneau la voie. `ignore()`
+        plutôt qu'un appel direct au panneau — c'est la propagation normale de Qt, et la vue
+        n'a pas à connaître son parent.
+
+        Sans zone sélectionnée, les flèches redeviennent le défilement : c'est encore ce qu'on
+        veut quand on parcourt un webtoon de 9 551 px de haut."""
+        scene = self.scene()
+        if (event.key() in self._FLECHES and scene is not None
+                and getattr(scene, "index_courant", -1) >= 0 and scene.interactif):
+            event.ignore()
+            return
+        super().keyPressEvent(event)
 
     def wheelEvent(self, event) -> None:
         facteur = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15

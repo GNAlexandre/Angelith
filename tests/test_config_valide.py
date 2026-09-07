@@ -15,7 +15,10 @@ from pathlib import Path
 
 import yaml
 
+import pytest
+
 from core import config as cfg
+from core import config_schema
 from core.config_schema import CLES_CONNUES, CLES_LIBRES
 
 RACINE = Path(__file__).resolve().parent.parent
@@ -133,3 +136,77 @@ def test_chemins_de_s_arrete_sous_un_bloc_libre():
 def test_les_blocs_libres_sont_tous_des_cles_connues():
     """Un bloc libre qui ne serait pas lui-meme declare serait signale a chaque lancement."""
     assert set(CLES_LIBRES) <= set(CLES_CONNUES)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTRAINTES DE VALEUR
+#
+# `CLES_CONNUES` attrape `font_paht`. Elle ne disait rien de `conf_threshold: "0.35"` ni de
+# `taille_min: -5` — des valeurs qui passaient sans un mot puis cassaient loin de leur cause,
+# ou ne cassaient pas et produisaient un mauvais rendu sur 150 planches.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_la_config_livree_respecte_ses_propres_contraintes():
+    """Le garde-fou qui fait tenir le reste : si `config.yaml` déclenchait un avertissement,
+    la table serait fausse — et on cesserait de lire les avertissements."""
+    reel = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    douteuses = [a for a in cfg.verifier(reel) if a.startswith("valeur douteuse")]
+
+    assert douteuses == []
+
+
+def test_chaque_contrainte_porte_sur_une_cle_connue():
+    """Une contrainte sur une clé qui n'existe pas ne s'appliquerait jamais — un garde-fou
+    mort, et personne ne s'en apercevrait."""
+    inconnues = sorted(c for c in config_schema.CONTRAINTES
+                       if c not in config_schema.CLES_CONNUES)
+
+    assert inconnues == [], f"contraintes orphelines : {inconnues}"
+
+
+def test_chaque_nature_declaree_existe():
+    natures = set(config_schema.CONTRAINTES.values())
+    natures |= {n for _p, n in config_schema.PREFIXES_CONTRAINTS}
+
+    assert natures <= set(config_schema.NATURES)
+
+
+@pytest.mark.parametrize("nature,bon,mauvais", [
+    ("fraction", 0.35, 1.5),
+    ("fraction", 0.0, "0.35"),
+    ("positif", 1.12, 0),
+    ("positif_ou_nul", 0, -1),
+    ("entier_positif", 11, 11.5),
+    ("entier_positif", 1, -5),
+    ("temperature", 0.3, 9),
+])
+def test_les_predicats_de_nature(nature, bon, mauvais):
+    predicat, _attendu = config_schema.NATURES[nature]
+    assert predicat(bon), (nature, bon)
+    assert not predicat(mauvais), (nature, mauvais)
+
+
+@pytest.mark.parametrize("nature", sorted(config_schema.NATURES))
+def test_un_booleen_n_est_jamais_un_nombre(nature):
+    """`True` vaut 1 en Python. `conf_threshold: true` doit être signalé, pas accepté comme
+    « 1 » — c'est précisément le genre de faute qu'un YAML rend facile."""
+    predicat, _attendu = config_schema.NATURES[nature]
+    assert not predicat(True)
+    assert not predicat(False)
+
+
+def test_none_est_toujours_accepte():
+    """C'est ainsi que ce fichier écrit « laisse le défaut » : `modeles.correcteur: null`
+    désactive l'agent. Le refuser casserait des configs saines."""
+    avertissements = cfg.verifier(
+        {"manga": {"detection": {"conf_threshold": None}},
+         "temperatures": {"traducteur": None}})
+
+    assert [a for a in avertissements if a.startswith("valeur douteuse")] == []
+
+
+def test_une_temperature_d_agent_nomme_est_verifiee():
+    """Les noms d'agents sont libres, mais leurs valeurs sont toutes des températures."""
+    avertissements = cfg.verifier({"temperatures": {"traducteur": 9}})
+
+    assert any("temperatures.traducteur" in a for a in avertissements)

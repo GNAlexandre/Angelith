@@ -26,8 +26,29 @@ l'utilisateur un texte qui n'est plus le sien, sans rien pour le signaler.
 
 En octets, pas en nombre d'entrées : une planche à deux bulles et une planche à quatorze ne
 coûtent pas la même chose, et un plafond en nombre laisserait la mémoire suivre le contenu du
-tome. La fenêtre ±10 du préchargement pèse ~21 Mo ; le plafond par défaut (120 Mo) la contient
-largement tout en bornant les allers-retours.
+tome.
+
+> ⚠ **MISE À JOUR 2026-09-05, lot 35 : la phrase qui suivait était FAUSSE, et elle l'était
+> depuis qu'elle a été écrite.** Elle disait : « la fenêtre ±10 du préchargement pèse ~21 Mo ;
+> le plafond par défaut (120 Mo) la contient largement ». Les deux moitiés sont démenties par
+> la mesure de l'étape 0.1 du `PLAN-35` (`docs/mesures/retouche-2026-09-05.md`) :
+>
+> | | annoncé | mesuré le 2026-09-05 |
+> |---|---:|---:|
+> | un aperçu, tome paginé (118 planches, 1440×2048) | 1,04 Mo | **9,35 Mo** |
+> | un aperçu, bande webtoon (1080×10 000) | — | **35,2 Mo** |
+> | la fenêtre ±10 au milieu d'un tome (21 planches) | ~21 Mo | **~196 Mo** |
+>
+> Le plafond ne contenait donc pas la fenêtre : il en tenait 12 sur 21. Le cache évinçait,
+> la voie de lecture recomposait, et l'éditeur brûlait un cœur indéfiniment sur un tome
+> qu'on ne touchait pas — **136 compositions pour 12 aperçus gardés en 120 s**, mesuré au
+> rang 60 du même tome. Le 1,04 Mo d'origine venait d'une mesure de calques ; ce qui manquait
+> est le fond (`poids_apercu` le compte, à 3 octets par pixel) et la taille réelle des
+> planches du corpus.
+>
+> `fenetre_tenable` et `fenetre_retenue`, plus bas, referment ce trou : la fenêtre ne demande
+> plus que ce que le plafond garde. Elles ne changent **rien** au rendu — seulement ce qu'on
+> précharge.
 """
 from __future__ import annotations
 
@@ -45,14 +66,24 @@ def _mtime(chemin) -> float:
         return 0.0
 
 
-def signature(index: int, chemin_clean, textes, layouts: dict | None) -> tuple:
+def signature(index: int, chemin_clean, textes, layouts: dict | None,
+              police: str | None = None) -> tuple:
     """Ce qui identifie un aperçu. Deux appels identiques doivent rendre la même chose.
 
     `layouts` est normalisé en tuple trié : un dictionnaire n'est pas hachable, et deux
     mises en page identiques posées dans un ordre différent ne doivent pas produire deux
-    entrées distinctes."""
+    entrées distinctes.
+
+    ⚠ `police` fait partie de l'identité, et son absence était un défaut : la signature
+    ne retenait que la page, ses textes et leurs mises en page. Changer
+    `manga.typeset.font_path` pendant que la GUI est ouverte ne changeait donc AUCUNE
+    signature — les aperçus restaient dans l'ancienne police jusqu'au redémarrage, en
+    montrant un lettrage que le rendu ne produisait plus. Le `mtime` s'y ajoute parce
+    que remplacer un `.ttf` EN PLACE ne change pas son nom, et que c'est précisément ce
+    que fait `tools/completer_police.py`."""
     mises = tuple(sorted((int(k), repr(v)) for k, v in (layouts or {}).items()))
-    return (int(index), _mtime(chemin_clean), tuple(textes or ()), mises)
+    return (int(index), _mtime(chemin_clean), tuple(textes or ()), mises,
+            str(police or ""), _mtime(police) if police else 0.0)
 
 
 class CacheApercu:
@@ -133,6 +164,17 @@ class CacheApercu:
         with self._verrou:
             return {c[0] for c in self._entrees}
 
+    def poids_moyen(self) -> float:
+        """Octets qu'un aperçu coûte EN MOYENNE sur ce tome. `0.0` tant qu'on n'a rien vu.
+
+        ⚠ **Mesuré, jamais supposé.** C'est tout l'objet du lot 35 sur ce fichier : la valeur
+        annoncée en tête (1,04 Mo) était fausse d'un facteur 9 sur un tome paginé et d'un
+        facteur 34 sur une bande, et personne ne pouvait s'en apercevoir parce que rien ne la
+        relisait. Ici la moyenne vient du cache lui-même, donc elle suit le tome ouvert —
+        une bande webtoon et un tome paginé ne rendent pas le même nombre."""
+        with self._verrou:
+            return (self.octets / len(self._entrees)) if self._entrees else 0.0
+
     # ------------------------------------------------------------------ #
 
     def _evincer(self) -> None:
@@ -163,3 +205,65 @@ def poids_apercu(apercu) -> int:
     if fond is not None:
         total += fond.width * fond.height * 3
     return total
+
+
+# --------------------------------------------------------------------------- #
+#  La fenêtre de préchargement et le plafond, réconciliés — `PLAN-35` L35.3
+# --------------------------------------------------------------------------- #
+#
+# ⚠ Ces deux fonctions sont **pures** et vivent ici plutôt que dans `gui/editeur_apercus.py`
+# pour la raison de couche du dépôt : ce sont des décisions, et une décision se teste sans
+# PySide6. `gui/editeur_apercus.py` importe Qt ; ce fichier, non.
+
+
+def fenetre_tenable(plafond: int, poids_moyen: float, demandee: int) -> int:
+    """Combien de planches la fenêtre peut demander sans que le cache s'emballe.
+
+    Le mode de panne qu'elle supprime, mesuré le 2026-09-05 : une fenêtre de 21 planches à
+    9,35 Mo pièce contre un plafond de 120 Mo. Le cache en garde 12, la voie de lecture
+    compose la 13ᵉ, `_evincer` jette la plus ancienne, `travail_restant` la redemande — et
+    ainsi de suite, sans fin, sur un éditeur que personne ne touche.
+
+    ⚠ **Tant que rien n'est mesuré, on ne bride rien** (`poids_moyen <= 0`). Deviner un poids
+    pour brider dès la première planche reviendrait à remplacer une valeur fausse par une
+    autre ; le premier aperçu composé donne la vraie, et il en faut de toute façon un pour
+    afficher quoi que ce soit.
+
+    ⚠ **Au moins 1**, toujours : la planche courante doit être composable même si son aperçu
+    dépasse le plafond à lui seul. C'est déjà la règle de `_evincer`, qui garde toujours une
+    entrée ; les deux doivent dire la même chose, sinon la fenêtre demanderait zéro et
+    l'écran resterait vide."""
+    if poids_moyen <= 0:
+        return max(1, int(demandee))
+    return max(1, min(int(demandee), int(plafond // poids_moyen)))
+
+
+def fenetre_retenue(numeros, courante: int, capacite: int) -> list[int]:
+    """Réduit une fenêtre à `capacite` planches **autour de la courante**, elle comprise.
+
+    ⚠ Elle grandit en alternant après/avant, et ce n'est pas une coquetterie : on lit un
+    manga en avançant. À capacité impaire la planche suivante est donc préférée à la
+    précédente, ce qui est le sens dans lequel l'utilisateur va — et le sens de lecture de
+    l'œuvre n'entre pas ici, c'est un ordre de PELLICULE, déjà trié par
+    `Tome.index_planches`.
+
+    `courante` absente de `numeros` rend simplement les `capacite` premières : c'est le cas
+    d'une planche qui vient d'être filtrée hors de la pellicule, et renvoyer une liste vide
+    ferait cesser tout préchargement jusqu'au prochain clic."""
+    suite = [int(n) for n in numeros]
+    capacite = max(1, int(capacite))
+    if len(suite) <= capacite:
+        return suite
+    if courante not in suite:
+        return suite[:capacite]
+    rang = suite.index(courante)
+    retenus = [courante]
+    apres, avant = rang + 1, rang - 1
+    while len(retenus) < capacite and (apres < len(suite) or avant >= 0):
+        if apres < len(suite) and len(retenus) < capacite:
+            retenus.append(suite[apres])
+            apres += 1
+        if avant >= 0 and len(retenus) < capacite:
+            retenus.append(suite[avant])
+            avant -= 1
+    return sorted(retenus, key=suite.index)

@@ -212,7 +212,7 @@ def _full_config(tmp_path):
 
 
 def test_run_doctor_reports_missing_config_sections(monkeypatch, capsys):
-    monkeypatch.setattr("pipeline.llm.test_connection", lambda config: True)
+    monkeypatch.setattr("pipeline.llm.test_connection", lambda config, ecrire=print: True)
     ok = run_mod._run_doctor({"llm": {}, "modeles": {}, "chemins": {}, "rendu": {}})
     out = capsys.readouterr().out
     assert ok is False
@@ -222,7 +222,7 @@ def test_run_doctor_reports_missing_config_sections(monkeypatch, capsys):
 def test_run_doctor_reports_missing_paths(tmp_path, monkeypatch, capsys):
     cfg = _full_config(tmp_path)
     cfg["chemins"]["sources"] = str(tmp_path / "nexiste_pas")
-    monkeypatch.setattr("pipeline.llm.test_connection", lambda config: True)
+    monkeypatch.setattr("pipeline.llm.test_connection", lambda config, ecrire=print: True)
     ok = run_mod._run_doctor(cfg)
     assert ok is False
     assert "sources introuvable" in capsys.readouterr().out
@@ -230,7 +230,7 @@ def test_run_doctor_reports_missing_paths(tmp_path, monkeypatch, capsys):
 
 def test_run_doctor_all_ok_when_everything_present_and_ollama_reachable(tmp_path, monkeypatch):
     cfg = _full_config(tmp_path)
-    monkeypatch.setattr("pipeline.llm.test_connection", lambda config: True)
+    monkeypatch.setattr("pipeline.llm.test_connection", lambda config, ecrire=print: True)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
     ok = run_mod._run_doctor(cfg)
     assert ok is True
@@ -238,7 +238,7 @@ def test_run_doctor_all_ok_when_everything_present_and_ollama_reachable(tmp_path
 
 def test_run_doctor_false_when_ollama_unreachable(tmp_path, monkeypatch):
     cfg = _full_config(tmp_path)
-    monkeypatch.setattr("pipeline.llm.test_connection", lambda config: False)
+    monkeypatch.setattr("pipeline.llm.test_connection", lambda config, ecrire=print: False)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
     ok = run_mod._run_doctor(cfg)
     assert ok is False
@@ -247,7 +247,7 @@ def test_run_doctor_false_when_ollama_unreachable(tmp_path, monkeypatch):
 def test_run_doctor_missing_reference_docx_is_blocking_when_docx_in_formats(tmp_path, monkeypatch):
     cfg = _full_config(tmp_path)
     cfg["rendu"]["reference_docx"] = str(tmp_path / "nexiste_pas.docx")
-    monkeypatch.setattr("pipeline.llm.test_connection", lambda config: True)
+    monkeypatch.setattr("pipeline.llm.test_connection", lambda config, ecrire=print: True)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
     ok = run_mod._run_doctor(cfg)
     assert ok is False
@@ -255,7 +255,7 @@ def test_run_doctor_missing_reference_docx_is_blocking_when_docx_in_formats(tmp_
 
 def test_run_doctor_missing_weasyprint_is_only_a_warning_not_blocking(tmp_path, monkeypatch):
     cfg = _full_config(tmp_path)
-    monkeypatch.setattr("pipeline.llm.test_connection", lambda config: True)
+    monkeypatch.setattr("pipeline.llm.test_connection", lambda config, ecrire=print: True)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name if name == "pandoc" else None)
     import builtins
     real_import = builtins.__import__

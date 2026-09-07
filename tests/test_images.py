@@ -109,3 +109,28 @@ def test_markers_preserve_original_size():
     assert 'width="3cm"' in out
     # sans attribut → pas d'attribut ajouté
     assert images.markers_to_markdown("<!-- IMG: media/x.png -->") == "![](media/x.png)"
+
+
+# --- le contrat du marqueur est UNIQUE et vit dans le socle (lot 23) -----------------
+
+def test_les_noms_reexportes_sont_les_MEMES_objets_que_ceux_du_socle():
+    """`core/` ne peut pas importer `pipeline/` — deux tests le vérifient — et
+    `core/illustrations.py` a besoin du même analyseur de marqueurs. Le contrat a donc migré
+    dans `core/marqueurs.py`. Ce test dit ce que la migration promet : rien n'a bougé pour
+    les appelants. L'identité d'objet, et pas seulement « ça importe » : c'est elle qui rend
+    le déplacement neutre pour le monkeypatching, comme au lot 2.1."""
+    from core import marqueurs
+    from pipeline import extract
+    assert images.manifest_for_chapter is marqueurs.manifest_for_chapter
+    assert images.orphan_markers is marqueurs.orphan_markers
+    assert extract.split_marker is marqueurs.split_marker
+    assert extract.strip_images is marqueurs.strip_images
+    assert extract.IMG_MARKER is marqueurs.IMG_MARKER
+
+
+def test_images_ne_garde_pas_une_COPIE_de_l_expression_du_marqueur():
+    """Deux analyseurs du même format divergent le jour où le format bouge. Ce module
+    réutilise celle du socle plutôt que d'en garder une seconde."""
+    from core import marqueurs
+    assert images.MARQUEUR_RE is marqueurs.MARQUEUR_RE
+    assert not hasattr(images, "_MARKER_RE")

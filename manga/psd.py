@@ -23,7 +23,31 @@ Les calques sont stockés **du bas vers le haut** :
 
     Planche originale     le scan, masqué par défaut — pour comparer
     Planche nettoyée      bulles vidées : le fond sur lequel on relettre
+    Effacement SFX        les pixels reconstruits hors bulle — masquable, donc réversible
     Texte 01 … Texte NN   une bulle par calque, nommée avec sa réplique
+    Glose 01 … Glose NN   une glose d'onomatopée par calque
+    SFX 01 … SFX NN       une zone hors bulle par calque, nommée avec sa traduction
+
+## Ce que les trois dernières piles ajoutent, et pourquoi c'est le cœur du lot 22
+
+Avant le lot 22, le PSD donnait à un letteur un fond où les **bulles** étaient vides — et
+l'onomatopée japonaise toujours là, en pixels, fusionnée au dessin. La seule chose que le
+fichier lui offrait gratuitement, la traduction, n'était pas dans le fichier mais dans
+`RAPPORT.md`. Il devait donc tout refaire à la main, en gardant un second document ouvert.
+
+Trois piles corrigent cela, et **aucune n'est écrite par défaut** :
+
+· **`Effacement SFX`** porte les pixels que `manga/effacement.py` a reconstruits, séparés du
+  fond. Le masquer d'un clic rétablit le japonais : c'est ce qui rend l'effacement réversible
+  sans relancer quoi que ce soit, et c'est la raison pour laquelle ce lot n'a pas eu besoin de
+  faire entrer `sfx` dans le graphe d'invalidation.
+· **`Glose NN`** existait dans le composite aplati et **nulle part comme calque** : le
+  `fond_propre` que le PSD reçoit est capturé AVANT le rendu, parce que `typeset_page` mute
+  l'image qu'on lui donne, si bien que les gloses n'existaient qu'écrasées dans les pixels.
+  C'était un défaut, pas une décision.
+· **`SFX NN`** nomme chaque zone hors bulle avec sa traduction, exactement comme un calque de
+  bulle. Les zones **illisibles ont aussi le leur**, vide, nommé avec leur position et une
+  mention : le letteur voit alors *où* il doit intervenir, au lieu de chercher.
 
 ## Calque de type ou calque rasterisé
 
@@ -53,13 +77,32 @@ from __future__ import annotations
 
 import struct
 import zlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 SIGNATURE = b"8BPS"
+
+#: Côté maximal, en pixels, d'un document PSD. C'est une limite du FORMAT, pas de ce module :
+#: `8BPS` version 1 code ses dimensions sur 32 bits mais Photoshop refuse au-delà de 30 000 px
+#: (le format PSB — `8BPS` version 2 — monte à 300 000, et ce module ne l'écrit pas).
+#:
+#: ⚠ Pourquoi c'est ici et pas dans un coin du webtoon. Une bande de chapitre fait
+#: couramment 1080×10 000 : trois fois moins que la limite, et **mesuré, ça marche** — sur les
+#: 9 bandes de *webtoon A* Chap.11, `perf.log` montre 9 PSD écrits, de 42,4 à 59,6 Mo, en 13,6
+#: à 18,2 s, sans un seul échec. Le risque n'est pas là où on le croyait. Il est sur la bande
+#: qu'un éditeur n'aurait PAS découpée : sans cette garde, `_u32(h)` écrit tranquillement
+#: 30 001, le fichier se referme, et c'est Photoshop qui annonce un document corrompu — trois
+#: quarts d'heure de rendu plus tard, sans dire lequel des 150 est fautif.
+COTE_MAX = 30_000
+
+
+class TropGrandPourPSD(ValueError):
+    """Planche au-delà de `COTE_MAX`. Message destiné à l'utilisateur, tel quel."""
+
+
 # 0 = brut, 1 = RLE (PackBits), 2 = ZIP sans prédiction, 3 = ZIP avec prédiction.
 # Les calques sont en ZIP (zlib de la bibliothèque standard, un appel par canal) ; le
 # **composite** est en RLE, la seule compression que tous les lecteurs acceptent à cet endroit.
@@ -745,6 +788,15 @@ def ecrire(chemin: Path, composite: Image.Image, calques: list[Calque], *,
     calques), `calques` la pile du **bas vers le haut**."""
     comp = composite.convert("RGB")
     w, h = comp.size
+    # ⚠ AVANT la première allocation et avant le premier octet écrit : refuser proprement
+    # coûte une comparaison, produire un PSD que Photoshop déclare corrompu coûte un rendu
+    # entier. Cf. `COTE_MAX`.
+    if w > COTE_MAX or h > COTE_MAX:
+        raise TropGrandPourPSD(
+            f"{w}×{h} px : le format PSD plafonne à {COTE_MAX} px de côté. "
+            f"Le PSD de cette planche n'est pas écrit ; les autres formats de sortie "
+            f"(`images`, `cbz`, `pdf`) n'ont pas cette limite. "
+            f"→ découpe la bande en amont, ou retire \"psd\" de `manga.rendu.formats`.")
     plans = np.asarray(comp).transpose(2, 0, 1)        # (3, h, w)
 
     entete = (SIGNATURE + _u16(1) + b"\x00" * 6 + _u16(3) + _u32(h) + _u32(w)
@@ -799,17 +851,36 @@ def _abrege(texte: str, maxi: int = 40) -> str:
 
 def calques_de_planche(nettoyee: Image.Image, fits: list[dict], *,
                        originale: Image.Image | None = None,
-                       mode_texte: str = "type") -> list[Calque]:
+                       mode_texte: str = "type",
+                       effacement=None, gloses: list | None = None,
+                       fits_sfx: list[dict] | None = None,
+                       zones_illisibles: list[dict] | None = None) -> list[Calque]:
     """Pile de calques d'une planche, du bas vers le haut, à partir des recettes de lettrage
     rendues par `typeset.typeset_page(fits_out=…)`.
 
-    `mode_texte` vaut `"type"` (calques de texte réels) ou `"rasterise"`."""
+    `mode_texte` vaut `"type"` (calques de texte réels) ou `"rasterise"`.
+
+    Les quatre derniers paramètres sont ceux du lot 22, et **tous valent `None` par défaut** :
+    une planche produite sans eux donne exactement le fichier d'avant, calque pour calque.
+
+    · `effacement` — un `manga.effacement.Effacement`. Devient le calque `Effacement SFX`,
+      juste au-dessus de `Planche nettoyée`, donc masquable d'un clic.
+    · `gloses` — les `gloss.Glose` posées, qui n'existaient que dans le composite aplati.
+    · `fits_sfx` — les recettes de lettrage des zones hors bulle, même forme que `fits`.
+    · `zones_illisibles` — `{"index", "bbox", "texte"}` par zone qu'on n'a pas su lire. Elles
+      reçoivent un calque **vide** nommé avec leur position : un letteur voit *où* intervenir
+      au lieu de rouvrir la planche et de chercher la boîte."""
     from .typeset import calque_fit
 
     calques: list[Calque] = []
     if originale is not None:
         calques.append(Calque("Planche originale", _opaque(originale), 0, 0, visible=False))
     calques.append(Calque("Planche nettoyée", _opaque(nettoyee), 0, 0))
+    if effacement is not None and getattr(effacement, "rgba", None) is not None:
+        # Au-dessus du fond, sous tout le texte : c'est l'ordre d'un letteur — on efface,
+        # puis on écrit. Et le masquer rétablit le japonais sans rien relancer.
+        calques.append(Calque("Effacement SFX", effacement.rgba,
+                              int(effacement.x), int(effacement.y)))
 
     for entree in fits:
         fit, style, police = entree["fit"], entree["style"], entree["police"]
@@ -822,27 +893,117 @@ def calques_de_planche(nettoyee: Image.Image, fits: list[dict], *,
 
         params = None
         if mode_texte == "type" and not fit.overflow:
-            police_font = ImageFont.truetype(police, fit.size)
-            montant, _descendant = police_font.getmetrics()
-            largeurs = [police_font.getlength(ligne) for ligne in fit.lines] or [0.0]
-            demi = max(largeurs) / 2.0
-            params = {
-                "texte": texte,
-                "police_ps": nom_postscript(police),
-                "corps": fit.size,
-                "interligne": fit.line_h,
-                "couleur": tuple(style.text_color),
-                "justification": 2,
-                # `_draw_fit` dessine avec `anchor="ma"` : `fit.top` est le haut de
-                # l'ascendante, donc la ligne de base de la première ligne est `top + montant`.
-                "tx": float(fit.center_x),
-                "ty": float(fit.top + montant),
-                "left": -demi, "right": demi,
-                "top": float(-montant),
-                "bottom": float(fit.line_h * (len(fit.lines) - 1) + police_font.getmetrics()[1]),
-            }
+            params = _params_type(fit, style, police)
         calques.append(Calque(nom, np.asarray(calque_img), x, y, texte=params))
+
+    calques += _calques_gloses(gloses)
+    calques += _calques_sfx(fits_sfx, mode_texte)
+    calques += _calques_illisibles(zones_illisibles)
     return calques
+
+
+def _calques_gloses(gloses: list | None) -> list[Calque]:
+    """Un calque RASTERISÉ par glose posée.
+
+    ⚠ Rasterisé et non de type, à dessein. `gloss.dessiner` choisit sa polarité localement et
+    peint son contour lui-même ; refabriquer un `TySh` à partir de ses paramètres demanderait
+    de dupliquer cette logique dans un second endroit, et les deux divergeraient sur la seule
+    chose que l'utilisateur regarde. Un calque déplaçable et effaçable est déjà tout ce qui
+    manquait — jusqu'ici, une glose n'existait QUE dans le composite aplati, parce que le
+    `fond_propre` remis au PSD est capturé AVANT le rendu."""
+    from . import gloss as gloss_mod
+
+    out: list[Calque] = []
+    for i, g in enumerate(gloses or []):
+        if g is None:
+            continue
+        x0, y0, x1, y1 = g.rect
+        largeur, hauteur = max(1, x1 - x0), max(1, y1 - y0)
+        # La glose est dessinée par le MÊME chemin que le rendu — `gloss.dessiner` — sur une
+        # vignette, et l'alpha est tiré de ce qui a changé par rapport à un fond neutre.
+        # Écrire un second dessinateur ferait diverger le calque du composite sur la seule
+        # chose que l'utilisateur regarde.
+        temoin = Image.new("RGB", (largeur, hauteur), (0, 0, 0))
+        pose = gloss_mod.Glose(rect=(0, 0, largeur, hauteur), texte=g.texte,
+                               taille=g.taille, ancrage=g.ancrage, claire=g.claire,
+                               calme=g.calme, fond=g.fond)
+        peint = np.asarray(gloss_mod.dessiner(temoin, [pose]))
+        rgba = np.zeros((hauteur, largeur, 4), dtype=np.uint8)
+        rgba[:, :, :3] = peint
+        rgba[:, :, 3] = np.where(peint.any(axis=2), 255, 0).astype(np.uint8)
+        out.append(Calque(f"Glose {i + 1:02d} — {_abrege(g.texte)}", rgba, x0, y0))
+    return out
+
+
+def _calques_sfx(fits_sfx: list[dict] | None, mode_texte: str) -> list[Calque]:
+    """Un calque par zone hors bulle RELETTRÉE, nommé avec sa traduction abrégée.
+
+    Même chemin que les calques de bulle — `calque_fit`, puis les mêmes paramètres de type —
+    parce que c'est le même artefact. La seule différence est le nom, et elle compte : un
+    letteur qui ouvre la planche doit distinguer `Texte 03` de `SFX 03` sans les comparer."""
+    from .typeset import calque_fit
+
+    out: list[Calque] = []
+    for entree in fits_sfx or []:
+        fit, style, police = entree["fit"], entree["style"], entree["police"]
+        produit = calque_fit(fit, style, police)
+        if produit is None:
+            continue
+        calque_img, x, y = produit
+        texte = chr(13).join(fit.lines)
+        nom = f"SFX {entree['index'] + 1:02d} — {_abrege(texte.replace(chr(13), ' '))}"
+        params = None
+        # ⚠ Pas de calque de TYPE quand le lettrage est pivoté : le descripteur `TySh` porte
+        # une transformation que ce module n'écrit pas, et déclarer un texte droit là où les
+        # pixels sont inclinés ferait sauter le lettrage à la première réécriture. Un calque
+        # rasterisé y est le comportement honnête.
+        if mode_texte == "type" and not fit.overflow and not fit.angle:
+            params = _params_type(fit, style, police)
+        out.append(Calque(nom, np.asarray(calque_img), x, y, texte=params))
+    return out
+
+
+def _calques_illisibles(zones: list[dict] | None) -> list[Calque]:
+    """Un calque VIDE par zone qu'on n'a pas su lire, nommé avec sa position.
+
+    Un calque vide n'est pas un calque inutile : il est ce qui transforme « il y a 260 zones
+    de texte quelque part dans ce tome » en une liste cliquable dans le panneau des calques, à
+    côté du dessin concerné. C'est le raisonnement des crops de la voie C du lot 21 — ce qui
+    manquait n'était pas l'information, c'était de la poser là où on travaille."""
+    out: list[Calque] = []
+    for i, zone in enumerate(zones or []):
+        x0, y0, x1, y1 = (int(v) for v in zone.get("bbox") or (0, 0, 1, 1))
+        largeur, hauteur = max(1, x1 - x0), max(1, y1 - y0)
+        source = _abrege((zone.get("texte") or "").replace(chr(13), " "), 24)
+        nom = (f"SFX ? {i + 1:02d} — à transcrire ({x0},{y0})"
+               + (f" · lu « {source} »" if source else ""))
+        out.append(Calque(nom, np.zeros((hauteur, largeur, 4), dtype=np.uint8), x0, y0,
+                          visible=False))
+    return out
+
+
+def _params_type(fit, style, police: str) -> dict:
+    """Paramètres du calque de TYPE d'un `Fit`. Extrait de `calques_de_planche`, sans rien y
+    changer : les zones hors bulle en ont besoin des mêmes, et deux copies divergeraient."""
+    police_font = ImageFont.truetype(police, fit.size)
+    montant, _descendant = police_font.getmetrics()
+    largeurs = [police_font.getlength(ligne) for ligne in fit.lines] or [0.0]
+    demi = max(largeurs) / 2.0
+    return {
+        "texte": chr(13).join(fit.lines),
+        "police_ps": nom_postscript(police),
+        "corps": fit.size,
+        "interligne": fit.line_h,
+        "couleur": tuple(style.text_color),
+        "justification": 2,
+        # `_draw_fit` dessine avec `anchor="ma"` : `fit.top` est le haut de l'ascendante, donc
+        # la ligne de base de la première ligne est `top + montant`.
+        "tx": float(fit.center_x),
+        "ty": float(fit.top + montant),
+        "left": -demi, "right": demi,
+        "top": float(-montant),
+        "bottom": float(fit.line_h * (len(fit.lines) - 1) + police_font.getmetrics()[1]),
+    }
 
 
 def psd_minimal(chemin: Path, texte: str = "Test", *, font_path: str | None = None,
@@ -903,9 +1064,20 @@ def polices_utilisees(fits: list[dict], mode_texte: str = "type") -> list[str]:
 
 def ecrire_planche(chemin: Path, *, finale: Image.Image, nettoyee: Image.Image,
                    fits: list[dict], originale: Image.Image | None = None,
-                   mode_texte: str = "type", dpi: int = 300) -> Path:
+                   mode_texte: str = "type", dpi: int = 300,
+                   effacement=None, gloses: list | None = None,
+                   fits_sfx: list[dict] | None = None,
+                   zones_illisibles: list[dict] | None = None) -> Path:
     """Écrit le PSD d'une planche. `finale` est la page aplatie telle que le pipeline la
     produit — elle sert de composite, donc un lecteur qui ignore les calques voit exactement
-    la même chose que dans `pages_out/`."""
-    calques = calques_de_planche(nettoyee, fits, originale=originale, mode_texte=mode_texte)
+    la même chose que dans `pages_out/`.
+
+    ⚠ Le composite reste `finale`, même quand un calque d'effacement est joint en mode
+    `"calque"`. Ce n'est pas une incohérence, c'est la définition du mode : la planche
+    aplatie n'est pas touchée, et l'effacement n'apparaît qu'à qui ouvre les calques. Un
+    composite qui montrerait l'effacement rendrait le PSD différent de `pages_out/`, ce que
+    ce module garantit depuis la v0.24.0."""
+    calques = calques_de_planche(nettoyee, fits, originale=originale, mode_texte=mode_texte,
+                                 effacement=effacement, gloses=gloses, fits_sfx=fits_sfx,
+                                 zones_illisibles=zones_illisibles)
     return ecrire(chemin, finale, calques, dpi=dpi)

@@ -13,6 +13,13 @@ Conçu pour **Ollama** sur ta 7900XT, sans coût de token.
 > **Tu cherches une commande ?** → **[COMMANDES.md](COMMANDES.fr.md)** : toutes les commandes
 > des trois briques, une ligne chacune. Ce README-ci explique le *pourquoi* ; le mémo donne
 > le *comment*.
+>
+> **Tu veux juste lancer une brique ?** → **[procedures/](procedures/README.md)** : une fiche
+> courte par brique — les commandes dans l'ordre, les clés de `config.yaml` qui comptent, et
+> « quand ça ne marche pas ».
+>
+> **Tu cherches un chiffre ?** → **[mesures/](mesures/README.md)** : les comptes rendus datés,
+> un par lot livré, chacun avec son commit et son dénominateur.
 
 ## Sommaire
 
@@ -480,12 +487,20 @@ python run.py "Mon LN" Vol.1 --chapitre 3 --from correction # ne refait que corr
 **retester**, pas à produire d'autres chapitres au passage) ; un chapitre jamais généré et
 hors cible est simplement exclu de l'assemblage, avec un avertissement.
 
-### Glossaire (import / optimisation / reconstruction)
+### Glossaire (import / réintégration / optimisation / reconstruction)
 ```bash
 python run.py "Mon LN" --import-glossary glossaire_survival.docx   # importe un glossaire existant
 python run.py "Mon LN" --optimize-glossary                          # dédoublonne/fusionne/reclasse à la demande
 python run.py "Mon LN" Vol.1 --extract-glossary                     # reconstruit depuis un tome DÉJÀ TRADUIT
+python run.py "Mon LN" --migrate-glossary ancien.bak.yaml           # réintègre un glossaire ANTÉRIEUR
 ```
+`--migrate-glossary` récupère un glossaire YAML qui n'est pas le fichier canonique du projet — un
+`glossaire.bak.yaml`, un export, une copie d'une installation précédente, le glossaire d'une œuvre
+sœur — et le convertit au format multi-cibles au passage. C'est nécessaire parce que la migration
+automatique de la 2.0.0 ne se déclenche QUE sur `sources/<Projet>/glossaire.yaml` : un ancien
+glossaire rangé ailleurs n'est lu par personne. Les fichiers donnés font autorité (le premier sert de
+base) ; le glossaire actuel est fusionné en dernier, ou ignoré avec `--remplacer` — il part alors en
+`glossaire.yaml.avant-reintegration.bak`. **Les fichiers réintégrés ne sont jamais modifiés.**
 `--extract-glossary` relit le texte FR déjà fini d'un tome comme pivot et ne lance QUE la
 terminologie (+ optimisation) — aucune retraduction, aucune réécriture, aucun rendu. Pratique pour
 repartir d'un tome fini et propre plutôt que d'un historique de brouillons. **Reprise par bloc** :
@@ -504,7 +519,7 @@ python run.py --version                  # ex. Angelith 0.9.0
 python run_manga.py --version            # ex. Angelith 1.0.0 (brique manga : stable)
 ```
 La version est déclarée **une seule fois**, dans `core/version.py` ; le
-[CHANGELOG](CHANGELOG.md) et le tag git en découlent, et `tests/test_version.py` vérifie
+[CHANGELOG](../CHANGELOG.md) et le tag git en découlent, et `tests/test_version.py` vérifie
 qu'ils ne dérivent pas. Elle est **inscrite dans ce que tu livres**, pas seulement
 affichée : en-tête de run, ligne d'en-tête de `perf.log` (avec la date et la commande —
 plusieurs runs s'y empilent), `- Version :` dans `RAPPORT.md`, commentaire HTML en tête du
@@ -921,10 +936,38 @@ angelith/
 ├── run.py                    # CLI light novel (projet + tome, commandes de la section 8)
 ├── run_manga.py              # CLI manga (section 12)
 ├── run_ocr.py                # CLI OCR de scans (section 13)
+├── run_illustration.py       # CLI atelier d'illustration — UNE commande, EXPÉRIMENTAL, désarmé
 ├── app.py                    # interface console (TUI) — ne dépend d'aucune CLI
 ├── gui.py                    # interface graphique (§12) — runs + édition des planches
+├── illustration/             # 4e brique : images NEUVES. N'IMPORTE QUE core/ (testé)
+│   ├── frontiere.py          # le périmètre d'écriture, armé PENDANT le run
+│   ├── moteur.py             # l'interface, les cinq canaux, la requête gelée, le factice
+│   ├── requete.py            # requete.yaml — le format relu par l'humain, et sa porte
+│   ├── marquage.py           # LE seul chemin qui écrit un PNG : tEXt + sidecar (AI Act)
+│   ├── poids.py              # téléchargement de plusieurs Go, repris sur coupure
+│   ├── comfyui.py            # un client HTTP, pas un framework
+│   ├── juge.py               # lot 25 : l'encodeur ONNX et les TROIS grandeurs, en numpy
+│   ├── identite.py           # lot 25 : la voie A — références de la bible → canal du moteur
+│   ├── prompt.py             # lot 26 : la charpente DÉTERMINISTE — rien n'entre hors bible
+│   ├── selection.py          # lot 26 : quelles images montrer, et POURQUOI (retenues + écartées)
+│   ├── scene.py              # lot 26 : la POSE, tirée du texte — jamais un attribut
+│   ├── gabarits/             # lot 26 : la SYNTAXE d'un modèle d'image, pas la voix d'un tome
+│   ├── atelier.py            # qui est illustrable, avec quelles images — Python nu, testable
+│   ├── relecture.py          # lot 27 : L'ÉCRAN de relecture, et la PORTE vers la phase 2
+│   ├── galerie.py            # lot 27 : garder / jeter / purger, l'inventaire, le poids disque
+│   ├── progression.py        # lot 27 : préparation (LLM) · bascule · génération (image)
+│   ├── attente.py            # lot 27 : le chiffre qui décide de la FORME de l'atelier
+│   ├── vram.py               # lot 27 : la bascule — s'ouvre une fois, se ferme TOUJOURS
+│   ├── sonde.py              # lot 28 : ce que le serveur expose RÉELLEMENT — en lecture seule
+│   ├── validation.py         # lot 28 : les 5 vérifications d'un graphe, AVANT le GPU
+│   ├── console.py            # les QUESTIONS, et rien d'autre (rich). La façade console
+│   ├── orchestrateur.py      # les deux phases, la bascule VRAM
+│   └── rapport.py            # RAPPORT.md et perf.log — DANS le dossier de la brique
 ├── gui/                      # QT SEULEMENT : aucune logique métier ici
-│   ├── fenetre.py            # fenêtre, onglets, journal, un seul run à la fois
+│   ├── fenetre.py            # fenêtre, destinations, journal, un seul run à la fois
+│   ├── bandeau.py            # lot 32 : le bandeau de run, visible depuis TOUTES les destinations
+│   ├── avancement.py         # temps restant OBSERVÉ + ce que le bandeau écrit — sans Qt
+│   ├── atelier.py            # lot 27 : l'onglet « Atelier » — catalogue, puis RELECTURE
 │   ├── editeur.py            # éditeur de planche (zones, répliques, « Appliquer »)
 │   ├── scene_planche.py      # canevas : image, zones, outils de tracé
 │   ├── lanceur.py            # lancement des runs (manga ET light novel)
@@ -978,6 +1021,7 @@ angelith/
 │   ├── control.py             # --stop / reprise propre par unité de travail
 │   ├── power.py               # --keep-awake / --shutdown (anti-veille, extinction programmée)
 │   ├── reporter.py            # avancement (texte + rich) + perf.log
+│   ├── progression.py         # lot 32 : phases, objet en cours, fraction MONOTONE — sans Qt
 │   └── tokens.py              # estimation de tokens (CJK ~1/caractère, latin ~4 caractères/token)
 ├── pipeline/                  # brique LIGHT NOVEL
 │   ├── extract.py            # docx (Pandoc) + pdf (PyMuPDF) → texte + images ; détection de
@@ -1000,9 +1044,14 @@ angelith/
 │   └── glossaire_modele.yaml    # modèle catégorisé à copier dans chaque nouveau projet
 ├── tools/
 │   ├── make_template.js         # (re)génère un reference.docx si tu n'as pas le tien
+│   ├── banc.py                  # LE banc : tous les volumes de build/ en un tableau daté
+│   ├── _banc_commun.py          # lecture de cache PARTAGÉE par les cinq outils ci-dessous
+│   ├── _banc_detection.py       # rappel / précision / F1 contre une vérité terrain (COCO)
+│   ├── corpus_synthetique.py    # génère le corpus annoté, redistribuable sans réserve
 │   ├── compter_variantes.py     # orthographes bannies subsistantes + dérives pas encore bannies
 │   ├── mesurer_bulles.py        # distribution géométrique des bulles (lit le cache, n'écrit rien)
 │   ├── apercu_detection.py      # ce que donnerait une relance de détection — une seule inférence
+│   ├── verifier_ordre.py        # l'ordre de lecture persisté contre le sens déclaré
 │   ├── valider_psd_photoshop.ps1 # ouvre un PSD dans Photoshop (COM) et vérifie que le texte se réécrit
 │   └── installer_polices.ps1    # installe les polices de lettrage (par utilisateur, réversible)
 ├── sources/
@@ -1023,8 +1072,8 @@ angelith/
 
 > Mémo des commandes de cette brique : **[COMMANDES.md](COMMANDES.fr.md)**.
 
-Traduction de **manga** (planches/images) : détection des bulles → OCR japonais →
-traduction → nettoyage déterministe → réinjection du texte français. **Totalement
+Traduction de **bande dessinée** (planches/images — manga, webtoon) : détection des bulles →
+OCR de la langue source → traduction → nettoyage déterministe → réinjection du texte français. **Totalement
 indépendante** du pipeline LN ci-dessus : package séparé (`manga/`), CLI séparée
 (`run_manga.py`), section de config séparée (`config.yaml > manga:`), sortie séparée
 (`build/<Projet>/<Tome>/manga/`).
@@ -1041,9 +1090,80 @@ au manga l'est vraiment : détection, nettoyage, lettrage, ordre de lecture, mot
 ### Principe : l'IA ne dessine jamais
 Détection et OCR ne font que **lire** l'image. Les seules écritures de pixels sont
 déterministes : `manga/clean.py` remplit le masque de bulle détecté avec sa couleur
-de fond mesurée, `manga/typeset.py` y dessine le texte traduit (Pillow). Aucun modèle
+de fond mesurée, `manga/typeset.py` y dessine le texte traduit (Pillow), et
+`manga/effacement.py` — ajouté au lot 22, **désarmé par défaut** — reconstruit le fond d'une
+zone hors bulle par remplissage de couleur ou par diffusion en numpy. Aucun modèle
 génératif ne touche au dessin. Vérifié par `tests/test_manga_clean.py` (tout pixel
 hors du masque ressort bit-à-bit identique à l'original).
+
+#### La portée du principe, écrite le 2026-08-29 — décision d'Alexandre
+
+Le principe porte sur les **pixels de l'œuvre** : aucune écriture non déterministe dans une
+planche, une page ou un fichier source. Une brique qui ne modifie **aucun** fichier existant
+n'entre pas dans son périmètre : elle produit des fichiers neufs, dans un dossier qui lui est
+propre, marqués comme générés, et supprimables sans rien casser. L'effacement de pixels
+existants, lui, reste interdit hors du cadre que le lot 22 a défini.
+
+C'est ce qui rend la quatrième brique — `run_illustration.py`, ajoutée au lot 24 — compatible
+avec le principe **sans le renégocier** : elle lit `media/`, elle écrit sous
+`build/<Projet>/illustrations/` et — pour ce qu'un humain décide de garder, depuis le lot 27 —
+sous `sources/<Projet>/illustrations/`, un sous-dossier NEUF ; elle ne composite rien dans une
+planche ni dans une page. Les quatre occurrences du principe dans le code restent vraies mot
+pour mot.
+
+⚠ **Et l'insertion du lot 27 ne les contredit pas non plus.** Armée, elle ajoute des
+*paragraphes* au Markdown assemblé du light novel — un marqueur d'image et sa légende — sans
+réécrire un seul caractère du récit ni toucher un pixel. Elle est désarmée par défaut
+(`illustration.inserer_dans_sorties: false`), et la légende « Illustration générée par IA — ne
+fait pas partie de l'œuvre originale » n'a **aucun interrupteur** : `core/insertion.py` lève
+sur une légende vide.
+
+⚠ **Cette portée n'est pas un précédent pour l'effacement.** Le lot 22, lui, portait bien sur
+des pixels de l'œuvre ; il a tranché **contre** le modèle génératif, et sa décision est
+ci-dessous, inchangée. Les deux sujets ne se mélangent pas.
+
+⚠ **Et elle n'est pas seulement affirmée.** Le dépôt ne se contente jamais d'un raisonnement
+là où un test existe — `clean.py` garde son `paint &= region.mask` « parce que l'invariant ne
+doit pas dépendre d'un raisonnement ». Même exigence ici, à deux niveaux :
+`illustration/frontiere.py` refuse **à l'exécution** toute écriture hors du dossier de la
+brique, et `tests/test_illustration_frontiere.py` vérifie qu'un run complet laisse **toutes**
+les empreintes SHA-256 préexistantes de l'arbre inchangées.
+
+#### La décision du lot 22, tranchée par écrit avant d'écrire le code
+
+Le `PLAN-22` demandait d'arbitrer explicitement une question que ce principe tranchait par
+effet de bord : il interdit **à la fois** qu'un modèle génératif réécrive des pixels de dessin
+dans le chemin par défaut, **et** qu'un utilisateur qui le demande obtienne un calque
+d'effacement séparé et réversible. Ce sont deux choses très différentes sous le même mot.
+
+**La décision retenue est le refus du modèle génératif, et le principe reste écrit en cinq
+mots.** Trois raisons, dans l'ordre où elles pèsent :
+
+1. **Le garde-fou du lot 21 rend le modèle inutile aujourd'hui.** Un effacement n'est autorisé
+   que sur une zone `lecture_sure` — deux voies de lecture indépendantes qui s'accordent. Le
+   taux de `lecture_sure` mesuré sur les six tomes du corpus est de **0 %**
+   (`docs/mesures/sfx-2026-08-28.md`). Payer plusieurs gigaoctets de poids pour reconstruire le fond de
+   zones qu'on s'interdit d'effacer serait acheter la seconde moitié d'un pont.
+2. **Le matériel ne le porte pas.** `Qwen-Image-Edit` fait 20 milliards de paramètres
+   (Apache-2.0, vérifié) ; la contrainte réaliste écrite au dossier du projet est déjà « un
+   modèle de 27 milliards de paramètres sur un GPU grand public », occupé par la traduction.
+3. **La licence des poids `big-lama` n'a pas pu être établie sur une source primaire.** Le
+   *code* de LaMa est Apache-2.0 ; ses poids circulent sous des conditions divergentes. Le
+   dépôt porte déjà deux poids sous contrainte (GPL-3.0 amont, Manga109-s académique) ; un
+   troisième rendrait la redistribution indéfendable.
+
+**Ce qui est ajouté, en revanche, est un effacement DÉTERMINISTE**, et il ne renégocie rien :
+remplir un masque d'encre dilaté avec la couleur de fond mesurée, c'est exactement le mode
+`"texte"` de `clean.py`, transposé hors de la bulle. Il obéit à quatre règles :
+
+- **désarmé par défaut** (`manga.onomatopees.effacement.mode: "aucun"`) — un utilisateur qui ne
+  touche à rien obtient le rendu bit à bit identique ;
+- **jamais sur une zone dont la lecture n'est pas concordante** — la règle est dans le code,
+  aucune clé de configuration ne la désarme ;
+- **rien n'est peint** sous le seuil d'uniformité du fond local (0,35, le palier du gratte-ciel
+  de la page 44) : la zone garde son texte source, visible donc corrigible ;
+- **calque séparé**, jamais aplati sans qu'on l'ait demandé, listé dans `RAPPORT.md`, et
+  annulable en masquant un calque dans le PSD ou en supprimant un fichier de cache.
 
 ### Installation
 ```
@@ -1065,9 +1185,48 @@ téléchargement : c'est le chargement disque, en moins d'une seconde.
 
 ### Structure des sources
 ```
-sources/<Projet>/<Tome>/manga/*.cbz | *.cbr | *.png/*.jpg/*.webp
+sources/<Projet>/<Tome>/<FORMAT>/<LANGUE>/*.cbz | *.cbr | *.png/*.jpg/*.webp
 ```
 Plusieurs archives sont concaténées dans l'ordre de lecture (tri naturel).
+
+**Les deux niveaux sont facultatifs**, avec repli en cascade — la structure historique
+`<Tome>/manga/` continue de marcher à l'identique :
+
+| Sur disque | format | langue source |
+|---|---|---|
+| `<Tome>/manga/*.png` | `manga` | `manga.langue_source` (défaut `jp`) |
+| `<Tome>/*.png` | `manga` | `manga.langue_source` |
+| `<Tome>/manga/ENG/*.png` | `manga` | anglais — lecture **droite→gauche** |
+| `<Tome>/webtoon/ENG/*.png` | `webtoon` | anglais — lecture **gauche→droite** |
+
+Les noms de dossiers de langue sont ceux du light novel (`config.yaml > langues.dossiers` :
+`ENG`, `JAP`, `FR`, `ESP`, `CHINOIS`…). `--langue ENG` et `--format webtoon` forcent le choix
+quand un tome porte plusieurs sources.
+
+> ⚠ **Format et langue sont deux axes indépendants, et les confondre coûte cher.** Un scan
+> **anglais** d'un manga japonais se lit toujours droite→gauche ; un webtoon **coréen** se lit
+> gauche→droite. Le format fixe le sens de lecture — donc l'ordre dans lequel les bulles sont
+> numérotées pour le modèle —, la langue fixe le moteur d'OCR et les consignes.
+
+> ⚠ **Ce que vaut réellement le webtoon aujourd'hui, mesuré.** Le format tourne de bout en
+> bout, mais **une détection sur six ou sept y est fausse** (15 à 17 % de bulles sans texte,
+> contre **0 %** sur les neuf volumes de manga paginé), et une bande de 10 000 px rend ~6 bulles
+> là où sa surface en promettrait 25 à 35. Les bulles fausses sont repeintes puis recollées
+> — le dessin d'origine revient — et `RAPPORT.md` les liste sous « Zones RESTAURÉES ». C'est
+> une limite connue et chiffrée, pas une panne : le détecteur livré n'a jamais été entraîné sur
+> du webtoon. Le détail, avec ce qui a été essayé et écarté :
+> [`webtoon-2026-08-26.md`](mesures/webtoon-2026-08-26.md).
+
+**La langue source choisit le moteur d'OCR**, et ce n'est pas un réglage de confort :
+`manga-ocr` est un modèle *japonais*, dont le décodeur n'a pas de token d'espace. Sur une
+planche anglaise il ne rend pas un texte approximatif, il rend une chaîne collée parsemée de
+kanji inventés (`HE'S CERTAINLY NO ORDINARY PERSON` → `ＨＥＳＣＥＲＴＡＮＡＹＮＯ…`), que le
+modèle de traduction traduit ensuite sans broncher. Les sources non japonaises passent donc
+par **RapidOCR** (`pip install rapidocr-onnxruntime`, cf. `requirements-manga.txt`) ; le
+japonais garde `manga-ocr`, où il est imbattable.
+
+**Un manga déjà en français** (`<Tome>/manga/FR/`) ne se traduit pas : un run complet s'arrête
+avec un message renvoyant vers `--extract-glossary`, qui sait le relever sans rien traduire.
 
 **Un chapitre est un `<Tome>`.** Une œuvre découpée en chapitres se range donc à plat, et
 chacun produit son propre CBZ, son propre `RAPPORT.md` et ses propres checkpoints :
@@ -1075,7 +1234,7 @@ chacun produit son propre CBZ, son propre `RAPPORT.md` et ses propres checkpoint
 ```
 sources/Mon Manga/
 ├── glossaire.yaml          ← PARTAGÉ par tous les chapitres (et par le light novel)
-├── Chap.6/manga/*.jpg
+├── Chap.6/manga/*.jpg          ← source japonaise supposée (structure historique)
 ├── Chap.7/manga/*.jpg
 └── Chap.10/manga/*.jpg
 ```
@@ -1088,6 +1247,7 @@ nourri du chapitre 10.
 ### Utilisation
 ```
 python run_manga.py "Mon Manga" Vol.1              # traduit le tome
+python run_manga.py "Mon Webtoon" Chap.11 --format webtoon --langue ENG  # force format et langue
 python run_manga.py "Mon Manga" Vol.1 --dry-run     # détection/OCR réels, SANS appel LLM
 python run_manga.py "Mon Manga" Vol.1 --force       # refait TOUTES les étapes des pages déjà générées
 python run_manga.py "Mon Manga" Vol.1 --stop        # arrêt propre (reprise à la relance)
@@ -1245,12 +1405,38 @@ de `--verbose`.
 
 ### Modèle LLM et mode de traduction
 Réutilise par défaut le **même modèle Ollama** que le LN (`qwen3.6:27b`, déjà
-vision-capable — vérifiable via `ollama show qwen3.6:27b`). Deux modes
+vision-capable — vérifiable via `ollama show qwen3.6:27b`). Trois modes
 (`config.yaml > manga.mode_traduction`) :
 - `"texte"` (défaut) : traduit depuis le texte OCR seul — rapide.
-- `"vision"` : envoie EN PLUS la planche entière, pour que le modèle exploite le
-  contexte visuel (scène, expressions) — plus lent (encodage image), à réserver aux
-  passages ambigus.
+- `"vision"` : envoie EN PLUS la planche entière, pour **toutes** les planches du tome —
+  plus lent (encodage image), et c'est le coût maximal pour les 90 % de planches qui n'en
+  ont pas besoin.
+- `"cible"` (2.7.0) : le premier passage est textuel, et c'est le **diagnostic** qui décide,
+  planche par planche, d'une seconde tentative avec image. Une planche dont le premier essai
+  déclenche un motif d'échec *est* une planche ambiguë ; ce sont alors les **crops de ses
+  groupes** qui partent, pas la planche entière — cinq à dix fois plus légers, et bien plus
+  lisibles parce que le sujet occupe le cadre. Une planche qui passe du premier coup ne coûte
+  rien de plus.
+
+### Ce que le traducteur sait de la planche (2.7.0)
+
+Depuis la 2.7.0, l'énoncé porte la **structure** de la planche, calculée sans le moindre
+appel LLM (`config.yaml > manga.structure`) :
+
+- des **groupes** de bulles séparés par une rupture de mise en page — ce ne sont pas des
+  cases détectées, et le prompt le dit ;
+- un **type de bulle** quand la forme est nette : `(pensée)`, `(récitatif)`, `(cri)` ;
+- une **étiquette de locuteur** `[A]` / `[B]`, déduite de la direction des queues de bulle,
+  **locale à la planche** et annoncée comme seulement probable.
+
+⚠ La règle qui gouverne les trois : **l'annotation absente vaut mieux que l'annotation
+fausse**. Mesuré sur les 7 862 bulles des dix volumes de `build/`, **86,2 % des bulles
+restent sans type**. C'est voulu, et c'est le chiffre à surveiller quand on touche aux seuils :
+
+```
+python tools/mesurer_structure.py --tous            # la distribution, sans charger un modèle
+python tools/mesurer_structure.py --tous --profils  # + les centiles bruts
+```
 
 Le glossaire de l'œuvre (`sources/<Projet>/glossaire.yaml`, **partagé avec le LN**)
 est automatiquement injecté en contexte du traducteur manga si présent, pour garder
@@ -1303,15 +1489,24 @@ Il liste les pages sans bulle, les écarts de comptage bulles/traductions, les t
 vides, les détections à faible confiance, les bulles non nettoyées, les glyphes substitués ou
 supprimés, et les formes canoniques que le glossaire n'a pas pu forcer.
 
-Un texte qui ne tient pas dans sa bulle a **trois causes**, et deux d'entre elles n'ont rien à
-voir avec le traducteur — le rapport les sépare, parce qu'il conseillait « raccourcir la
-traduction » neuf fois sur le Vol.1 et n'avait raison qu'une seule :
+Un texte qui ne tient pas dans sa bulle a **quatre causes**, et trois d'entre elles n'ont
+rien à voir avec le traducteur — le rapport les sépare, parce qu'il conseillait
+« raccourcir la traduction » neuf fois sur le Vol.1 et n'avait raison qu'une seule :
 
 | cause | ce que ça veut dire | correctif |
 |---|---|---|
 | **région dégénérée** | la région ne peut porter aucun mot, même au plus petit corps — elle n'est **pas lettrée** | corriger la **détection** |
+| **police trop large** | la région est saine, mais le mot le plus long ne tient pas au plus petit corps **dans cette police-là** — elle est lettrée quand même | raccourcir la réplique, ou changer `manga.typeset.font_path` |
 | **bulle étroite** | le mot le plus long ne tient pas en largeur | corriger la **détection**, ou scinder la région |
 | **texte trop long** | la bulle pourrait accueillir du texte, il y en a trop | raccourcir la **traduction** |
+
+⚠ La frontière entre les deux premières s'est payée cher. Le critère de largeur dépend de
+la police, et une police 1,3× plus large a fait basculer deux vraies bulles du côté
+« dégénéré » : le nettoyage ayant déjà effacé le japonais, elles sont sorties **blanches**,
+et le message accusait une détection qui n'avait pas bougé. Désormais la géométrie seule
+fait renoncer — aire utile, hauteur utile, et une largeur où pas même une lettre ne tient.
+Une réplique non dessinée a sa propre section de rapport, en tête des incidents : c'est le
+seul où du texte disparaît de la planche.
 
 Plutôt que de déborder — un débordement fait *découper les lettres par le masque* — le lettrage
 descend sous `taille_min`, jusqu'à `taille_min_absolue`. Ces bulles-là ont leur propre section :
@@ -1439,6 +1634,29 @@ la réécriture au clavier.
 Enfin, si Photoshop ne trouve pas la police du lettrage il **substitue** et le signale : le
 calque reste éditable, le dessin change. Installer `templates/fonts/ComicNeue-Bold.ttf` (ou ta
 police) côté système règle le cas.
+
+### Changer la police de lettrage
+
+`config.yaml > manga.typeset.font_path`, puis `--from rendu` — le lettrage est la seule
+étape rejouée, les traductions restent en cache.
+
+⚠ **Deux pièges, tous deux silencieux avant qu'on les mesure.**
+
+1. **La police est choisie BULLE PAR BULLE.** S'il manque un seul caractère à la police
+   demandée, toute la réplique est redessinée dans la première police de repli qui la
+   couvre — et cette bascule n'était signalée nulle part. Mesuré sur un tome de 150
+   planches, avec une police à qui manquaient `« » œ Ç À — ♪` : **63 bulles sur 818, sur
+   45 planches**, sorties dans une autre police. Le **pré-vol** le dit désormais dans les
+   premières secondes du run, et `python run_manga.py --check` sans lancer de run.
+   `python tools/completer_police.py <ta_police.ttf>` complète la police à partir de ses
+   propres tracés (⚠ travail dérivé : cf. `NOTICE`).
+2. **Une police plus large change la mise en page.** Le pré-vol annonce le rapport à
+   ComicNeue-Bold à corps égal. Au-delà de ~1,15×, attends-toi à des corps plus petits et
+   à des bulles étroites en débordement (cause `police trop large` du tableau ci-dessus).
+
+Un chemin Windows se met en guillemets **simples** dans `config.yaml` : en guillemets
+doubles, YAML lit `\` comme une échappe, `\U` réclame 8 chiffres hexadécimaux et le
+chargement échoue — tandis que `\t` passerait en silence en produisant une tabulation.
 
 ### Cohérence des noms propres
 
@@ -1631,6 +1849,19 @@ Navigation : `Page préc.`/`Page suiv.` entre planches, `F` ajuster, molette zoo
 revenir à « Choisir », `Ctrl+J` afficher le journal. Le mémo complet est dans
 **[COMMANDES.md](COMMANDES.fr.md)**.
 
+**Au clavier, sans la souris.** Les flèches déplacent la zone sélectionnée d'un pixel (`Maj`
+pour dix), `Ctrl`+flèches la retaillent. L'écriture part une demi-seconde après la dernière
+touche, pas à chaque pression : un retaillage réécrit `regions.json`, `masks.png` **et** la
+planche nettoyée. ⚠ **Tracer** une zone reste un geste de souris — ce n'est pas couvert.
+
+**Thème clair ou sombre** — « Affichage → Thème ». Par défaut l'interface suit le réglage du
+système, et le choix est retenu d'une session à l'autre dans `.angelith/interface.json`.
+⚠ **Le canevas reste sombre dans les deux thèmes**, comme dans tout outil d'image : un fond
+sombre autour d'une planche évite d'éblouir et fait ressortir le dessin. Les couleurs, les
+tailles et les contrastes vivent tous dans `gui/theme.py` ; le tableau de contraste des deux
+thèmes est publié dans
+**[systeme-visuel-2026-08-27.md](mesures/systeme-visuel-2026-08-27.md)**.
+
 ⚠ **Rien n'est écrit avant `Ctrl+S`.** L'éditeur tient un document tamponné **par planche**,
 avec son historique : on peut essayer, revenir en arrière, et ne valider qu'à la fin. Si un run
 a retouché la planche entre-temps, l'écriture est **refusée** et la modification conservée.
@@ -1680,8 +1911,16 @@ zéro, et l'interface dit lesquelles.
 
 **Onglet « Runs » — le lanceur.** Manga *ou* light novel : projet, tome, étape de reprise,
 planche unique, `--force`, `--dry-run`, `--verbose`, et les réglages de lot et de raisonnement.
-Journal en direct, barre de progression, et un bouton **« Arrêter proprement »** qui écrit le
-même fichier `STOP` que `--stop`.
+Journal en direct, et un bouton **« Arrêter proprement »** qui écrit le même fichier `STOP`
+que `--stop`.
+
+**Le bandeau de run (lot 32).** L'avancement n'est plus une barre dans un onglet : c'est un
+bandeau en pied de FENÊTRE, visible depuis n'importe quelle destination, qui nomme la phase
+(« Traduction et rendu (5/6) »), l'objet en cours (`page_0084.png`, `lot 80→99`), l'avancement
+compté (« planche 84 / 131 ») et le temps restant tiré du débit observé. Il ne recule jamais,
+il **n'affiche aucun pourcentage**, et il passe en indéterminé — sans temps — dans les trois
+cas où rien n'est comptable. Le titre de la fenêtre porte le même compte en tête, pour la
+barre des tâches. Mesure : `docs/mesures/progression-2026-09-05.md`.
 
 `perf.log` est écrit **dans tous les cas** (hors dry-run) depuis la 1.7.0 : la case « verbose »
 ne décide plus que de ce qui s'affiche à l'écran, et les incidents (`⚠`) y atterrissent
@@ -1831,6 +2070,8 @@ pas, et les deux voies restent interchangeables.
   ```
   python tools/mesurer_bulles.py "Mon Manga" Vol.1
   python tools/mesurer_bulles.py "Mon Manga" Vol.1 --scindables   # sans rien écrire
+  python tools/banc.py --tous                    # les mêmes chiffres, TOUS les volumes
+  python tools/banc.py --tous --markdown         # …daté, avec commit et empreinte de config
   ```
   ⚠ Un tome déjà traité **migre tout seul** au premier run suivant, sans le modèle ONNX (la
   scission travaille sur les masques en cache). Mais une planche qui gagne des bulles perd

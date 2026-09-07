@@ -27,7 +27,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from gui import apercu as apercu_mod
-from manga import checkpoints, clean, typeset
+from manga import checkpoints, clean
 from manga.detection import BubbleRegion
 
 TAILLE = (400, 600)

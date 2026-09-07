@@ -1,0 +1,93 @@
+# Pack de langue cible — FRANÇAIS
+#
+# Ce fichier décrit tout ce qui, dans une traduction vers le français, relève de la LANGUE
+# et non du moteur. Ajouter une langue au projet, c'est copier ce dossier et en traduire le
+# contenu : aucun code Python à toucher. Voir langues/README.md.
+#
+# ⚠ Les valeurs ci-dessous reproduisent EXACTEMENT le comportement d'avant l'externalisation.
+# Ce n'est pas une base à ajuster : c'est le comportement de référence, et le modifier change
+# la sortie de tous les tomes déjà produits.
+
+code: fr
+nom: français
+
+# Accord grammatical du forçage déterministe. Le français accorde le déterminant,
+# répare les élisions (« l' » → « le »/« la ») et REFUSE un remplacement dont le genre
+# est incertain — le déterministe ne doit jamais introduire une faute que le modèle
+# n'aurait pas faite. Implémentations : `francais`, `aucun`.
+accord: francais
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TYPOGRAPHIE
+# ─────────────────────────────────────────────────────────────────────────────
+typographie:
+  # Guillemets de dialogue. Le rendu s'en sert pour REPÉRER une réplique dans la narration :
+  # c'est la paire que le traducteur produit, pas nécessairement celle du texte source.
+  guillemets: ["«", "»"]
+
+  # Tiret de réplique, posé par la feuille de style epub (`.dialogue p::before`).
+  tiret_dialogue: "—"
+
+  # Le tiret est-il déjà DANS le texte ? Non en français : c'est le gabarit qui le pose, et
+  # `_strip_dialogue_dashes` retire ceux que le modèle aurait ajoutés — sinon « — — ».
+  tiret_dans_le_texte: false
+
+  # Ponctuations qui terminent une phrase. Sert à savoir où s'arrête une incise
+  # d'attribution collée à sa réplique.
+  fin_de_phrase: ";.!?…"
+
+  # ⚠ VERBES DE PAROLE — le point le plus délicat de ce fichier.
+  #
+  # Sert à décider si le récit qui SUIT une réplique lui reste collé : « — Viens, dit-il. »
+  # est un seul bloc de dialogue, pas une réplique suivie d'une narration.
+  #
+  # C'est un LEXIQUE, pas un caractère à paramétrer, et il n'a pas d'équivalent mécanique
+  # dans toutes les langues : l'anglais écrit `"...," he said`, sans inversion ni conjugaison
+  # à énumérer. Une langue qui n'a pas cette construction laisse donc la clé ABSENTE, et le
+  # rendu n'essaie pas de coller d'incise — plutôt que de le faire selon des règles
+  # françaises.
+  #
+  # Motif d'expression régulière, ancré en début de segment, insensible à la casse.
+  verbes_de_parole: >-
+    (?:s['’]\s*)?(?:d(?:it|is|isait|isaient|irent)|répond(?:it|irent|ait)?|répliqua|rétorqua|demand(?:a|ait|èrent)|interrogea|questionna|hurl(?:a|ait|èrent)|cri(?:a|ait|èrent)|écria|exclama|murmur(?:a|ait)|chuchota|souffla|marmonna|bredouilla|balbutia|pens(?:a|ait)|song(?:ea|eait)|réfléchit|ajouta|repr(?:it|enait)|poursuivit|continua|soupira|gémit|grogna|gronda|grommela|lança|beugla|tonna|affirma|déclara|annonça|objecta|insista|conclut|répéta)\b
+
+  # Titre du guide de style, tel qu'il apparaît en tête de `style_guide.md`. Sert au garde-fou
+  # qui détecte qu'un modèle a RÉGURGITÉ le guide dans sa sortie — sans lui, le garde-fou
+  # chercherait un titre français dans un pack anglais et ne trouverait jamais rien.
+  titre_guide_de_style: "Guide de style"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STYLES DE SORTIE
+# ─────────────────────────────────────────────────────────────────────────────
+# Noms XML EXACTS des styles de `templates/reference.docx`. Un `custom-style` absent d'ici
+# est déballé en paragraphe simple par `_sanitize_custom_styles` : un nom halluciné par un
+# modèle ne doit pas ressortir littéralement dans le document final.
+styles_word:
+  dialogue: "List Paragraph"      # ↔ « Paragraphe de liste » (tiret auto)
+  pensee: "Pensée"
+  # narration = paragraphe simple (hérite de « Corps de texte » / Body Text)
+
+# Classes de `templates/epub.css`.
+classes_css:
+  dialogue: dialogue
+  pensee: pensee
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSIGNES
+# ─────────────────────────────────────────────────────────────────────────────
+# Fragments de message que le code injecte conditionnellement — ce ne sont pas des prompts
+# système, d'où leur absence de `prompts/`.
+#
+# ⚠ VOLONTAIREMENT VIDE pour le français, et ce n'est pas un oubli. Le texte français vit à
+# son SITE D'APPEL dans le code (`pipeline/orchestrator.py`, `core/glossary_lang.py`,
+# `manga/traduction_unitaire.py`), et le recopier ici en ferait une seconde source, libre de
+# diverger, dont l'une déciderait de la sortie d'un tome. Un pack qui ne déclare rien reçoit
+# ce texte-là ; c'est ce qui rend l'identité de sortie vraie par construction.
+#
+# Un pack NON français, lui, doit les déclarer toutes. Clés reconnues (cf.
+# `core.langues.CONSIGNES_CONNUES`) :
+#
+#   naturalisation_minimale · naturalisation_legere · naturalisation_moderee
+#   naturalisation_marquee  · titre_chapitre        · romanisation_rendu
+#   traduction_unitaire
+consignes: {}

@@ -10,16 +10,20 @@ from core import cli
 
 cli.configurer_stdout()
 
-from pathlib import Path
-from types import SimpleNamespace
+# ⚠ Les imports qui suivent sont VOLONTAIREMENT après l'appel ci-dessus : `configurer_stdout()`
+# réencode la sortie console, et tout module qui touche à stdout en l'important — `rich` au
+# premier chef — figerait l'ancien encodage. D'où les suppressions E402 de ce bloc.
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.prompt import Confirm, IntPrompt, Prompt
+from pathlib import Path  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 
-from core.reporter import Reporter, RichReporter
-from pipeline import sources
-from pipeline.orchestrator import STAGES, process_volume
+from rich.console import Console  # noqa: E402
+from rich.panel import Panel  # noqa: E402
+from rich.prompt import Confirm, IntPrompt, Prompt  # noqa: E402
+
+from core.reporter import Reporter, RichReporter  # noqa: E402
+from pipeline import sources  # noqa: E402
+from pipeline.orchestrator import STAGES, process_volume  # noqa: E402
 
 console = Console()
 

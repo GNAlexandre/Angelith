@@ -13,6 +13,9 @@ S'y ajoutent les non-régressions du lot 1.3. Ce que le lettrage faisait avant :
   · écrire `fill=(0,0,0)` **en dur**, d'où du texte noir sur les bulles inversées ;
   · `zip(regions, texts)` — une liste de traductions plus courte tronquait en silence.
 """
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
@@ -20,8 +23,9 @@ from PIL import Image, ImageDraw
 from manga.clean import analyze_bubble, analyze_regions
 from manga.detection import BubbleRegion
 from manga.geometry import width_profile
-from manga.typeset import (Fit, _profil, best_fit, harmonize, layout_at_size, load_font,
-                           resolve_font, typeset_bubble, typeset_page, wrap_balanced)
+from manga.typeset import (DEFAULT_FONT_CANDIDATES, POLICES_SYMBOLES, Fit, _profil, best_fit,
+                           harmonize, layout_at_size, load_font, resolve_font, typeset_bubble,
+                           typeset_page, wrap_balanced)
 
 TEXTE = ("C'est bien, mais j'aimerais que vous modériez un peu votre attention "
          "pour le seigneur Kruuteo.")
@@ -542,8 +546,54 @@ def test_la_police_par_defaut_est_comic_neue_et_non_arial():
 
 
 def test_font_path_explicite_est_prioritaire():
+    """⚠ La police d'essai doit EXISTER sur la plateforme qui exécute le test. Ce test
+    passait `C:/Windows/Fonts/l_10646.ttf` : sur Linux le fichier est absent, `resolve_font`
+    faisait donc son repli — comportement correct — et l'assertion accusait la priorité d'un
+    défaut qui n'existait pas. On prend une police livrée par le dépôt, présente partout, et
+    volontairement pas la première de la chaîne."""
     resolve_font.cache_clear()
-    assert resolve_font("C:/Windows/Fonts/l_10646.ttf").endswith("l_10646.ttf")
+    explicite = "templates/fonts/ComicNeue-Italic.ttf"
+    assert Path(explicite).is_file(), explicite
+    assert resolve_font(explicite).endswith("ComicNeue-Italic.ttf")
+
+
+def test_un_font_path_introuvable_retombe_sur_la_chaine():
+    """Contrepartie du test précédent : une config qui pointe dans le vide ne doit pas faire
+    échouer le lettrage, elle doit reprendre la chaîne."""
+    resolve_font.cache_clear()
+    assert resolve_font("nulle-part/police-absente.ttf") in DEFAULT_FONT_CANDIDATES
+
+
+def test_une_police_a_symboles_est_disponible_sur_cette_plateforme():
+    """Échoue — ne skippe pas, comme `tests/test_fixture_police.py`.
+
+    Sans police de repli à symboles, `♪ ♥ → ♂ ♀` ne lèvent RIEN : ils partent en « supprimé »
+    et la planche sort amputée d'un signe que le traducteur avait produit, la perte
+    n'apparaissant que dans une ligne du rapport. C'est le même silence que le lot 20 a
+    supprimé pour la police japonaise."""
+    from manga.typeset import explication_absence_symboles, polices_symboles
+    trouvees = [c for c in polices_symboles() if Path(c).is_file()]
+    assert trouvees, explication_absence_symboles()
+
+
+def test_les_deux_os_de_la_matrice_ont_des_polices_a_symboles():
+    """`.github/workflows/ci.yml` fait tourner la suite sur windows-latest ET ubuntu-latest.
+    Un OS sans candidat déclaré rendrait le test précédent rouge sans dire pourquoi."""
+    from manga.typeset import polices_symboles
+    for plateforme in ("win32", "linux", "darwin"):
+        assert polices_symboles(plateforme), plateforme
+    assert sys.platform in POLICES_SYMBOLES, (
+        f"{sys.platform} n'a aucune police à symboles déclarée dans manga/typeset.py")
+
+
+def test_aucune_police_CJK_dans_la_chaine_de_repli():
+    """La garde qui protège la substitution. `font_pour_texte` bascule TOUTE la bulle : une
+    police CJK dans la chaîne couvrirait `・` et court-circuiterait `_SUBSTITUTIONS`, faisant
+    redessiner un paragraphe entier de français en CJK pour un seul point médian."""
+    from manga.typeset import a_le_glyphe
+    for candidat in DEFAULT_FONT_CANDIDATES:
+        if Path(candidat).is_file():
+            assert not a_le_glyphe(candidat, "・"), candidat
 
 
 def test_load_font_est_mis_en_cache():
@@ -889,3 +939,138 @@ def test_une_traduction_francaise_normale_nest_jamais_marquee():
                  sources=["こんにちは"])
     assert not [e for e in rapport if e["type"] == "bulle_vide"]
     assert [e for e in rapport if e["type"] == "bulle"]
+
+
+# --------------------------------------------------------------------------- #
+# Une réplique non vide n'est JAMAIS perdue
+#
+# Défaut mesuré : au passage de ComicNeue-Bold à Wildjess (~1,3× plus large à corps égal),
+# page 22 bulle 2 (« J'aimerais bien tirer. ») et page 68 bulle 5 (« Katch ») du Vol.1
+# de manga A sont sorties BLANCHES. Le nettoyage avait effacé le japonais, le test de
+# « région dégénérée » avait renoncé au lettrage, et le message conseillait « corriger la
+# détection » alors que la détection n'avait pas bougé d'un pixel — c'était la police.
+# --------------------------------------------------------------------------- #
+
+def test_une_bulle_trop_etroite_POUR_LA_POLICE_nest_jamais_laissee_blanche():
+    """Le 3ᵉ critère de dégénérescence est le seul à dépendre de la POLICE. Le déclencher
+    seul ne doit plus faire renoncer : on lettre, quitte à déborder, et on nomme la cause.
+
+    Le plancher est remonté à `taille_min` pour que le mot le plus long ne tienne
+    définitivement pas — c'est exactement la situation de la page 22."""
+    img, region, styles = _bulle_de(46, 120)
+    cfg = dict(_cfg_test(), taille_min=20, taille_min_absolue=20)
+    fit = best_fit("J'aimerais", styles[0], cfg, resolve_font())
+    assert fit.lines, "la réplique doit être dessinée, pas abandonnée"
+    assert fit.cause == "police_trop_large"
+    assert fit.overflow is True
+
+
+def test_une_region_vraiment_minuscule_reste_ecartee():
+    """Non-régression de l'autre moitié : les deux critères GÉOMÉTRIQUES font toujours
+    renoncer. Une région de 8×8 px ne porte aucun mot, quelle que soit la police — c'est
+    une fausse détection, et le rapport doit continuer de pointer la détection."""
+    img, region, styles = _bulle_de(8, 8, marge=6)
+    fit = best_fit("Bonjour", styles[0], _cfg_test(), resolve_font())
+    assert fit.lines == []
+    assert fit.cause == "bulle_degeneree"
+
+
+def test_une_replique_non_dessinee_est_signalee_avec_son_texte():
+    """Une bulle blanche est indistinguable d'un choix éditorial. Quand rien n'est peint
+    alors que le texte n'était pas vide, le rapport doit porter LA RÉPLIQUE — sans quoi il
+    faut rouvrir le checkpoint pour savoir ce qui a disparu."""
+    img, region, styles = _bulle_de(8, 8, marge=6)
+    rapport: list = []
+    typeset_page(img, [region], ["Bonjour"], styles=styles, cfg=_cfg_test(),
+                 report_out=rapport)
+    perdues = [e for e in rapport if e.get("type") == "replique_non_dessinee"]
+    assert perdues, "une réplique non dessinée doit être signalée"
+    assert perdues[0]["texte"] == "Bonjour"
+    assert perdues[0]["cause"] == "bulle_degeneree"
+
+
+# --------------------------------------------------------------------------- #
+# La chaîne de repli ne dépend plus du répertoire courant
+# --------------------------------------------------------------------------- #
+
+def test_les_polices_livrees_sont_des_chemins_ABSOLUS():
+    """Elles étaient relatives, donc résolues contre le répertoire COURANT : lancé
+    d'ailleurs que de la racine, le repli sautait aux polices système — un tome en Arial,
+    sans un mot."""
+    from manga.typeset import POLICES_LIVREES
+    assert POLICES_LIVREES, "la chaîne livrée ne doit pas être vide"
+    for chemin in POLICES_LIVREES:
+        assert Path(chemin).is_absolute(), f"{chemin} est relatif au répertoire courant"
+
+
+def test_les_candidats_systeme_sont_des_chemins_ABSOLUS():
+    """`comic.ttf` et `arial.ttf` y figuraient sans dossier. Les deux points d'usage
+    filtrent par `Path(c).exists()` : ils n'ont donc jamais été trouvés, et le commentaire
+    promettait trois candidats Windows quand il n'y en avait qu'un."""
+    # `Path.is_absolute()` ne convient pas : sous Windows il rend False pour un chemin
+    # POSIX, et l'inverse. Ce qu'on veut vérifier est plus simple et c'est le vrai défaut :
+    # le candidat NOMME-t-il un dossier, ou compte-t-il sur le répertoire courant ?
+    for plateforme, candidats in POLICES_SYMBOLES.items():
+        for chemin in candidats:
+            assert "/" in chemin or "\\" in chemin,                 f"{plateforme} : {chemin} n'a pas de dossier"
+
+
+def test_resolve_font_marche_depuis_un_autre_repertoire(tmp_path, monkeypatch):
+    """Le vrai symptôme, reproduit : changer de répertoire ne doit plus changer la police."""
+    depuis_la_racine = resolve_font()
+    resolve_font.cache_clear()
+    monkeypatch.chdir(tmp_path)
+    assert resolve_font() == depuis_la_racine
+    resolve_font.cache_clear()
+
+
+# --------------------------------------------------------------------------- #
+# Pré-vol : savoir en deux secondes, pas après dix minutes de rendu
+# --------------------------------------------------------------------------- #
+
+def test_le_prevol_nomme_les_glyphes_absents_et_les_bulles_touchees():
+    """Le repli se décide par bulle et ne laisse AUCUNE trace : sur le Vol.1, 63 bulles sur
+    818 sont sorties dans une autre police que celle demandée sans une ligne de rapport.
+    Le pré-vol doit dire lesquelles, et pourquoi, avant de lettrer."""
+    from manga.typeset import couverture, message_couverture
+    c = couverture(resolve_font(), {1: ["les filles ♪", "Bonjour"], 2: ["Rien de special"]})
+    assert c.manquants_textes == "♪"
+    assert (c.bulles_touchees, c.bulles_vues) == (1, 3)
+    assert c.pages_touchees == [1]
+    assert "♪" in "\n".join(message_couverture(c))
+
+
+def test_un_font_path_ABSENT_nest_pas_avale_en_silence(tmp_path):
+    """`resolve_font` retombe sur la chaîne par défaut quand le fichier n'existe pas, sans
+    rien dire. Les polices non livrées avec le dépôt étant absentes de toute autre machine,
+    un tome entier peut sortir en Comic Neue — le pré-vol doit le crier."""
+    from manga.typeset import couverture, message_couverture
+    fantome = tmp_path / "nulle-part.ttf"
+    c = couverture(str(fantome))
+    assert c.existe is False
+    assert c.retenue != str(fantome)
+    assert "ABSENT" in "\n".join(message_couverture(c))
+
+
+def test_le_prevol_mesure_la_largeur_relative_a_letalon():
+    """Une police large fait tomber les corps et pousse les bulles étroites en débordement.
+    L'annoncer avant évite d'accuser la détection. L'étalon se mesure à 1,00 exactement."""
+    from manga.typeset import POLICE_ETALON, couverture
+    assert couverture(POLICE_ETALON).largeur_relative == pytest.approx(1.0)
+
+
+def test_un_ruban_de_quelques_pixels_reste_une_FAUSSE_DETECTION():
+    """Le critère de largeur se dédouble, et l'oublier a mal classé la page 80 du Vol.1.
+
+    « Un mot ne tient pas » se corrige en changeant de police ; « pas même une lettre ne
+    tient » ne se corrige pas du tout. Mesuré : 4 px de largeur maximale pour 258 px de
+    haut — l'aire utile (1 032 px²) passe le seuil, la hauteur aussi, et pourtant aucune
+    police n'écrira jamais dans un couloir d'un pixel. Conseiller « choisir une police
+    moins large » y enverrait chercher un défaut qui n'existe pas.
+
+    ⚠ La mesure porte sur la plus étroite LETTRE, pas sur le caractère le plus étroit : le
+    point de ComicNeue-Bold fait 1,0 px à 8 px et « tenait » donc dans ce couloir."""
+    img, region, styles = _bulle_de(4, 260)
+    fit = best_fit("Une forte source de chaleur...", styles[0], _cfg_test(), resolve_font())
+    assert fit.lines == []
+    assert fit.cause == "bulle_degeneree", "un ruban de 4 px n'est pas un défaut de police"

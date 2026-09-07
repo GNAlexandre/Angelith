@@ -163,7 +163,8 @@ def test_thinking_agent_gets_larger_token_budget():
         def chat(self, model, system, user, temp, max_tokens=None, **_):
             self.last_max = max_tokens; return "ok"
 
-    import os, tempfile
+    import os
+    import tempfile
     p = os.path.join(tempfile.gettempdir(), "prompt_test.md")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("prompt")

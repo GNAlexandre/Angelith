@@ -119,14 +119,38 @@ def lire(build_dir, index: int):
         return None
 
 
+#: Ce qu'un dossier de miroir doit porter pour qu'on ose l'annoncer. Ce sont exactement les
+#: deux fichiers que `document.lire_etat` exige — `checkpoints.load_regions` rend `None` sans
+#: l'un ou l'autre, et `lire_etat` lève alors `ErreurDocument`.
+INDISPENSABLES = ("regions.json", "masks.png")
+
+
 def planches(build_dir) -> list[int]:
-    """Les planches dont un brouillon attend, triées."""
+    """Les planches dont un brouillon attend **et est lisible**, triées.
+
+    ⚠ **« Et est lisible » a été ajouté le 2026-09-05 (lot 35), après une mesure.** La
+    version d'avant comptait tout dossier nommé `page_NNNN`, vide compris — et le corpus en
+    portait : sur `webtoon A/Chap.11`, deux dossiers vides à côté d'un seul complet.
+    `PanneauEditeur.proposer_reprise` annonçait donc « 3 planches portent des modifications
+    non enregistrées », `_reprendre_brouillons` en récupérait une, et les deux autres
+    partaient en « Brouillon de la planche N illisible — ignoré ». Le premier chiffre qu'on
+    lit après un plantage ne doit pas être un chiffre qu'on dément deux lignes plus bas.
+
+    Un dossier vide se produit quand `ecrire` crée la cible puis échoue à l'écrire — disque
+    plein, fichier verrouillé — ce que `PanneauEditeur.sauver_brouillons` attrape et
+    journalise sans lever, à dessein : le travail est toujours en mémoire, et c'est
+    l'essentiel à ne pas perdre.
+
+    ⚠ On teste la PRÉSENCE des fichiers plutôt que de tenter la lecture : décoder un
+    `masks.png` pleine page coûte 10,8 Mo sur une bande webtoon (`config.yaml` ~L894), et
+    l'ouverture du tome le ferait pour chaque planche du miroir, juste pour compter."""
     racine = dossier(build_dir)
     if not racine.is_dir():
         return []
     return sorted(int(d.name.removeprefix("page_")) for d in racine.iterdir()
                   if d.is_dir() and d.name.startswith("page_")
-                  and d.name.removeprefix("page_").isdigit())
+                  and d.name.removeprefix("page_").isdigit()
+                  and all((d / nom).is_file() for nom in INDISPENSABLES))
 
 
 def date(build_dir) -> float | None:

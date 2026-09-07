@@ -133,14 +133,19 @@ def test_la_legende_porte_le_numero_et_le_nombre_de_bulles():
 
 
 def test_la_couleur_distingue_trois_etats_seulement():
-    assert pel.couleur(_etat()) is None
-    assert pel.couleur(_etat(perimee=True)) == "#d09030"
-    assert pel.couleur(_etat(corrigees=1)) == "#6aa6d8"
-    assert pel.couleur(_etat(detectee=False)) == "#777"
+    """⚠ Des RÔLES, plus des valeurs (`PLAN-19` L19.1). Le test disait `"#d09030"` : il
+    gardait donc une cinquième copie d'une couleur littérale, dans le fichier même qui
+    prétendait garder la règle. Ce qu'il doit garder est la DÉCISION — quel état l'emporte —
+    et `tests/test_gui_theme.py` vérifie séparément que chaque rôle nommé ici existe."""
+    assert pel.role_couleur(_etat()) is None
+    assert pel.role_couleur(_etat(perimee=True)) == "pastille_perimee"
+    assert pel.role_couleur(_etat(corrigees=1)) == "pastille_main"
+    assert pel.role_couleur(_etat(detectee=False)) == "pastille_absente"
+    assert pel.role_couleur(_etat(), 2) == "pastille_brouillon"
 
 
 def test_le_perime_l_emporte_sur_la_correction():
-    assert pel.couleur(_etat(perimee=True, corrigees=1)) == "#d09030"
+    assert pel.role_couleur(_etat(perimee=True, corrigees=1)) == "pastille_perimee"
 
 
 # --------------------------------------------------------------------------- #

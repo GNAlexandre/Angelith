@@ -8,8 +8,9 @@ Point de conception vérifié ici : les pages déjà générées sont SAUTÉES p
 seul run en cours serait donc quasi vide sur une reprise — donc mensonger. Il est bâti en
 relisant les `qa.json` de TOUTES les pages, cache compris.
 """
+import json
+
 import numpy as np
-import pytest
 
 from manga import checkpoints, report_manga
 from manga.detection import BubbleRegion
@@ -304,3 +305,34 @@ def test_les_regions_non_bulle_ne_sont_pas_comptees(tmp_path):
     texte = report_manga.build_report(tmp_path, "P", "Vol.1", total_pages=1, mcfg={})
     assert "Bulles : 0" in texte
     assert "## Bulles sans texte OCR" not in texte
+
+
+def test_le_rapport_signale_une_REPLIQUE_NON_DESSINEE_avec_son_texte(tmp_path):
+    """Le seul incident du rendu où du TEXTE DISPARAÎT de la planche.
+
+    Un débordement laisse des lettres rognées, qui se voient ; une bulle blanche se lit
+    comme un silence voulu et ne se voit pas. Mesuré sur le Vol.1 de manga A après un
+    changement de police : deux répliques (« J'aimerais bien tirer. », « Katch ») ont
+    disparu sans qu'aucune ligne du rapport ne dise LAQUELLE."""
+    _semer_tome(tmp_path, 1, {
+        1: {"translated": ["J'aimerais bien tirer."],
+            "rendu_qa": [{"type": "replique_non_dessinee", "index": 0,
+                          "cause": "bulle_degeneree",
+                          "texte": "J'aimerais bien tirer."}]}})
+    texte = report_manga.build_report(tmp_path, "P", "Vol.1", total_pages=1, mcfg={})
+    assert "RÉPLIQUES NON DESSINÉES" in texte
+    assert "page 1 bulle 1" in texte
+    assert "J'aimerais bien tirer." in texte
+
+
+def test_un_qa_json_dancien_format_ne_casse_pas_le_rapport(tmp_path):
+    """Les pages reprises du cache portent un `qa.json` écrit AVANT ce lot, sans le champ
+    `non_dessinees`. Le rapport doit se construire et ne rien compter, plutôt qu'inventer
+    ou lever."""
+    _semer_tome(tmp_path, 1, {1: {"translated": ["Bonjour"], "rendu_qa": []}})
+    chemin = checkpoints.page_checkpoint_dir(tmp_path, 1) / "qa.json"
+    donnees = json.loads(chemin.read_text(encoding="utf-8"))
+    donnees.pop("non_dessinees", None)
+    chemin.write_text(json.dumps(donnees, ensure_ascii=False), encoding="utf-8")
+    texte = report_manga.build_report(tmp_path, "P", "Vol.1", total_pages=1, mcfg={})
+    assert "RÉPLIQUES NON DESSINÉES" not in texte

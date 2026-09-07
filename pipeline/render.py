@@ -15,11 +15,21 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+from core.langues import resoudre_pack
+
+from . import typographie as ty
 from core.version import __version__
 
 from .images import markers_to_markdown
 
-_DIALOGUE_BLOCK = re.compile(r'(:::+\s*\{[^}]*\.dialogue[^}]*\}\s*\n)(.*?)(\n:::+)', re.DOTALL)
+# ⚠ Le bloc d'attributs s'écrivait `\{[^}]*\.dialogue[^}]*\}` : DEUX quantificateurs
+# illimités de part et d'autre d'un littéral. Sur une fence `{...}` longue qui ne contient
+# pas `.dialogue`, le moteur réessaie chaque point de coupure avant d'abandonner — coût
+# quadratique en la longueur des attributs, et à chaque position de départ du document. Le
+# `.dialogue` est vérifié par une ANTICIPATION (qui ne consomme rien, donc n'a rien à
+# redistribuer), et un seul `[^}]*\}` consomme ensuite le bloc de façon déterministe.
+_DIALOGUE_BLOCK = re.compile(
+    r'(:::+\s*\{(?=[^}]*\.dialogue)[^}]*\}\s*\n)(.*?)(\n:::+)', re.DOTALL)
 _FENCE_LINE = re.compile(r'^:{2,}(\s*\{[^}]*\})?\s*$')
 # Fence écrite EN LIGNE : ouverture + attributs + texte + fermeture, le tout sur la
 # même ligne/paragraphe séparés par des espaces au lieu de retours à la ligne (motif
@@ -226,22 +236,15 @@ def _sanitize_custom_styles(md: str, valid_styles: set[str]) -> str:
     return _CUSTOM_STYLE_BLOCK.sub(repl, md)
 
 
-_DIALOGUE_SPAN = re.compile(r'«\s*(.+?)\s*»', re.DOTALL)
-
-# Une INCISE d'attribution : la narration qui suit une réplique et COMMENCE par un verbe
-# de parole/pensée (aux temps du récit — passé simple / imparfait, forme inversée incluse
-# « dit-il », « hurla-t-elle »). Elle reste collée à la réplique (cf. `_segment_text`).
-_SPEECH_VERB_START = re.compile(
-    r"^\s*(?:s['’]\s*)?(?:"
-    r"d(?:it|is|isait|isaient|irent)|répond(?:it|irent|ait)?|répliqua|rétorqua|"
-    r"demand(?:a|ait|èrent)|interrogea|questionna|hurl(?:a|ait|èrent)|cri(?:a|ait|èrent)|"
-    r"écria|exclama|murmur(?:a|ait)|chuchota|souffla|marmonna|bredouilla|balbutia|"
-    r"pens(?:a|ait)|song(?:ea|eait)|réfléchit|ajouta|repr(?:it|enait)|poursuivit|continua|"
-    r"soupira|gémit|grogna|gronda|grommela|lança|beugla|tonna|affirma|déclara|annonça|"
-    r"objecta|insista|conclut|répéta"
-    r")\b", re.IGNORECASE)
-
-_SENTENCE_END = re.compile(r'[;.!?…]')
+# Les règles typographiques de la langue CIBLE vivent désormais dans
+# `pipeline/typographie.py` : elles sont COMPILÉES PAR RUN depuis le pack, et ne
+# peuvent donc plus être des constantes de module. `ty.DEFAUT` porte les valeurs
+# françaises d'origine, pour les appelants qui n'ont pas de pack sous la main.
+#
+# ⚠ Le lexique des verbes de parole est le cas qui a commandé le déplacement : ce
+# n'est pas un caractère à paramétrer mais une CONSTRUCTION de langue, que l'anglais
+# n'a pas (`"...," he said`, sans inversion). Un pack peut donc dire « je n'en ai
+# pas », et le rendu n'essaie alors pas de coller d'incise.
 
 
 def _is_spoken(inner: str) -> bool:
@@ -259,7 +262,7 @@ def _is_spoken(inner: str) -> bool:
     return len(inner) >= 20
 
 
-def _segment_text(text: str, style: str) -> list[str] | None:
+def _segment_text(text: str, style: str, typo=None) -> list[str] | None:
     """Découpe un texte qui MÊLE répliques « … » et narration en une liste de blocs :
     chaque réplique → un bloc `.dialogue` (guillemets retirés) sur SON PROPRE paragraphe ;
     chaque portion de narration → un paragraphe simple (les termes cités « … » y restent,
@@ -269,8 +272,9 @@ def _segment_text(text: str, style: str) -> list[str] | None:
     commence par un verbe de parole/pensée (« dit-il », « hurla-t-elle », « pensa »…), il
     reste COLLÉ à la réplique dans le même bloc dialogue, jusqu'à la fin de phrase
     (; . ! ? …). Le reste repart en narration."""
+    typo = typo or ty.DEFAUT
     spans = []
-    for m in _DIALOGUE_SPAN.finditer(text):
+    for m in typo.dialogue_span.finditer(text):
         if not _is_spoken(m.group(1)):
             continue
         # RÉPLIQUE AUTONOME seulement si ce qui précède le « est vide ou termine une phrase
@@ -316,9 +320,9 @@ def _segment_text(text: str, style: str) -> list[str] | None:
         # 2) Incise d'attribution (« dit-il », « hurla-t-elle »…) : reste dans le bloc
         #    dialogue jusqu'à la fin de phrase.
         head = after[consumed:].lstrip()
-        if _SPEECH_VERB_START.match(head):
+        if typo.verbes_de_parole is not None and typo.verbes_de_parole.match(head):
             lead = len(after[consumed:]) - len(head)
-            se = _SENTENCE_END.search(head)
+            se = typo.fin_de_phrase.search(head)
             if se:
                 reply = f"{reply} {head[:se.end()].strip()}"
                 consumed += lead + se.end()
@@ -332,7 +336,7 @@ def _segment_text(text: str, style: str) -> list[str] | None:
             for k, t in seg]
 
 
-def _segment_dialogues(md: str, style: str) -> str:
+def _segment_dialogues(md: str, style: str, typo=None) -> str:
     """Filet déterministe de détection/catégorisation des dialogues (le 9B est
     imparfait) : chaque réplique « … » devient un bloc `.dialogue` INDÉPENDANT, la
     narration reste en paragraphe simple (avec l'exception de l'incise d'attribution, cf.
@@ -348,6 +352,7 @@ def _segment_dialogues(md: str, style: str) -> str:
 
     À exécuter APRÈS `_normalize_fences` (fences propres) et AVANT
     `_strip_dialogue_dashes`/`_strip_dialogue_quotes`."""
+    typo = typo or ty.DEFAUT
     chunks = re.split(r'\n[ \t]*\n', md)
     out: list[str] = []
     for ch in chunks:
@@ -370,10 +375,10 @@ def _segment_dialogues(md: str, style: str) -> str:
                     and content.count('«') == 1 and content.count('»') == 1):
                 out.append(ch)
                 continue
-            parts = _segment_text(content, style)
+            parts = _segment_text(content, style, typo)
             out.append(ch if parts is None else "\n\n".join(parts))
             continue
-        parts = _segment_text(s, style)
+        parts = _segment_text(s, style, typo)
         out.append("\n\n".join(parts) if parts else ch)
     return "\n\n".join(out)
 
@@ -404,14 +409,42 @@ def _strip_dialogue_quotes(md: str) -> str:
     return _DIALOGUE_BLOCK.sub(repl, md)
 
 
+def _chemin(bloc, cle: str) -> Path | None:
+    """Un chemin EXPLICITEMENT posé dans `config`, ou `None`.
+
+    ⚠ La config PRIME sur le pack, et c'est délibéré. `rendu.reference_docx` est calé sur le
+    document de l'utilisateur ; si le pack l'emportait, une faute de frappe dans ce chemin
+    serait silencieusement masquée par le gabarit du pack — et le doctor la déclarerait
+    saine. Le pack fournit le DÉFAUT (clé vide), pas l'autorité."""
+    valeur = (bloc or {}).get(cle)
+    return Path(str(valeur)) if valeur else None
+
+
+#: Un élément `<w:style …>…</w:style>`, attributs et corps séparés.
+#:
+#: ⚠ Le motif tenait en une seule passe — `<w:style\b[^>]*w:styleId="([^"]+)"[^>]*>` — soit,
+#: là encore, deux quantificateurs illimités autour d'un littéral : `styles.xml` porte des
+#: listes d'attributs longues, et chaque élément sans `w:styleId` faisait réessayer toutes
+#: les coupures. Découper en DEUX motifs supprime l'ambiguïté au lieu de la déplacer :
+#: `[^>]*>` est déterministe, et l'identifiant se cherche ensuite dans la seule chaîne
+#: d'attributs, qui est courte.
+_STYLE_ELEMENT = re.compile(r'<w:style\b([^>]*)>(.*?)</w:style>', re.DOTALL)
+_STYLE_ID = re.compile(r'w:styleId="([^"]+)"')
+
+
 def _narration_style_id(reference_docx: Path) -> str:
     """styleId de la narration dans le reference.docx (celui nommé « Body Text »)."""
     try:
         with zipfile.ZipFile(reference_docx) as z:
             st = z.read("word/styles.xml").decode("utf-8")
-        for m in re.finditer(r'<w:style\b[^>]*w:styleId="([^"]+)"[^>]*>(.*?)</w:style>', st, re.DOTALL):
-            if '<w:name w:val="Body Text"' in m.group(2):
-                return m.group(1)
+        for m in _STYLE_ELEMENT.finditer(st):
+            if '<w:name w:val="Body Text"' not in m.group(2):
+                continue
+            identifiant = _STYLE_ID.search(m.group(1))
+            # Un style « Body Text » SANS `w:styleId` ne peut pas être désigné : on continue
+            # de chercher, comme le faisait l'ancien motif qui ne l'appariait simplement pas.
+            if identifiant:
+                return identifiant.group(1)
     except Exception:
         pass
     return "Corpsdetexte"
@@ -495,7 +528,10 @@ def render(markdown_path: Path, out_dir: Path, config: dict,
     stem = markdown_path.stem
 
     # Lignes du guide de style (pour retirer un guide régurgité par un agent, cf. plus bas).
-    sg_path = Path(config.get("chemins", {}).get("style_guide", "")) if config.get("chemins") else None
+    pack = resoudre_pack(config)
+    # Repli côté BRIQUE : ces trois artefacts sont propres au light novel, leurs clés de
+    # config n'ont rien à faire dans `core/` (cf. `core.langues.Pack.fichier`).
+    sg_path = _chemin(config.get("chemins"), "style_guide") or pack.fichier("style_guide.md")
     sg_lines = sg_path.read_text(encoding="utf-8").splitlines() if sg_path and sg_path.exists() else []
 
     # md temporaire avec images Markdown, dans out_dir (pour résoudre media/…)
@@ -506,14 +542,18 @@ def render(markdown_path: Path, out_dir: Path, config: dict,
     md_text = _strip_leaked_style_guide(md_text, sg_lines)  # filet : guide de style régurgité
     md_text = _collapse_repetitions(md_text)       # filet : dégénérescence en boucle du modèle
     md_text = _normalize_fences(md_text)          # garde-fou :: / :::: mal formées
-    valid_styles = {r["styles"].get("dialogue", "List Paragraph"), r["styles"].get("pensee", "Pensée")}
+    # Styles et règles typographiques du PACK DE LANGUE CIBLE, la config gardant la main
+    # (cf. `typographie.Typographie.depuis_pack` : `rendu.styles` est calé sur le
+    # `reference.docx` de l'utilisateur, un pack ne doit pas le lui reprendre).
+    typo = ty.Typographie.depuis_pack(pack, r)
+    valid_styles = set(typo.styles_word.values())
     md_text = _sanitize_custom_styles(md_text, valid_styles)  # garde-fou : nom de style halluciné/introuvable
-    md_text = _segment_dialogues(md_text, r["styles"].get("dialogue", "List Paragraph"))  # détection/catégorisation des dialogues
+    md_text = _segment_dialogues(md_text, typo.styles_word["dialogue"], typo)  # détection/catégorisation des dialogues
     md_text = _strip_correction_annotations(md_text)   # garde-fou annotations inline "(Correction: ...)"
     # Retire les titres purement numériques (« ## 1 », « ## 3 ») : ce sont des numéros
     # de section de la source, redondants avec le titre qui suit.
     md_text = re.sub(r'(?m)^#{2,}\s*\d+\s*$\n?', '', md_text)
-    if not r.get("dialogue_dash_in_text", False):
+    if not typo.tiret_dans_le_texte:
         md_text = _strip_dialogue_dashes(md_text)   # évite le double tiret « — — »
     if r.get("strip_dialogue_quotes", True):
         md_text = _strip_dialogue_quotes(md_text)   # « » redondants dans les blocs dialogue
@@ -551,17 +591,22 @@ def render(markdown_path: Path, out_dir: Path, config: dict,
               "--metadata", f"lang={meta['langue']}",
               "--resource-path", "."]
     produced: list[Path] = []
+    # Gabarits du PACK DE LANGUE CIBLE. Un pack qui n'en fournit pas retombe sur
+    # `rendu.reference_docx` / `rendu.epub_css`, qui restent le réglage de l'utilisateur —
+    # d'où une sortie inchangée tant qu'aucun pack n'est installé.
+    docx_ref = _chemin(r, "reference_docx") or pack.fichier("templates/reference.docx")
+    css_pack = _chemin(r, "epub_css") or pack.fichier("templates/epub.css")
     try:
         if "docx" in formats:
             out = out_dir / f"{stem}.docx"
-            ref = str(Path(r["reference_docx"]).resolve())
+            ref = str(Path(docx_ref).resolve())
             _run(["pandoc", src, "--reference-doc", ref, *common, "-o", out.name], out_dir)
-            _normalize_docx(out, _narration_style_id(Path(r["reference_docx"])))
+            _normalize_docx(out, _narration_style_id(Path(docx_ref)))
             produced.append(out)
 
         if "epub" in formats:
             out = out_dir / f"{stem}.epub"
-            css = str(Path(r["epub_css"]).resolve())
+            css = str(Path(css_pack).resolve())
             _run(["pandoc", src, "--css", css, *common, "-o", out.name], out_dir)
             produced.append(out)
 
@@ -570,7 +615,7 @@ def render(markdown_path: Path, out_dir: Path, config: dict,
             engine = r.get("pdf_engine", "weasyprint")
             cmd = ["pandoc", src, "--pdf-engine", engine]
             if engine in ("weasyprint", "wkhtmltopdf", "pagedjs-cli", "prince"):
-                cmd += ["--css", str(Path(r["epub_css"]).resolve())]
+                cmd += ["--css", str(Path(css_pack).resolve())]
             cmd += [*common, "-o", out.name]
             try:
                 _run(cmd, out_dir)

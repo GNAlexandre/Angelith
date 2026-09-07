@@ -1,14 +1,56 @@
+# ⚠ ENVELOPPE depuis le lot 37 (2.31.0, 2026-09-06). Les dépendances sont déclarées une seule
+# fois, dans `pyproject.toml` ; ce fichier les appelle par leur EXTRA. Motif : le `.spec` de
+# PyInstaller, la CI et cinq fichiers ne peuvent pas être trois sources de vérité — le jour où
+# deux divergent, le gel manque un module et le symptôme est un `ImportError` chez
+# l'utilisateur, pas chez toi.
+#
+# ⚠ **Ce fichier ne disparaît pas**, et sa prose non plus : la CI, les procédures et le README
+# le citent nommément, et les mesures écrites plus bas ne sont écrites nulle part ailleurs.
+#
+# ⚠ **Ce qui change pour toi**, et le CHANGELOG le dit : `-e .` installe aussi `angelith`
+# lui-même, en mode éditable. Conséquence pratique : lance la commande **depuis la racine du
+# dépôt**, parce qu'un `-e .` d'un fichier de requirements se résout contre le RÉPERTOIRE
+# COURANT, pas contre le fichier.
+
 # Dépendances de la brique MANGA (indépendante du pipeline LN — voir manga/).
 # N'installe RIEN qui affecte requirements.txt : installation séparée, à la carte.
 #   pip install -r requirements-manga.txt
 
-numpy>=1.26          # masques de segmentation (bulles)
-onnxruntime>=1.18    # exécution du modèle de détection de bulles (CPU)
-manga-ocr>=0.1.14    # OCR japonais dédié (télécharge son modèle depuis Hugging Face
-                     # au premier lancement — nécessite une connexion réseau une fois)
-rarfile>=4.1         # lecture des archives .cbr (nécessite en plus l'outil externe
-                     # unrar/unar dans le PATH : https://www.rarlab.com/rar_add.htm
-                     # — sans lui, seuls les .cbz/.zip fonctionnent)
+-e .[manga]
+#
+# Ce que l'extra `manga` porte, et pourquoi — les lignes d'origine, gardées en prose :
+#   numpy>=1.26          masques de segmentation (bulles)
+#   onnxruntime>=1.18    exécution du modèle de détection de bulles (CPU)
+#   manga-ocr>=0.1.14    OCR JAPONAIS dédié — télécharge son modèle depuis Hugging Face au
+#                        premier lancement (nécessite une connexion réseau une fois)
+#   rapidocr-onnxruntime>=1.3   OCR des sources non japonaises, cf. le bloc ci-dessous
+#   rarfile>=4.1         lecture des archives .cbr (exige en plus `unrar`/`unar` dans le PATH,
+#                        https://www.rarlab.com/rar_add.htm — sans lui, seuls .cbz/.zip)
+#
+# ⚠ **Ce que cet extra COÛTE, mesuré le 2026-09-06** dans quatre venv propres
+# (`docs/mesures/empaquetage-2026-09-06.md`) : `manga-ocr` à lui seul ajoute **980,2 Mo et
+# 26 092 fichiers** au jeu socle + GUI + détection — soit ×3,0 sur le nombre de fichiers, pour
+# la seule lecture du japonais. C'est le chiffre qui a décidé de la forme du paquet livré.
+
+# --- OCR des sources NON japonaises (anglais, français, coréen, chinois...) ---
+# `manga-ocr` est un modèle japonais : son décodeur n'a pas de token d'espace (le japonais
+# n'en écrit pas). Sur une planche anglaise il ne rend pas un texte approximatif, il rend
+# une chaîne collée et parsemée de kanji INVENTÉS — mesuré sur un webtoon anglais :
+#   « HE'S CERTAINLY NO ORDINARY PERSON » → « ＨＥＳＣＥＲＴＡＮＡＹＮＯＯＯＲＤＩＮＡＲＹＰＥＲＳＯＮ »
+#   une date                             → « ２０１６年１０月１９日に２０日 »
+# Le LLM traduit ensuite cette bouillie sans broncher : le défaut est invisible au rapport.
+# RapidOCR (PP-OCRv4 en ONNX) lit le latin AVEC les espaces, embarque ses modèles dans la
+# roue, tourne hors ligne sur CPU et n'exige pas torch. Mesuré sur la planche qui a motivé
+# ce changement : les 10 bulles relues correctement, dont celle citée ci-dessus.
+#   Tire `opencv-python` (~44 Mo), `shapely` et `pyclipper` — la roue elle-même fait ~15 Mo.
+#   ⚠ Il DÉPEND de `onnxruntime`. Si tu as installé `onnxruntime-directml` (mutuellement
+#   exclusif, cf. plus bas), un `pip install` non qualifié te réinstallerait `onnxruntime`
+#   par-dessus. Dans ce cas :  pip install --no-deps rapidocr-onnxruntime
+#   Inutile si tu ne traites que du japonais : le pipeline ne l'importe qu'au besoin, et
+#   dit quoi installer le jour où il en a besoin.
+#   ⚠ LIMITE connue : son détecteur rate parfois une bulle de PONCTUATION SEULE (`...`), là
+#   où manga-ocr la lisait. La bulle ressort vide ; c'est le prix à payer, et il est sans
+#   commune mesure avec ce qu'on gagne sur le texte.
 
 # --- Vitesse de l'OCR — OPTIONNEL ---
 # Sans `torchvision`, `transformers` se rabat sur un processeur d'image en PIL, plus lent :

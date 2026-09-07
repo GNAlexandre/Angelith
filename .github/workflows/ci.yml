@@ -1,0 +1,584 @@
+# Intégration continue — voir docs/COMMANDES.fr.md pour rejouer ces étapes en local.
+#
+# ## Le contrat d'OS a changé au lot 20, et la raison en vaut la peine
+#
+# Ce fichier disait, et c'était honnête : « `windows-latest`, et ce n'est pas une préférence.
+# `tests/conftest.py` fabrique sa planche manga synthétique avec `C:/Windows/Fonts/msgothic.ttc`
+# et *skippe* la fixture si la police manque. Sur un runner Linux, `synthetic_manga_page` serait
+# donc sautée en silence — et avec elle toute la couverture détection / OCR / orchestrateur de
+# la brique manga. La CI serait verte en ne testant plus rien de ce qui coûte cher. Rendre la
+# police configurable est souhaitable ; tant que ce n'est pas fait, le système d'exploitation
+# fait partie du contrat. »
+#
+# C'est fait. Trois changements, dans cet ordre — et l'ordre est le point :
+#
+#  1. `tools/polices.py` résout la police par variable d'environnement puis par une liste de
+#     candidats par plateforme (`ANGELITH_POLICE_JP`) ;
+#  2. `tests/test_fixture_police.py` ÉCHOUE — il ne skippe pas — quand aucune police n'est
+#     trouvable. C'était le vrai défaut : pas la police, le SILENCE ;
+#  3. seulement alors, la matrice `[windows-latest, ubuntu-latest]`, avec le job `collecte`
+#     ci-dessous qui casse le build si les deux OS ne voient pas la même suite.
+#
+# ⚠ **Pas de macOS.** `docs/roadmap.md` le classe hors périmètre, faute de machine pour le
+# tester. Une CI verte sur un OS que personne n'utilise donne une fausse assurance.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Lundi 04:17 UTC. Le banc de détection tourne alors avec les poids réels ET les dernières
+    # versions d'onnxruntime et de numpy : une régression due à une mise à jour amont
+    # n'apparaissait jusqu'ici qu'au prochain run manuel, c'est-à-dire trop tard pour savoir
+    # laquelle des deux causes en est la cause.
+    - cron: "17 4 * * 1"
+
+concurrency:
+  # Une PR poussée trois fois de suite ne doit pas faire tourner trois fois la suite.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    strategy:
+      # `fail-fast: false` : quand Linux tombe, on veut quand même savoir si Windows tenait.
+      # Sans ça, la moitié de l'information disparaît au moment précis où elle sert.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Polices et bibliothèques Qt (Linux)
+        # `fonts-noto-cjk` couvre kana et kanji : le texte peint dans la planche synthétique
+        # n'est pas décoratif — un ovale vide et un ballon lettré ne donnent pas le même score
+        # au détecteur. Une police qui rendrait des tofus changerait la mesure sans rien casser
+        # de visible.
+        #
+        # `fonts-dejavu-core` est l'équivalent Linux de Lucida Sans Unicode pour la CHAÎNE DE
+        # REPLI du lettrage (`manga/typeset.py > POLICES_SYMBOLES`). Sans elle, la chaîne se
+        # réduit aux polices latines livrées et `♪ ♥ → ♂ ♀` ne sont pas dessinés : ils sont
+        # SUPPRIMÉS de la bulle. Ce n'était pas qu'un défaut de CI — une planche produite sous
+        # Linux sortait vraiment amputée, et la perte ne se lisait que dans le rapport.
+        #
+        # ⚠ Surtout pas `fonts-noto-cjk` pour ce rôle-là, bien qu'elle couvre tout : le repli
+        # bascule TOUTE la bulle, et un seul `・` redessinerait un paragraphe entier de
+        # français en CJK. DejaVu a les symboles sans les kana — c'est exactement ce qu'il faut.
+        #
+        # Les bibliothèques Qt sont là pour la même raison que `QT_QPA_PLATFORM: offscreen` :
+        # même hors écran, Qt charge de quoi instancier une plateforme. Sur une image Ubuntu
+        # nue, `libEGL` et `libxkbcommon` manquent et le premier `QApplication` plante — les
+        # 140 tests d'interface ne seraient alors pas rouges, ils seraient absents.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fonts-noto-cjk fonts-dejavu-core libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3
+
+      - name: Dépendances
+        # Socle + GUI + outils de test. PAS `requirements-manga.txt` : il tire `manga-ocr`,
+        # donc torch, donc plusieurs Go par run — pour des tests que la suite double de toute
+        # façon (règle de couche du dépôt : ce qui décide se teste sans modèle).
+        #
+        # PySide6 (~120 Mo) est en revanche indispensable, et c'est MESURÉ : sans lui, les
+        # fichiers de tests qui font `importorskip("PySide6")` ne sont pas collectés du tout —
+        # 2 644 tests contre 2 504, soit 140 tests d'interface, dans CETTE configuration
+        # (socle + GUI + dev, sans requirements-manga.txt), au 2026-08-27, commit du lot 18.
+        # Un test non collecté ne se voit nulle part dans le compte-rendu ; c'est exactement la
+        # CI verte qui ne teste plus rien.
+        #
+        # ⚠ Ce couple n'a PAS été remesuré au lot 20 et porte donc toujours sa date du
+        # 2026-08-27 : le lot 20 a changé le nombre total de tests (garde-fous neufs), pas le
+        # rapport entre « avec PySide6 » et « sans ». Le remesurer demande un run dédié sans
+        # PySide6 ; `tests/test_coherence_chiffres.py` vérifie en attendant que l'arithmétique
+        # du couple tient et qu'il porte sa date.
+        #
+        # ⚠ Le couple encore antérieur — 2 007 contre 1 879, soit 128 — datait d'un commit plus
+        # ancien et n'a jamais été reproduit. Les trois dénominateurs du dépôt
+        # (`docs/chiffres-de-reference.md`) bougent à chaque lot ; chacun porte sa date.
+        #
+        # Reste 30 tests non collectés ici (`test_manga_detection.py`, `test_manga_ocr.py`) :
+        # ils font `pytest.importorskip` sur onnxruntime / manga_ocr et portent en plus un
+        # `skipif` sur la présence des poids. Ils sont hors périmètre de cette CI, assumé.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-gui.txt -r requirements-dev.txt
+
+      - name: Pandoc
+        # Le dépôt DÉPEND de Pandoc à l'exécution : `pipeline/extract.py` et
+        # `pipeline/render.py` lèvent sans lui, et 42 tests traversent réellement les deux.
+        # Il arrivait jusqu'ici par l'image du runner, jamais par une déclaration — puis
+        # `windows-latest` est passé à Windows Server 2025 et l'a emporté, faisant tomber
+        # d'un coup des tests qui n'avaient pas changé. Une dépendance qu'on exécute se
+        # déclare, au même titre qu'une dépendance qu'on importe (cf. `requirements.txt`).
+        uses: r-lib/actions/setup-pandoc@v2
+        with:
+          pandoc-version: "3.1.11"
+
+      - name: Linter
+        run: ruff check .
+
+      - name: Compte de tests collectés
+        # AVANT d'exécuter, et c'est délibéré : ce relevé doit exister même si la suite tombe,
+        # sinon on perdrait l'information au moment où elle explique l'échec. Il est comparé
+        # entre les deux OS par le job `collecte`.
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >
+          python tools/compte_de_tests.py -m "not lent and not modeles"
+          --sortie compte-${{ matrix.os }}.json
+
+      - name: Relevé de collecte en artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: compte-${{ matrix.os }}
+          path: compte-${{ matrix.os }}.json
+          if-no-files-found: error
+
+      - name: Tests
+        # `lent` et `modeles` sont exclus : ils exigent les poids ONNX sous `manga_models/`,
+        # qui ne sont pas dans le dépôt (ils se téléchargent au premier run). Un échec ici est
+        # un vrai échec, jamais un modèle absent.
+        #
+        # Qt a besoin d'une plateforme d'affichage même pour instancier un widget hors écran ;
+        # sur un runner sans session graphique, `offscreen` est ce qui évite un plantage au
+        # premier `QApplication`.
+        env:
+          QT_QPA_PLATFORM: offscreen
+        # `--cov` sans argument : la cible est `source =` de `.coveragerc`, un seul endroit
+        # plutôt qu'une liste de paquets à tenir à jour dans deux fichiers.
+        run: pytest -m "not lent and not modeles" -q --cov --cov-report=xml:coverage.xml
+
+      - name: Couverture en artefact
+        # ⚠ Windows SEULEMENT, et ce n'est pas de la paresse. Sonar fusionne les rapports qu'on
+        # lui donne ; deux rapports produits sur deux OS pour le MÊME code ne mesurent pas deux
+        # choses, ils mesurent la même deux fois, et la fusion masquerait alors une ligne
+        # couverte sur un seul des deux. Le job `collecte` est ce qui garantit que les deux OS
+        # exécutent bien la même suite — c'est LUI qui rend cette économie légitime.
+        #
+        # Téléversée plutôt que consommée sur place : le scan a besoin d'un checkout Linux
+        # (cf. le job `sonar`), et l'artefact est le seul passage entre les deux systèmes.
+        #
+        # `if: always()` serait un piège ici : sur suite rouge, le rapport est partiel, et le
+        # publier ferait afficher à Sonar une couverture calculée sur une exécution incomplète.
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-tests
+          path: coverage.xml
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # LA COHÉRENCE DE COLLECTE entre les deux OS (lot 20).
+  #
+  # Ce job est la contrepartie de la matrice, et sans lui la matrice serait pire que rien : un
+  # second OS qui collecte moins de tests que le premier affiche un vert supplémentaire pour
+  # une couverture inférieure. C'est la même logique que la mesure « avec PySide6 contre sans »
+  # qui justifie l'installation de PySide6 — un test non collecté ne se voit NULLE PART.
+  collecte:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: compte-*
+          merge-multiple: true
+          path: comptes
+      - name: Comparer les deux relevés
+        # ⚠ `set -o pipefail` n'est pas décoratif : sans lui, le code de sortie d'un pipeline
+        # est celui de `tee`, qui réussit toujours. Le job serait vert quel que soit l'écart —
+        # un garde-fou de couverture perdue qui se perdrait lui-même.
+        shell: bash
+        run: |
+          set -o pipefail
+          python tools/compte_de_tests.py --markdown --comparer \
+            comptes/compte-windows-latest.json comptes/compte-ubuntu-latest.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Le BANC DE MESURE (lot 10) — la non-régression de détection.
+  #
+  # Job séparé, et il le faut : le job `tests` exclut délibérément `modeles`, parce que ces
+  # tests exigent les poids ONNX que le dépôt ne commite pas. Marquer le banc `modeles` sans
+  # ce job aurait donc écrit un garde-fou que la CI n'exécute jamais — précisément la CI verte
+  # qui ne teste plus rien que ce dépôt se refuse ailleurs.
+  #
+  # Le corpus, lui, est dans le dépôt : il est SYNTHÉTIQUE, généré par
+  # `tools/corpus_synthetique.py`, donc redistribuable sans réserve. Aucun corpus réel ne
+  # pourrait tenir ce rôle (œuvres purgées, Manga109-s sous conditions académiques).
+  banc:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Dépendances
+        # onnxruntime SEUL, pas `requirements-manga.txt` : celui-ci tire `manga-ocr`, donc
+        # torch, donc plusieurs Go par run. Le banc de DÉTECTION n'a besoin que du runtime
+        # ONNX, de Pillow et de numpy — l'OCR n'entre pas dans cette mesure.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt onnxruntime
+
+      - name: Dernières versions d'onnxruntime et de numpy (run hebdomadaire)
+        # ⚠ Le run hebdomadaire n'a d'intérêt que s'il voit ce qui a bougé EN AMONT. Rejouer
+        # chaque lundi la même mesure sur les mêmes versions ne dit rien de neuf ; ce qu'on
+        # cherche à attraper, c'est une régression de post-traitement due à une mise à jour
+        # d'onnxruntime ou de numpy — le fichier note plus bas que ce post-traitement n'est pas
+        # bit-à-bit reproductible d'une version à l'autre.
+        if: github.event_name == 'schedule'
+        run: pip install --upgrade onnxruntime numpy
+
+      - name: Cache des poids du détecteur
+        # 104 Mo. Les mettre en cache évite de retélécharger depuis Hugging Face à chaque
+        # push, et évite surtout qu'une indisponibilité amont fasse échouer une PR qui n'y est
+        # pour rien. La clé porte le SHA-256 attendu : republier les poids invalide le cache.
+        uses: actions/cache@v4
+        with:
+          path: manga_models
+          key: detecteur-36c26bdefe15
+
+      - name: Récupérer les poids si le cache est froid
+        # Le point d'entrée nommé, et non `run_manga.py --check` : celui-ci diagnostique
+        # AUSSI `manga-ocr` et Ollama, absents de ce job par choix, et rendrait donc un
+        # verdict d'échec sur un environnement parfaitement suffisant pour mesurer la
+        # détection. Le `.part` renommé en dernier fait le reste : une coupure ne laisse pas
+        # de `.onnx` tronqué en cache pour le run suivant.
+        #
+        # ⚠ `configurer_stdout()` d'abord, et ce n'est pas décoratif : sans lui, la trace de
+        # téléchargement (qui contient une flèche « → ») lève `UnicodeEncodeError` sur une
+        # console Windows en cp1252 — mesuré, le job échouait avant d'avoir écrit un octet.
+        run: >
+          python -c "from core.cli import configurer_stdout; configurer_stdout();
+          from manga import models;
+          models.assurer_detecteur('manga_models/bubble_detector.onnx', dire=print)"
+
+      - name: Banc de détection sur le corpus synthétique
+        # ⚠ Casse le build si le rappel BAISSE **ou** si les faux positifs MONTENT. Les deux :
+        # gagner des bulles en gagnant autant de fausses détections n'est pas un gain, et un
+        # seuil sur le seul rappel le laisserait passer en affichant un succès.
+        #
+        # ⚠ `-rs` et la vérification du fichier ne sont pas décoratifs. Le test porte un
+        # `skipif` sur la présence des poids — c'est la convention du dépôt, qui veut qu'un
+        # checkout frais ne soit jamais bloqué. Mais ici ce même `skipif` rendrait la CI VERTE
+        # en n'exécutant rien si l'étape précédente avait silencieusement échoué : `pytest`
+        # sort 0 sur « tout sauté ». On vérifie donc que les poids sont là AVANT, et `-rs`
+        # nomme dans le log tout ce qui aurait été sauté malgré tout.
+        #
+        # ⚠ La couverture est mesurée ICI AUSSI, et c'est le point qui décide de l'honnêteté du
+        # chiffre publié. Le job `tests` exclut `lent` et `modeles` ; si Sonar ne recevait que
+        # son rapport, la couverture annoncée exclurait toute la détection de bulles et l'OCR —
+        # le code le plus cher et le plus risqué du dépôt — en se présentant comme « la »
+        # couverture du projet. C'est la CI verte qui ne mesure rien, transposée à un
+        # pourcentage. Deux rapports, fusionnés par Sonar via
+        # `sonar.python.coverage.reportPaths`, donnent le chiffre vrai.
+        run: |
+          python -c "import pathlib,sys; p=pathlib.Path('manga_models/bubble_detector.onnx'); sys.exit(0) if p.exists() and p.stat().st_size > 100_000_000 else sys.exit('poids absents ou tronques : le banc aurait ete saute en silence')"
+          pytest tests/test_banc_corpus_synthetique.py -m "modeles" -q -rs --cov --cov-report=xml:coverage-banc.xml
+
+      - name: Tableau du banc — résumé de job et artefact
+        # ⚠ `if: always()` ICI, contrairement à la couverture : un tableau de banc sur un run
+        # ROUGE est précisément celui qu'on veut lire — c'est lui qui dit de combien le rappel
+        # a baissé. Ce qu'on refuse de publier sur run rouge, c'est un POURCENTAGE de
+        # couverture calculé sur une exécution incomplète, pas une mesure de détection.
+        #
+        # Le résumé plutôt que les logs : un tableau enterré sous 400 lignes de pip n'est pas
+        # publié, il est archivé.
+        #
+        # ⚠ UNE seule exécution du banc, écrite dans un fichier puis recopiée. `--corpus`
+        # charge le détecteur et infère sur chaque planche : le lancer deux fois (une pour le
+        # résumé, une pour l'artefact) paierait la mesure deux fois pour le même chiffre.
+        if: always()
+        shell: bash
+        run: |
+          python tools/banc.py --corpus tests/corpus/synthetique --markdown > banc-ci.md \
+            || echo "_(tableau indisponible : le banc a échoué avant de mesurer)_" > banc-ci.md
+          {
+            echo "### Banc de détection — corpus synthétique"
+            echo
+            echo "> ⚠ **Corpus synthétique UNIQUEMENT.** Ce banc ne voit pas les 17 projets"
+            echo "> réels : ils ne sont pas dans le dépôt et ne peuvent pas y être (œuvres"
+            echo "> purgées, Manga109-s sous conditions académiques). Le corpus réel se mesure"
+            echo "> en local par \`python tools/banc.py --tous\`. Un job nommé « banc de"
+            echo "> détection » qui ne dirait pas cela laisserait croire le contraire."
+            echo
+            cat banc-ci.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Téléverser le tableau
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: banc-synthetique
+          path: banc-ci.md
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Couverture du banc en artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-banc
+          path: coverage-banc.xml
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # L'ARTEFACT (lot 37) — le gel, l'installeur, et surtout LES TROIS TESTS DU GEL.
+  #
+  # ## Pourquoi ce job existe, et pourquoi il TESTE
+  #
+  # « Un artefact non testé est un artefact qu'on livre cassé une fois sur trois. » Le gel a
+  # trois pannes classiques, et les trois étapes ci-dessous les attrapent une par une :
+  #
+  #   1. LA VERSION PERDUE → `--version` doit rendre celle de `core/version.py` ;
+  #   2. UN CHEMIN RELATIF À `__file__` → le diagnostic structuré doit se collecter, ce qui
+  #      exige d'avoir trouvé `config.yaml`, `langues/` et `templates/` sous `sys._MEIPASS` ;
+  #   3. UN MODULE QT ÉLAGUÉ DE TROP → la fenêtre doit s'ouvrir, sur l'accueil, sans tome.
+  #
+  # ⚠ Chacune de ces trois pannes a été RENCONTRÉE pendant le lot, sur la machine principale,
+  # le 2026-09-06 — pas imaginée. Le détail est dans `docs/mesures/empaquetage-2026-09-06.md`.
+  #
+  # ## ⚠ Sur les tags SEULEMENT
+  #
+  # Le gel prend plusieurs minutes et pèse des centaines de mégaoctets ; le faire à chaque push
+  # paierait un artefact que personne ne télécharge. `workflow_dispatch` permet de le demander
+  # à la main quand on veut l'essayer avant de poser le tag.
+  artefact:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    # ⚠ Le strict nécessaire pour attacher l'installeur à la release, et rien d'autre — même
+    # portée que `publication.yml`, qui déclare la même chose pour la même raison.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Dépendances du paquet livré
+        # ⚠ **Le jeu C — TOUT, `manga-ocr` compris.** C'est la forme tranchée à l'étape 0.2 du
+        # `PLAN-37`, et la décision est mesurée dans les deux sens :
+        #
+        #  · ce qu'elle COÛTE : le gel passe de 390,1 Mo / 356 fichiers (sans `manga-ocr`) à
+        #    916,5 Mo / 5 262 fichiers — x2,4 en poids, x14,8 en nombre de fichiers ;
+        #  · ce que l'alternative coûterait : sans `manga-ocr`, **27 des 55 tomes du corpus**
+        #    restent traitables, et **aucun manga** — les 26 autres sont des light novels, qui
+        #    n'appellent aucun OCR. Le paquet léger ne servirait donc pas la brique que le dépôt
+        #    déclare « stable » ;
+        #  · et les deux voies « on l'installera après » sont mesurées IMPOSSIBLES : un
+        #    exécutable PyInstaller n'est pas un interpréteur (`-m pip` n'existe pas), et
+        #    déposer les paquets dans `_internal` échoue sur la bibliothèque standard élaguée
+        #    (`No module named 'timeit'`, rencontré le 2026-09-06).
+        #
+        # Tout est dans `docs/mesures/empaquetage-2026-09-06.md`. Repasser au paquet léger tient
+        # en une ligne — retirer `manga-ocr` ci-dessous —, et le chiffre à opposer à ce choix est
+        # celui des 27 tomes sur 55.
+        #
+        # ⚠ `pyinstaller` est installé ici et **n'est pas** une dépendance du projet : il ne
+        # figure ni dans `pyproject.toml` ni dans un `requirements-*.txt`. Un empaqueteur n'est
+        # pas une dépendance de ce qu'il empaquette.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-gui.txt -r requirements-manga.txt
+          pip install pyinstaller
+
+      - name: Le numéro de version vient de core/version.py
+        shell: bash
+        run: echo "VERSION=$(python -c 'import core.version as v; print(v.__version__)')" >> "$GITHUB_ENV"
+
+      - name: L'outillage de compilation est-il là ?
+        # ⚠ **Cette étape a trouvé un défaut réel.** `ci.yml` cherchait Inno Setup dans
+        # `C:\Program Files (x86)` et nulle part ailleurs ; une installation par
+        # `winget --scope user` — celle de la machine principale du projet — le met dans
+        # `%LOCALAPPDATA%\Programs`. Le job aurait marché, la commande documentée non.
+        # `tools/geler.py` cherche aux trois endroits, et c'est lui qui fait autorité des deux
+        # côtés maintenant.
+        run: python tools/geler.py --outils
+
+      - name: Compiler — gel, trois vérifications, installeur, empreintes
+        # ⚠ **UNE commande, et c'est le point du lot 38.** La séquence était écrite deux fois :
+        # ici et dans `docs/COMMANDES.fr.md`. Une séquence recopiée est une séquence qu'on
+        # finit par exécuter à moitié — le lot 37 s'est lui-même livré avec un installeur
+        # portant le numéro de la version précédente, faute d'avoir régénéré
+        # `installeur/version.iss` avant de compiler. `tools/geler.py` régénère d'abord, gèle
+        # ensuite, et rejoue les trois vérifications du `PLAN-37` L37.7 sur le binaire produit :
+        #
+        #   1. la version survit au gel ;
+        #   2. le diagnostic structuré se collecte — donc les chemins de données sont résolus ;
+        #   3. la fenêtre s'ouvre sur l'accueil, sans ouvrir de tome.
+        #
+        # Chacune a échoué pour de vrai pendant le lot 37 ; le détail est dans
+        # `docs/mesures/empaquetage-2026-09-06.md` §5.
+        run: python tools/geler.py
+
+      - name: Empreintes SHA-256 en résumé de job
+        # ⚠ `tools/geler.py` a déjà écrit `dist/SHA256SUMS.txt` ; cette étape ne fait que le
+        # remonter là où on le lit. C'est ce qui permet à quelqu'un de vérifier que le fichier
+        # téléchargé est celui qui a été construit — la seule garantie d'intégrité que ce
+        # projet offre tant qu'il ne signe pas ses binaires.
+        shell: bash
+        run: |
+          {
+            echo "### Empreintes SHA-256 — Angelith $VERSION"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Corps de la release
+        shell: bash
+        run: python tools/notes_de_version.py "$VERSION" --sortie dist/notes.md
+
+      - name: Téléverser l'installeur
+        uses: actions/upload-artifact@v4
+        with:
+          name: angelith-installeur
+          path: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
+            dist/notes.md
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attacher l'installeur à la release
+        # ⚠ **LE prérequis de la mise à jour automatique**, et il manquait. `publication.yml`
+        # crée bien une release sur un tag `v*`, mais **sans aucun fichier** (« ce lot livre le
+        # squelette, pas l'artefact ») ; les étapes ci-dessus, elles, téléversent des artefacts
+        # de WORKFLOW, qui ne sont pas des assets de release. Un updater qui demanderait « le
+        # dernier asset publié » n'aurait donc **rien à télécharger**.
+        #
+        # ⚠ `SHA256SUMS.txt` part AVEC : c'est lui que `core/maj.py` lit pour vérifier ce qu'il
+        # vient de télécharger. Sans certificat de signature, c'est la seule garantie
+        # d'intégrité que ce projet offre — et elle ne vaut que si le fichier est publié.
+        if: startsWith(github.ref, 'refs/tags/v')
+        # Épinglée au correctif, comme les deux autres actions tierces de ce dépôt : celle-ci
+        # reçoit un jeton d'écriture sur le dépôt, et une étiquette flottante changerait ce
+        # qu'elle en fait sans qu'un commit l'indique.
+        uses: softprops/action-gh-release@v2.0.8
+        with:
+          files: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          # ⚠ **Le même corps que `publication.yml`, produit par le même générateur.** Les deux
+          # workflows partent du même tag et écrivent sur la même release ; celui-là tourne sur
+          # `ubuntu-latest` et n'a jamais d'installeur, celui-ci tourne sur `windows-latest` et
+          # vient d'en construire un. Leur ordre d'arrivée n'est pas garanti.
+          #
+          # Laisser `body` vide ici reviendrait à parier sur ce que l'action fait d'une release
+          # existante dont on ne lui donne pas le corps. Lui donner le corps issu de
+          # `tools/notes_de_version.py` — c'est-à-dire EXACTEMENT ce que `publication.yml`
+          # écrit, à l'octet près, puisque c'est le même script sur le même CHANGELOG — rend
+          # les deux ordres équivalents par construction plutôt que par espoir.
+          body_path: dist/notes.md
+
+      - name: Téléverser le dossier gelé
+        uses: actions/upload-artifact@v4
+        with:
+          name: angelith-gel
+          path: dist/Angelith
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Relevés des trois tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: angelith-verifications
+          path: |
+            diagnostic-gel.json
+            demarrage-gel.json
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # SonarQube Cloud — l'analyse, et le seul endroit du dépôt où la couverture devient un
+  # chiffre publié.
+  #
+  # ## Ce que ce job corrige
+  #
+  # Sonar affichait `Coverage: 0 %` sur un dépôt qui collecte 2 644 tests en CI (2026-08-27). Sonar ne se
+  # trompait pas : aucun rapport n'était produit, et l'analyse tournait en *Automatic
+  # Analysis*, un mode qui ne CALCULE jamais la couverture Python — il ne sait que lire un
+  # rapport qu'on lui fournit. Le zéro était donc une absence de mesure déguisée en mesure,
+  # exactement ce que le reste de ce fichier passe trois pages à refuser.
+  #
+  # ⚠ **Deux actions manuelles conditionnent ce job**, et sans elles il échouera :
+  #   1. basculer le projet sur *CI-based analysis* dans SonarQube Cloud
+  #      (`Administration > Analysis Method`) — les deux modes sont mutuellement exclusifs,
+  #      et tant que l'automatique est actif le scan lancé ici est REFUSÉ ;
+  #   2. créer le secret `SONAR_TOKEN` (`Settings > Secrets and variables > Actions`).
+  #
+  # ⚠ `needs: [tests, banc]` a une conséquence assumée : si le banc échoue, aucune analyse
+  # n'est publiée. C'est voulu — publier une couverture amputée en silence serait pire qu'une
+  # absence de publication.
+  sonar:
+    needs: [tests, banc]
+    # `ubuntu-latest` : ici on n'exécute aucun test — on lit deux XML et le code source.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Obligatoire. Sans historique complet, Sonar ne peut ni attribuer les lignes à leur
+          # auteur ni calculer le « New Code » — c'est-à-dire la seule vue qui serve à décider
+          # sur une PR.
+          fetch-depth: 0
+
+      # Les deux rapports atterrissent à la RACINE du checkout, parce que
+      # `sonar.python.coverage.reportPaths` les y nomme en relatif.
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-tests
+          path: .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-banc
+          path: .
+
+      - name: Version du projet
+        # Source unique : `core/version.py`. Sonar s'en sert pour poser un repère « Version »
+        # sur la frise d'activité et pour la définition de New Code « depuis la version
+        # précédente » — exactement ce que veut un projet dont la roadmap est versionnée.
+        # ⚠ `v.__version__`, et non `v.VERSION` : cet attribut-là N'EXISTE PAS et n'a jamais
+        # existé — `core/version.py` ne déclare que `__version__`. L'étape échouait donc
+        # silencieusement sur un `AttributeError` depuis le lot 20, et `sonar.projectVersion`
+        # partait vide. Relevé en passant par le lot 37 (2026-09-06), corrigé ici.
+        run: echo "PROJECT_VERSION=$(python -c 'import core.version as v; print(v.__version__)')" >> "$GITHUB_ENV"
+
+      - name: Scan
+        # Version ÉPINGLÉE au correctif, contrairement aux actions officielles de ce fichier
+        # (`checkout@v4`, `cache@v4`) : celle-ci télécharge et exécute un binaire tiers, et sa
+        # v8 a changé un défaut de sécurité (`skipSignatureVerification` passé à `false`). Une
+        # étiquette flottante ferait donc changer le comportement du scan sans commit.
+        # Vérifié le 26/08/2026 : v8.2.1 est la dernière publiée.
+        uses: SonarSource/sonarqube-scan-action@v8.2.1
+        with:
+          args: -Dsonar.projectVersion=${{ env.PROJECT_VERSION }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        # Pas de `SONAR_HOST_URL` : il ne sert qu'à un SonarQube Server auto-hébergé. Sur
+        # SonarQube Cloud, le renseigner ferait viser la mauvaise instance.

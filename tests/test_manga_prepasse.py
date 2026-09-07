@@ -126,6 +126,10 @@ def tome3(tmp_path):
     config["chemins"]["sources"] = str(tmp_path / "sources")
     config["chemins"]["build"] = str(tmp_path / "build")
     config["chemins"]["prompts"] = str(RACINE / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    config.setdefault("langues", {})["packs"] = str(RACINE / "langues")
     # Chemin ONNX inexistant : toute construction du détecteur lèverait SystemExit. C'est la
     # garantie que ces tests n'atteignent jamais la vision par ordinateur.
     config["manga"]["detection"]["model_path"] = str(tmp_path / "absent.onnx")

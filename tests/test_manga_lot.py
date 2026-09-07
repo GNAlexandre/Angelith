@@ -131,6 +131,10 @@ def tome4(tmp_path):
     config["chemins"]["sources"] = str(tmp_path / "sources")
     config["chemins"]["build"] = str(tmp_path / "build")
     config["chemins"]["prompts"] = str(RACINE / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    config.setdefault("langues", {})["packs"] = str(RACINE / "langues")
     # Chemin ONNX inexistant : toute construction du détecteur lèverait SystemExit. C'est la
     # garantie que ces tests n'atteignent jamais la vision par ordinateur.
     config["manga"]["detection"]["model_path"] = str(tmp_path / "absent.onnx")
@@ -297,8 +301,15 @@ def test_le_qa_dit_la_taille_de_lot_reellement_subie(tome4, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 def test_une_planche_incomplete_est_seule_reprise(tome4, monkeypatch):
-    """Le lot n'est PAS rejoué : seules les planches trouées repassent par le chemin nominal.
-    Ici le modèle « oublie » les numéros 3 à 5, c'est-à-dire toute la planche 2."""
+    """Le lot n'est PAS rejoué EN ENTIER : seules les planches trouées repassent par le chemin
+    nominal. Ici le modèle « oublie » les numéros 3 à 5, c'est-à-dire toute la planche 2.
+
+    ⚠ Trois appels et non deux depuis le lot 15 : le lot a droit, comme la planche, à **une**
+    seconde tentative à température corrigée avant de tomber sur le repli. Le repli, lui,
+    rejoue la numérotation — exactement ce qui vient d'échouer, et `config.yaml` mesure que
+    c'est ce qui échoue à nouveau. Un appel de lot se compare aux vingt appels de planche que
+    le repli coûterait. Le double du traducteur sabote de la même façon aux deux essais : la
+    planche 2 finit donc bien reprise seule."""
     config, build_dir, _tmp = tome4
     config["manga"]["lot"]["planches"] = 4
 
@@ -312,7 +323,7 @@ def test_une_planche_incomplete_est_seule_reprise(tome4, monkeypatch):
 
     _run(config)
 
-    assert trad.appels == 2, "un lot + une seule planche reprise"
+    assert trad.appels == 3, "un lot, sa seconde tentative, puis une seule planche reprise"
     # La planche reprise a été traduite SEULE : sa numérotation repart donc à 1.
     assert _traductions(build_dir, 2) == ["FR1", "FR2", "FR3"]
     # Les trois autres gardent la tranche du lot, à leur place.
@@ -341,7 +352,11 @@ def test_le_qa_ramene_la_taille_a_1_pour_une_planche_repliee(tome4, monkeypatch)
 
 def test_un_lot_non_numerote_est_abandonne_en_entier(tome4, monkeypatch):
     """Rattacher 9 répliques à leurs bulles par leur seul ordre est indéfendable sur un lot,
-    là où c'était déjà le pire cas sur une planche isolée. On repart planche par planche."""
+    là où c'était déjà le pire cas sur une planche isolée. On repart planche par planche.
+
+    ⚠ Une seconde tentative de LOT précède l'abandon depuis le lot 15 (cf.
+    `test_une_planche_incomplete_est_seule_reprise`) : un appel, contre les quatre que le
+    repli va coûter."""
     config, build_dir, _tmp = tome4
     config["manga"]["lot"]["planches"] = 4
 
@@ -355,7 +370,9 @@ def test_un_lot_non_numerote_est_abandonne_en_entier(tome4, monkeypatch):
 
     _run(config)
 
-    assert trad.appels == 1 + len(BULLES), "le lot raté, puis les quatre planches seules"
+    assert trad.appels == 2 + len(BULLES), (
+        "le lot raté, sa seconde tentative à température corrigée, puis les quatre planches "
+        "seules")
     assert _traductions(build_dir, 2) == ["FR1", "FR2", "FR3"]
 
 
