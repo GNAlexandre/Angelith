@@ -192,6 +192,13 @@ def _retirer_installeurs_perimes(*, dire=print) -> None:
 
     On n'efface QUE les installeurs, et QUE ceux d'une autre version : le reste de `dist/` ne
     nous appartient pas."""
+    # ⚠ **`sys.path` d'abord, et ce n'est pas une précaution de style** — lot 50. Lancé par
+    # `python tools/geler.py`, l'interpréteur met `tools/` en tête du chemin, PAS la racine :
+    # l'import échouait donc par `ModuleNotFoundError`, après huit minutes de gel et quatre
+    # d'installeur. Le test, lui, importait `tools.geler` en paquet — avec la racine déjà sur
+    # le chemin —, et ne pouvait pas voir la différence.
+    if str(RACINE) not in sys.path:
+        sys.path.insert(0, str(RACINE))
     from core.version import __version__
 
     dossier = Path(DIST)

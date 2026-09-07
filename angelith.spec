@@ -67,6 +67,14 @@ DONNEES = [
     ("templates/fonts", "templates/fonts"),
     ("templates/glossaire_modele.yaml", "templates"),
 
+    # L'icône de l'application. ⚠ Elle part alors même qu'elle est DÉJÀ dans le `.exe` par
+    # `icon=` ci-dessous : ces deux icônes ne servent pas au même moment. Celle du `.exe` est
+    # lue par l'explorateur et le menu Démarrer, sans lancer le programme ; celle-ci est lue
+    # par `gui/icones.logo()` au démarrage, et c'est elle que porte la fenêtre et la barre des
+    # tâches. Sans le fichier, `logo()` retombe sur son SVG de secours et l'utilisateur voit
+    # deux identités différentes selon l'endroit.
+    ("templates/icone", "templates/icone"),
+
     # Les gabarits de prompt d'illustration : des YAML dans un paquet, que PyInstaller ne
     # ramasse pas tout seul (il ne suit que les imports).
     ("illustration/gabarits", "illustration/gabarits"),
@@ -139,6 +147,13 @@ IMPORTS_CACHES = [
 ]
 
 
+# ⚠ **L'icône est la MÊME pour les deux exécutables**, y compris celui de la console. Ils
+# portent le même nom de produit et vivent dans le même dossier ; deux icônes différentes
+# feraient croire à deux logiciels. Le `.ico` est multi-résolutions (16 à 256 px) — Windows y
+# pioche la taille qu'il affiche, il ne redimensionne pas le 256 dans la barre des tâches.
+ICONE = str(RACINE / "templates" / "icone" / "angelith.ico")
+
+
 def _fichier_de_version() -> str:
     """Écrit la ressource de version Windows, depuis `core/version.py`, et rend son chemin.
 
@@ -209,6 +224,7 @@ exe_gui = EXE(                                                          # noqa: 
     # jamais saisie : c'est elle que l'explorateur de fichiers affiche dans les propriétés du
     # `.exe`, et un numéro tapé à la main y aurait vieilli en silence.
     version=_fichier_de_version(),
+    icon=ICONE,
 )
 
 # ⚠ **Un SECOND exécutable, console, et il n'est pas un confort.** Sous Windows, un binaire
@@ -237,6 +253,7 @@ exe_console = EXE(                                                      # noqa: 
     codesign_identity=None,
     entitlements_file=None,
     version=_fichier_de_version(),
+    icon=ICONE,
 )
 
 COLLECT(                                                                # noqa: F821

@@ -172,6 +172,10 @@ class PanneauOeuvres(QWidget):
         theme.poser_role(self.etat, "faible")
         colonne.addWidget(self.etat)
 
+        # ⚠ Les infobulles du bouton ACTIF, gardées de côté : `_griser` les repose quand le
+        # bouton redevient utilisable, et met à leur place ce qu'il attend quand il ne l'est
+        # pas. Sans cette mémoire, la première grisée effacerait le texte pour de bon.
+        self._aides: dict[str, str] = {}
         gestes = QHBoxLayout()
         self.bouton_lancer = QPushButton("Lancer…")
         self.bouton_lancer.setToolTip(
@@ -204,6 +208,8 @@ class PanneauOeuvres(QWidget):
                        self.bouton_exports, self.bouton_glossaire,
                        self.bouton_dossier):
             gestes.addWidget(bouton)
+        for nom in self.ATTENTES:
+            self._aides[nom] = getattr(self, nom).toolTip()
         gestes.addStretch(1)
         colonne.addLayout(gestes)
 
@@ -309,25 +315,54 @@ class PanneauOeuvres(QWidget):
             return ""
         return (item.data(0, Qt.UserRole) or ("", ""))[0]
 
+    #: Ce qu'un bouton grisé attend, par bouton. ⚠ **Le module PROMETTAIT déjà cela** — « un
+    #: bouton grisé dit ce qu'il attend » — et ne le tenait pas : l'infobulle était la même,
+    #: actif ou grisé. Sur une liste vide, six boutons se grisent d'un coup et rien ne dit
+    #: pourquoi ; le 2026-09-07, le mainteneur a cherché une option qui était sous ses yeux.
+    ATTENTES = {
+        "bouton_lancer": "Sélectionne un tome dans la liste.",
+        "bouton_retoucher": "Sélectionne un tome de MANGA ou de WEBTOON : la retouche édite "
+                            "des planches, et un roman n'en a pas.",
+        "bouton_importer": "Sélectionne le tome de MANGA ou de WEBTOON dans lequel réintégrer "
+                           "les corrections : l'import vérifie que le paquet est bien celui de "
+                           "CE tome avant d'écrire quoi que ce soit.",
+        "bouton_exports": "Sélectionne un tome dans la liste.",
+        "bouton_glossaire": "Sélectionne une œuvre qui a un glossaire.",
+        "bouton_dossier": "Sélectionne une œuvre dans la liste.",
+    }
+
+    def _griser(self, nom: str, actif: bool, quoi: str) -> None:
+        """Grise ou active, **et dit ce qui manque** quand c'est grisé.
+
+        ⚠ L'infobulle d'origine reste quand le bouton est actif : elle décrit le geste et son
+        coût, ce qu'un bouton utilisable doit annoncer. Grisé, il doit dire autre chose — non
+        pas ce qu'il ferait, mais ce qu'il attend pour le faire."""
+        bouton = getattr(self, nom)
+        bouton.setEnabled(actif)
+        bouton.setToolTip(quoi if actif else self.ATTENTES[nom])
+
     def _maj_gestes(self) -> None:
         """Un bouton grisé dit ce qu'il attend. Un bouton actif qui ne fait rien ment."""
         info = self.selection()
         projet = self.projet_selectionne()
-        self.bouton_lancer.setEnabled(info is not None)
-        self.bouton_exports.setEnabled(info is not None)
-        self.bouton_dossier.setEnabled(bool(projet))
+        self._griser("bouton_lancer", info is not None, self._aides["bouton_lancer"])
+        self._griser("bouton_exports", info is not None, self._aides["bouton_exports"])
+        self._griser("bouton_dossier", bool(projet), self._aides["bouton_dossier"])
         # ⚠ Le glossaire est par ŒUVRE : le geste vaut aussi sur une ligne de projet, et il
         # n'a de sens que si l'œuvre en a un.
-        self.bouton_glossaire.setEnabled(bool(projet) and self._a_un_glossaire(projet))
+        self._griser("bouton_glossaire", bool(projet) and self._a_un_glossaire(projet),
+                     self._aides["bouton_glossaire"])
         # ⚠ La retouche édite des PLANCHES. La proposer sur un roman serait promettre un
         # écran qui s'ouvrirait vide.
-        self.bouton_retoucher.setEnabled(
-            info is not None and info.brique in (biblio.MANGA, biblio.WEBTOON))
+        self._griser("bouton_retoucher",
+                     info is not None and info.brique in (biblio.MANGA, biblio.WEBTOON),
+                     self._aides["bouton_retoucher"])
         # ⚠ Même garde que la retouche, et pour la même raison : l'import réintègre des
         # CHECKPOINTS DE PLANCHES. Le proposer sur un roman promettrait un geste qui n'a rien
         # à écrire.
-        self.bouton_importer.setEnabled(
-            info is not None and info.brique in (biblio.MANGA, biblio.WEBTOON))
+        self._griser("bouton_importer",
+                     info is not None and info.brique in (biblio.MANGA, biblio.WEBTOON),
+                     self._aides["bouton_importer"])
 
     def _a_un_glossaire(self, projet: str) -> bool:
         return any(o.projet == projet and o.glossaire is not None for o in self._oeuvres)

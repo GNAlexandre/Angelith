@@ -172,7 +172,7 @@ pip install -r requirements-dev.txt          # pytest + psd-tools (test dependen
 python -m pytest -q
 ```
 
-**5 076 automated tests** (collected by `pytest --collect-only -q` on 2026-09-06 with every
+**5 081 automated tests** (collected by `pytest --collect-only -q` on 2026-09-06 with every
 optional dependency installed; 4 855 of them run in the short loop,
 `-m "not lent and not modeles"`), none of which require a real LLM call — the agents are
 simulated.

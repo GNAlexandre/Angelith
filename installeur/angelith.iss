@@ -81,6 +81,16 @@ WizardStyle=modern
 UninstallDisplayName={#MonNom} {#MaVersion}
 UninstallDisplayIcon={app}\{#MonExe}
 
+; ⚠ **Trois icônes, une seule source.** `SetupIconFile` habille le `.exe` de l'installeur —
+; celui qu'on télécharge et qu'on double-clique, donc la toute première image du logiciel.
+; `UninstallDisplayIcon` ci-dessus et les raccourcis de `[Icons]` pointent, eux, sur
+; `angelith-gui.exe`, qui porte déjà la même icône par `icon=` dans `angelith.spec`. Le
+; fichier est donc nommé une fois ici et une fois là, jamais copié.
+;
+; ⚠ Le chemin est relatif à CE fichier, pas à la racine : `iscc` résout les chemins depuis le
+; dossier du script.
+SetupIconFile=..\templates\icone\angelith.ico
+
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 

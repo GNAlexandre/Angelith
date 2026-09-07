@@ -141,3 +141,62 @@ def test_aucune_colonne_de_vignette(qt_app):
     module = Path(__file__).resolve().parents[1] / "gui" / "oeuvres.py"
     source = module.read_text(encoding="utf-8")
     assert "QPixmap" not in source and "QIcon(" not in source
+
+
+# --------------------------------------------------------------------------- #
+#  ⚠ Un bouton grisé DIT ce qu'il attend
+#
+#  Le module le promettait — « un bouton grisé dit ce qu'il attend » — et ne le tenait pas :
+#  l'infobulle était la même, actif ou grisé. Sur une liste vide, six boutons se grisent d'un
+#  coup et rien n'explique pourquoi. Le 2026-09-07, le mainteneur a cherché « Importer un tome
+#  corrigé… » alors que le bouton était sous ses yeux, grisé faute de sélection.
+# --------------------------------------------------------------------------- #
+
+def _panneau(qt_app):
+    panneau = oe.PanneauOeuvres()
+    panneau.poser_oeuvres([])          # l'état exact d'une installation neuve
+    return panneau
+
+
+def test_sur_une_liste_vide_chaque_bouton_dit_ce_qu_il_attend(qt_app):
+    """**Le défaut signalé.** Six boutons grisés sans un mot, c'est une option qu'on croit
+    absente."""
+    panneau = _panneau(qt_app)
+    for nom in oe.PanneauOeuvres.ATTENTES:
+        bouton = getattr(panneau, nom)
+        assert not bouton.isEnabled(), f"{nom} devrait être grisé sur une liste vide"
+        assert bouton.toolTip() == oe.PanneauOeuvres.ATTENTES[nom], nom
+    panneau.deleteLater()
+
+
+def test_l_import_grise_dit_qu_il_attend_un_tome(qt_app):
+    """Celui que le mainteneur cherchait : son infobulle nomme la SÉLECTION qui lui manque, et
+    la brique qu'il exige."""
+    panneau = _panneau(qt_app)
+    aide = panneau.bouton_importer.toolTip()
+    assert "Sélectionne" in aide
+    assert "MANGA" in aide and "WEBTOON" in aide
+    panneau.deleteLater()
+
+
+def test_le_bouton_actif_retrouve_son_infobulle_de_geste(qt_app):
+    """⚠ L'infobulle d'origine décrit le geste et son coût — c'est ce qu'un bouton UTILISABLE
+    doit annoncer. Sans la mémoire des textes d'origine, la première grisée l'effacerait pour
+    de bon, et le bouton actif expliquerait ce qu'il attend alors qu'il n'attend plus rien."""
+    panneau = _panneau(qt_app)
+    grisee = panneau.bouton_retoucher.toolTip()
+    panneau._griser("bouton_retoucher", True, panneau._aides["bouton_retoucher"])
+    active = panneau.bouton_retoucher.toolTip()
+    assert active != grisee
+    assert active not in oe.PanneauOeuvres.ATTENTES.values()
+    panneau.deleteLater()
+
+
+def test_chaque_bouton_grisable_a_son_attente(qt_app):
+    """Un bouton ajouté à la rangée sans attente déclarée lèverait un `KeyError` au premier
+    clic sur la liste. On l'exige ici plutôt que de le découvrir à l'écran."""
+    panneau = _panneau(qt_app)
+    for nom in oe.PanneauOeuvres.ATTENTES:
+        assert hasattr(panneau, nom), nom
+    assert set(oe.PanneauOeuvres.ATTENTES) <= set(oe.PanneauOeuvres.PARCOURS)
+    panneau.deleteLater()

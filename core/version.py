@@ -22,7 +22,7 @@ version, ce serait un `tests/test_version.py` qui passe pendant qu'on livre le m
 Aucun parseur TOML n'est chargé au démarrage : setuptools lit l'attribut à la CONSTRUCTION du
 paquet, jamais à l'exécution."""
 
-__version__ = "2.36.3"
+__version__ = "2.37.0"
 
 # La version du dépôt est UNIQUE, mais les deux briques n'ont pas le même degré de
 # confiance. Affiché par `--version`.

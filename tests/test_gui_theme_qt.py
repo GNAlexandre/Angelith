@@ -174,6 +174,25 @@ def test_le_logo_se_rend(qt_app):
     assert not ico.logo(64).isNull()
 
 
+def test_le_logo_vient_du_fichier_livre_et_porte_ses_sept_tailles(qt_app):
+    """⚠ Ce test existe parce que le SVG de secours rendrait ce même `logo()` **non nul**.
+
+    Sans lui, supprimer ou déplacer `templates/icone/angelith.ico` laisserait toute la suite au
+    vert, et l'utilisateur verrait deux identités : celle du `.exe` dans le menu Démarrer,
+    celle du secours dans la barre des tâches. Ce qui distingue les deux chemins n'est pas la
+    couleur — c'est le nombre de résolutions : le SVG est rendu à une taille, le `.ico` en
+    porte sept."""
+    from core import installation
+
+    fichier = installation.ressource(*ico.ICONE_LIVREE)
+    assert fichier.is_file(), f"icône livrée introuvable : {fichier}"
+
+    tailles = {(t.width(), t.height()) for t in ico.logo().availableSizes()}
+    assert (16, 16) in tailles, "le 16 px est celui de la barre des tâches, il ne se déduit pas"
+    assert (256, 256) in tailles
+    assert len(tailles) >= 7
+
+
 def test_la_table_du_journal_est_bien_celle_ci():
     """Le pendant Qt de `test_les_quatre_niveaux_du_journal_ont_un_role` : deux tables qui
     divergeraient laisseraient un niveau repeint à la mauvaise couleur, en silence."""

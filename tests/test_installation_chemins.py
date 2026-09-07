@@ -114,6 +114,7 @@ def _donnees_du_spec() -> list[str]:
 
 
 @pytest.mark.parametrize("attendu", ["config.yaml", "langues", "templates/fonts",
+                                     "templates/icone",
                                      "illustration/gabarits", "tools/installer_polices.ps1",
                                      "LICENSE", "NOTICE"])
 def test_le_spec_embarque_la_donnee(attendu):

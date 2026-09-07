@@ -39,6 +39,136 @@ prompt.
 
 ---
 
+## [2.37.0] - 2026-09-07
+
+### MINEUR — le logiciel a une icône, et elle est la même partout
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+
+#### Ce qu'il y avait, et ce que ça donnait
+
+Rien, sauf dans la fenêtre. `gui/icones.LOGO` posait un ballon de manga dessiné en SVG en
+ligne sur `setWindowIcon`, et c'était tout : `angelith.spec` n'avait pas de paramètre `icon=`,
+donc les deux exécutables portaient **l'icône PyInstaller par défaut**, et
+`UninstallDisplayIcon={app}\angelith-gui.exe` en héritait. L'installeur, lui, portait celle
+d'Inno Setup.
+
+Trois endroits où l'utilisateur voit le logiciel avant de l'avoir lancé — le fichier
+téléchargé, le menu Démarrer, la liste « Applications installées » — et trois images qui
+n'étaient celles de personne.
+
+#### Ce qui change
+
+`templates/icone/angelith.ico` est désormais **la** source, et les trois endroits la nomment :
+
+- `angelith.spec` : `icon=` sur `angelith-gui.exe` **et** sur `angelith-console.exe`. Deux
+  icônes différentes pour deux exécutables du même produit, dans le même dossier, feraient
+  croire à deux logiciels ;
+- `installeur/angelith.iss` : `SetupIconFile`, pour le `.exe` de l'installeur lui-même ;
+- `gui/icones.logo()` : le fichier est lu par `core.installation.ressource()`, avec **ses sept
+  résolutions** (16, 24, 32, 48, 64, 128, 256 px). Qt prend celle qu'il affiche au lieu de
+  réduire le 256 dans une barre des tâches à 16 px.
+
+Le `.ico` part donc dans le gel (`DONNEES`) *en plus* d'être incrusté dans le `.exe` : ces deux
+copies ne servent pas au même moment. Celle du `.exe` est lue par l'explorateur sans lancer le
+programme ; celle du dossier est lue au démarrage.
+
+Le SVG en ligne n'est pas supprimé : il devient le **secours** d'un fichier manquant. Motif :
+un `logo()` qui lèverait sur un fichier absent ferait échouer le démarrage pour un ornement, et
+une application sans icône du tout porte celle de Qt.
+
+⚠ **Et c'est exactement ce que le nouveau test garde.** Le secours rendrait ce même `logo()`
+non nul : sans lui, supprimer le `.ico` laisserait toute la suite au vert pendant que
+l'utilisateur verrait deux identités, celle du `.exe` au menu Démarrer et celle du secours dans
+la barre des tâches. Ce qui distingue les deux chemins n'est pas la couleur, c'est le nombre de
+résolutions — le test compte sept tailles et exige le 16 px nommément.
+
+#### D'où vient l'image, et ce qu'elle ne tient pas
+
+Une illustration générée par ChatGPT, choisie par le mainteneur dans une planche de quatre
+candidates. Elle est enregistrée au registre de provenance (`docs/ai-provenance.md`), avec son
+master 1024 px (`docs/img/icone-1024.png`) — l'artwork est matriciel, toute taille au-delà de
+256 px se régénère depuis lui et ne s'agrandit pas.
+
+⚠ **Elle ne tient pas le cahier des charges d'icône du projet, et le dire ici coûte moins cher
+que de le redécouvrir.** Ce cahier demandait un tracé vectoriel plat, sans texte, deux couleurs
+plus un neutre, lisible à 16 px, et écartait nommément l'engrenage, les étincelles, les
+dégradés et le halo. L'image en porte quatre sur quatre, plus du faux texte de page et un
+visage de personnage. Rendue en bande sur fond clair et sur fond sombre : lisible comme « un
+livre ouvert » à partir de 48 px, tache bleue à 32 et à 16 — or la barre des tâches et l'Alt-Tab
+sont à 16 et 32. Ce constat est un œil sur une bande rendue, pas une mesure ; la sortie propre,
+si elle vient, est un 16/32 dessiné à part et glissé dans le même `.ico`, ce que le format
+accepte sans rien changer au code.
+
+---
+
+## [2.36.4] - 2026-09-07
+
+### CORRECTIF — un bouton grisé qui ne dit rien passe pour un bouton absent
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+
+#### 1. Six boutons grisés d'un coup, sans un mot
+
+Signalé à l'usage : *« je n'ai toujours pas l'option pour importer un build »*. Le bouton
+**était là**, sur la capture même — grisé, comme toute la rangée, parce que la liste des œuvres
+était vide.
+
+`gui/oeuvres.py` promettait pourtant, noir sur blanc : *« Un bouton grisé dit ce qu'il
+attend. »* Il ne le tenait pas — l'infobulle était la même, actif ou grisé. Sur une installation
+neuve, six boutons se grisent ensemble et rien n'explique pourquoi ; on cherche alors une option
+qui est sous les yeux.
+
+Chaque bouton dit désormais **ce qui lui manque** quand il est grisé, et retrouve son infobulle
+de geste quand il redevient utilisable — un bouton actif doit annoncer ce qu'il fait et ce qu'il
+coûte, un bouton grisé ce qu'il attend. ⚠ Vérifié en retirant le correctif : trois des quatre
+tests deviennent rouges.
+
+⚠ **Ce n'était pas un défaut de l'import**, et il faut le dire : dans une installation gelée,
+`sources/` vit sous `Documents\Angelith` — séparé du dossier d'installation pour qu'une
+désinstallation n'emporte rien (lot 37). Un dépôt de travail rempli et une installation gelée
+vide sont donc deux corpus distincts, ce que `ANGELITH_DOCUMENTS` permet de réunir.
+
+#### 2. Le nettoyage de `dist/` échouait quand on lançait l'outil, pas quand on le testait
+
+`tools/geler.py` retire de `dist/` les installeurs d'une autre version que celle qu'il vient de
+produire (lot 41). Ce nettoyage importe `core.version` — et échouait par
+`ModuleNotFoundError`.
+
+`python tools/geler.py` met **`tools/` en tête de `sys.path`**, pas la racine du dépôt. L'import
+n'avait donc aucune chance d'aboutir. Et la panne tombait **après huit minutes de gel et quatre
+d'installeur** : au pire moment, sur un travail entièrement réussi.
+
+⚠ **Le test qui couvrait cette fonction importait `tools.geler` en PAQUET**, avec la racine
+déjà sur le chemin. Il ne pouvait pas voir la différence — il ne testait pas l'outil, il testait
+un module.
+
+#### Le correctif, et le test qui le garde
+
+La racine est ajoutée au chemin avant l'import. Le test, lui, lance un interpréteur **dans les
+conditions du script** : `tools/` sur le chemin, répertoire courant ailleurs. ⚠ Vérifié en
+retirant le correctif : il devient rouge.
+
+#### Le motif, pour la cinquième fois
+
+Le mécanisme de release, les tests dépendants de la plateforme, l'écriture au fil de l'eau, le
+réenroulement, deux listes divergentes — et maintenant un test qui n'exécutait pas l'outil comme
+l'outil s'exécute. **Chaque fois, du code couvert par des tests, et défaillant en usage réel.**
+
+La leçon est constante et vaut d'être écrite une fois pour toutes : *un test qui importe ce
+qu'un utilisateur lance ne teste pas ce que l'utilisateur lance.*
+
+#### Fichiers
+
+`gui/oeuvres.py`, `tests/test_gui_oeuvres.py` · `tools/geler.py`,
+`tests/test_empaquetage.py`.
+
+**Tests** : +5 — 5 076 → **5 081** collectés avec PySide6, 4 633 → **4 634** sans. ⚠ L'écart
+avec/sans PySide6 passe de 443 à **447** : les quatre tests d'infobulle exigent un écran, ce qui
+est la seule façon de vérifier ce qu'un bouton affiche.
+
+---
+
 ## [2.36.3] - 2026-09-07
 
 ### CORRECTIF — le garde-fou de fuite était aveugle à cinq titres, et personne ne pouvait le voir

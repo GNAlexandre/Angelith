@@ -32,6 +32,11 @@ from core.version import __version__
 from tools import verifier_gel
 
 RACINE = Path(__file__).resolve().parent.parent
+
+#: Un saut de ligne, jamais écrit en littéral — même convention que `SAUT_LIGNE` de
+#: `gui/dialogues.py`.
+NL = chr(10)
+
 SPEC = RACINE / "angelith.spec"
 ISS = RACINE / "installeur" / "angelith.iss"
 
@@ -556,3 +561,38 @@ def test_le_workflow_se_declenche_bien_sur_un_TAG():
     tags = (declencheurs.get("push") or {}).get("tags")
     assert tags, "le workflow ne se déclenche pas sur les tags : `artefact` ne partira jamais"
     assert any(motif.startswith("v") for motif in tags), tags
+
+
+def test_le_nettoyage_du_manifeste_marche_LANCÉ_EN_SCRIPT(tmp_path):
+    """⚠ **Le défaut du lot 50, et il n'était pas visible par un test ordinaire.**
+
+    `python tools/geler.py` met `tools/` en tête de `sys.path`, **pas la racine du dépôt**.
+    L'import de `core.version` échouait donc par `ModuleNotFoundError` — après huit minutes de
+    gel et quatre d'installeur, c'est-à-dire au pire moment.
+
+    Le test qui couvrait cette fonction importait `tools.geler` **en paquet**, avec la racine
+    déjà sur le chemin : il ne pouvait pas voir la différence. Celui-ci lance un interpréteur
+    dans les conditions du script — `tools/` sur le chemin, un répertoire courant AILLEURS —,
+    et c'est la seule façon de reproduire la panne.
+
+    Même famille que les autres défauts de cette série : le code était couvert, mais pas dans
+    les conditions où il tourne."""
+    outils = str(RACINE / "tools")
+    faux = tmp_path / "dist"
+    faux.mkdir()
+    (faux / f"Angelith-{__version__}-windows-x64-setup.exe").write_bytes(b"x")
+    (faux / "Angelith-0.9.0-windows-x64-setup.exe").write_bytes(b"x")
+
+    code = (
+        "import sys" + NL
+        + "sys.path.insert(0, r'" + outils + "')" + NL
+        + "import geler" + NL
+        + "geler.DIST = r'" + str(faux) + "'" + NL
+        + "geler._retirer_installeurs_perimes(dire=lambda *a, **k: None)" + NL
+    )
+    resultat = subprocess.run([sys.executable, "-c", code], cwd=tmp_path,
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace")
+    assert resultat.returncode == 0, resultat.stdout + resultat.stderr
+    restants = sorted(f.name for f in faux.glob("*.exe"))
+    assert restants == [f"Angelith-{__version__}-windows-x64-setup.exe"], restants

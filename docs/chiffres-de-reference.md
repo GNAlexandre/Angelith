@@ -184,10 +184,10 @@ plus décrire l'état courant.
 
 | Chiffre | Où | Dénominateur |
 |---|---|---|
-| **5 076** | `README.md`, `CONTRIBUTING.md`, `docs/COMMANDES.fr.md` | `pytest --collect-only -q`, toutes dépendances optionnelles installées, 2026-09-06 |
-| **5 019** | — | ce que la boucle courte exécute : `-m "not lent and not modeles"` |
+| **5 081** | `README.md`, `CONTRIBUTING.md`, `docs/COMMANDES.fr.md` | `pytest --collect-only -q`, toutes dépendances optionnelles installées, 2026-09-06 |
+| **5 024** | — | ce que la boucle courte exécute : `-m "not lent and not modeles"` |
 | **57** | — | désélectionnés par ces marqueurs : 57 `lent`, dont 22 aussi `modeles` — tout ce qui exige les poids est aussi lent, l'inverse n'est pas vrai |
-| **4 633** | `docs/mesures/creation-import-maj-2026-09-06.md` | le même total **sans PySide6**, soit un écart de **443** — `python -m pytest --collect-only -q -p tools.compte_sans_pyside`, 2026-09-06 |
+| **4 634** | `docs/mesures/creation-import-maj-2026-09-06.md` | le même total **sans PySide6**, soit un écart de **447** — `python -m pytest --collect-only -q -p tools.compte_sans_pyside`, 2026-09-06 |
 
 ⚠ Les nombres antérieurs (1 908, 1 657, « un millier et demi », 2 262, 2 909, 3 804, 3 809, 3 811, 3 868, 3 872, 3 969, 3 996, 3 998, 4 130, 4 239, 4 378, 4 487, 4 510, 4 567, 4 705, 4 846, 4 886, 4 912, 5 008, 5 019, 5 025) n'étaient pas faux non
 plus : ils dataient. Un compte de tests se périme à chaque commit — c'est pourquoi celui-ci
@@ -196,7 +196,7 @@ porte sa date, et pourquoi la commande qui le reproduit est écrite à côté.
 > **Depuis le lot 20, ce tableau est la SOURCE et non plus un relevé parmi d'autres.**
 > `tests/test_coherence_chiffres.py` lit ces lignes et vérifie que les trois fichiers de la
 > colonne « Où » citent bien **ce** nombre **avec cette date**, et que l'arithmétique tient
-> (5 019 + 57 = 5 076). La divergence à quatre chiffres qui a motivé ce document ne peut plus
+> (5 024 + 57 = 5 081). La divergence à quatre chiffres qui a motivé ce document ne peut plus
 > se reproduire en silence : elle colore un test en rouge.
 >
 > Reproduire les deux premiers : `python tools/compte_de_tests.py` et

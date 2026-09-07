@@ -10,6 +10,13 @@ Le projet n'est pas empaqueté et ne veut pas l'être : pas de `pyproject.toml`,
 et une étape de build à un projet qui n'en a aucune. Douze glyphes de 24 px tiennent en trois
 cents caractères chacun ; le coût d'un dossier de ressources dépasserait ce qu'il porte.
 
+⚠ **Une exception, et une seule : l'icône de l'application.** C'est une image matricielle, pas
+un tracé ; elle ne rentre pas dans une chaîne de trois cents caractères, et Windows la veut de
+toute façon en `.ico` pour le `.exe` et pour l'installeur. Elle vit donc dans
+`templates/icone/angelith.ico`, et `logo()` la lit par `core.installation.ressource()`. Un
+fichier, pas un `.qrc` : la règle qui tient est « rien de généré à committer », pas « rien sur
+le disque ».
+
 ## Pourquoi `currentColor`
 
 Une icône qui ne suit pas le thème est pire qu'un libellé texte : elle devient un carré noir
@@ -131,9 +138,15 @@ TRACES: dict[str, str] = {
     "menu": '<path d="M4 7h16M4 12h16M4 17h16"/>',
 }
 
-#: L'icône de l'application — `setWindowIcon`. Elle n'est PAS dans `TRACES` : elle est pleine
-#: et colorée, alors que les douze autres sont des tracés monochromes qui prennent la teinte
-#: du thème. Un ballon de manga, ce que le logiciel manipule.
+#: Le **secours** de l'icône d'application, et plus son identité : depuis que
+#: `templates/icone/angelith.ico` existe, `logo()` lit le fichier et ne rend ce SVG que si le
+#: fichier manque. Il reste ici parce qu'une application sans icône du tout porte celle de Qt
+#: dans la barre des tâches — un carré vert qui n'est celui de personne —, et parce qu'un
+#: `logo()` qui lèverait sur un fichier absent ferait échouer le démarrage pour un ornement.
+#:
+#: Il n'est PAS dans `TRACES` : il est plein et coloré, alors que les vingt-deux autres sont
+#: des tracés monochromes qui prennent la teinte du thème. Un ballon de manga, ce que le
+#: logiciel manipule.
 LOGO = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
     '<rect width="64" height="64" rx="12" fill="#1e1e22"/>'
@@ -197,15 +210,40 @@ def icone(nom: str, role: str = "texte", cote: int = COTE):
     return QIcon(pixmap(nom, theme.couleur(role), cote))
 
 
+#: L'icône livrée, résolue par `core.installation.ressource()` — la seule fonction du dépôt
+#: qui sache où est le gel. Un `Path(__file__)` désignerait l'intérieur de l'archive
+#: PyInstaller, et `tests/test_installation_chemins.py` échoue si l'un réapparaît.
+ICONE_LIVREE = ("templates", "icone", "angelith.ico")
+
+
 def logo(cote: int = 64):
     """L'icône de l'application. Une seule, l'identité du logiciel.
 
     ⚠ Elle ne suit PAS le thème : elle apparaît dans la barre des tâches et l'alt-tab du
     système, où la couleur de fond n'est pas la nôtre. Une icône d'application qui change de
-    couleur selon un réglage interne est une icône qu'on ne reconnaît plus."""
+    couleur selon un réglage interne est une icône qu'on ne reconnaît plus.
+
+    ⚠ **Le `.ico` est rendu tel quel, sans passer par `cote`.** Un fichier ICO porte sept
+    résolutions dessinées séparément (16 à 256 px) ; les charger toutes laisse Qt prendre
+    celle qu'il affiche, alors qu'un rendu à une taille unique ferait redimensionner ce même
+    256 dans une barre des tâches à 16 px. `cote` ne sert donc qu'au SVG de secours, où il n'y
+    a rien à choisir.
+
+    C'est aussi l'icône que porte le `.exe` (`icon=` dans `angelith.spec`) : le même fichier,
+    pour que la fenêtre et le menu Démarrer ne montrent pas deux logiciels."""
     from PySide6.QtCore import QByteArray, Qt
     from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
     from PySide6.QtSvg import QSvgRenderer
+
+    from core import installation
+
+    fichier = installation.ressource(*ICONE_LIVREE)
+    if fichier.is_file():
+        depuis_fichier = QIcon(str(fichier))
+        # ⚠ `QIcon(chemin)` ne lit rien à la construction : un fichier illisible rend une icône
+        # vide, sans lever. On le constate ici plutôt que dans la barre des tâches.
+        if not depuis_fichier.isNull():
+            return depuis_fichier
 
     image = QImage(int(cote), int(cote), QImage.Format_ARGB32_Premultiplied)
     image.fill(Qt.transparent)
