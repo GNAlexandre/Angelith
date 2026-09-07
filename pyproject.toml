@@ -62,7 +62,7 @@ classifiers = [
 # d'`openai` n'est pas une frilosité : la 3.x est bâtie sur httpx2, et `core/llm.py` construit
 # lui-même son `httpx.Timeout`. Voir `requirements.txt` pour la mesure.
 dependencies = [
-  "openai>=1.40,<3",
+  "openai>=1.40,<4",
   "httpx>=0.27",
   "pyyaml>=6.0",
   "pymupdf>=1.24",
