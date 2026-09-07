@@ -525,72 +525,13 @@ jobs:
             demarrage-gel.json
           if-no-files-found: warn
 
-  # ---------------------------------------------------------------------------
-  # SonarQube Cloud — l'analyse, et le seul endroit du dépôt où la couverture devient un
-  # chiffre publié.
+  # ⚠ **LE JOB `sonar` EST RETIRÉ DE L'ARBRE PUBLIÉ**, sur décision du mainteneur.
   #
-  # ## Ce que ce job corrige
+  # Il exige un secret `SONAR_TOKEN` que ce dépôt n'a pas, et son étape de scan échouait
+  # donc à chaque exécution — peignant en rouge une intégration continue dont les tests,
+  # eux, passent sur les deux plateformes. Un job qui ne peut structurellement pas
+  # réussir ici n'apprend rien à qui lit le badge.
   #
-  # Sonar affichait `Coverage: 0 %` sur un dépôt qui collecte 2 644 tests en CI (2026-08-27). Sonar ne se
-  # trompait pas : aucun rapport n'était produit, et l'analyse tournait en *Automatic
-  # Analysis*, un mode qui ne CALCULE jamais la couverture Python — il ne sait que lire un
-  # rapport qu'on lui fournit. Le zéro était donc une absence de mesure déguisée en mesure,
-  # exactement ce que le reste de ce fichier passe trois pages à refuser.
-  #
-  # ⚠ **Deux actions manuelles conditionnent ce job**, et sans elles il échouera :
-  #   1. basculer le projet sur *CI-based analysis* dans SonarQube Cloud
-  #      (`Administration > Analysis Method`) — les deux modes sont mutuellement exclusifs,
-  #      et tant que l'automatique est actif le scan lancé ici est REFUSÉ ;
-  #   2. créer le secret `SONAR_TOKEN` (`Settings > Secrets and variables > Actions`).
-  #
-  # ⚠ `needs: [tests, banc]` a une conséquence assumée : si le banc échoue, aucune analyse
-  # n'est publiée. C'est voulu — publier une couverture amputée en silence serait pire qu'une
-  # absence de publication.
-  sonar:
-    needs: [tests, banc]
-    # `ubuntu-latest` : ici on n'exécute aucun test — on lit deux XML et le code source.
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Obligatoire. Sans historique complet, Sonar ne peut ni attribuer les lignes à leur
-          # auteur ni calculer le « New Code » — c'est-à-dire la seule vue qui serve à décider
-          # sur une PR.
-          fetch-depth: 0
+  # L'analyse continue de tourner là où le jeton existe. Elle n'est pas supprimée du
+  # projet : elle est absente de CETTE copie.
 
-      # Les deux rapports atterrissent à la RACINE du checkout, parce que
-      # `sonar.python.coverage.reportPaths` les y nomme en relatif.
-      - uses: actions/download-artifact@v4
-        with:
-          name: coverage-tests
-          path: .
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: coverage-banc
-          path: .
-
-      - name: Version du projet
-        # Source unique : `core/version.py`. Sonar s'en sert pour poser un repère « Version »
-        # sur la frise d'activité et pour la définition de New Code « depuis la version
-        # précédente » — exactement ce que veut un projet dont la roadmap est versionnée.
-        # ⚠ `v.__version__`, et non `v.VERSION` : cet attribut-là N'EXISTE PAS et n'a jamais
-        # existé — `core/version.py` ne déclare que `__version__`. L'étape échouait donc
-        # silencieusement sur un `AttributeError` depuis le lot 20, et `sonar.projectVersion`
-        # partait vide. Relevé en passant par le lot 37 (2026-09-06), corrigé ici.
-        run: echo "PROJECT_VERSION=$(python -c 'import core.version as v; print(v.__version__)')" >> "$GITHUB_ENV"
-
-      - name: Scan
-        # Version ÉPINGLÉE au correctif, contrairement aux actions officielles de ce fichier
-        # (`checkout@v4`, `cache@v4`) : celle-ci télécharge et exécute un binaire tiers, et sa
-        # v8 a changé un défaut de sécurité (`skipSignatureVerification` passé à `false`). Une
-        # étiquette flottante ferait donc changer le comportement du scan sans commit.
-        # Vérifié le 26/08/2026 : v8.2.1 est la dernière publiée.
-        uses: SonarSource/sonarqube-scan-action@v8.2.1
-        with:
-          args: -Dsonar.projectVersion=${{ env.PROJECT_VERSION }}
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        # Pas de `SONAR_HOST_URL` : il ne sert qu'à un SonarQube Server auto-hébergé. Sur
-        # SonarQube Cloud, le renseigner ferait viser la mauvaise instance.
