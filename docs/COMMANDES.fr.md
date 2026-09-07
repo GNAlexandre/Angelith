@@ -409,7 +409,7 @@ tout le run.
 ### Tests
 
 ```powershell
-python -m pytest -q                                   # tout (5 025 tests au 2026-09-06)
+python -m pytest -q                                   # tout (5 034 tests au 2026-09-06)
 python -m pytest -q -m "not modeles and not lent"     # la boucle courte : 4 855 (57 de moins)
 python -m pytest tests/test_manga_typeset.py -q       # un fichier
 python -m pytest -q --durations=15                    # les 15 plus lents

@@ -485,3 +485,50 @@ def test_publication_ne_cherche_aucun_fichier_windows_sur_un_runner_linux():
     # ⚠ La clé cherchée porte son indentation, et non la sous-chaîne « files: » toute nue :
     # `fail_on_unmatched_files:` la contient, et le test échouait sur son propre garde-fou.
     assert (chr(10) + "          files:") not in directives
+
+
+def test_la_verification_de_demarrage_isole_les_reglages():
+    """⚠ **Le défaut du lot 41, et il rendait le gel non reproductible.**
+
+    La troisième vérification affirme que la fenêtre s'ouvre sur l'ACCUEIL. Or l'application
+    rouvre la dernière destination visitée, et une installation gelée lit son
+    `.angelith/interface.json` dans le profil de l'utilisateur — celui de qui vient de se
+    servir de l'application. Une session laissée sur la page Diagnostic a fait échouer une
+    compilation dont le code était sain.
+
+    En intégration continue le profil est vide et le piège n'apparaît jamais : c'est un
+    garde-fou qui ne dit la vérité que sur une machine neuve. `ANGELITH_REGLAGES` l'emporte sur
+    toute autre résolution ; l'outil doit le poser."""
+    source = (RACINE / "tools" / "geler.py").read_text(encoding="utf-8")
+    rang_isolation = source.index("ANGELITH_REGLAGES")
+    rang_verification = source.index("--verifier-demarrage")
+    assert rang_isolation < rang_verification, (
+        "les réglages ne sont pas isolés AVANT la vérification de démarrage")
+    assert "TemporaryDirectory" in source
+
+
+def test_le_manifeste_ne_liste_que_la_version_qu_on_vient_de_geler(tmp_path, monkeypatch):
+    """⚠ **Un manifeste ne doit lister que ce que CETTE compilation a produit.**
+
+    `SHA256SUMS.txt` est écrit en balayant `dist/`. Un installeur d'une version précédente
+    resté là s'y retrouve — constaté le 2026-09-07, la 2.31.0 à côté de la 2.35.0. Ce n'est pas
+    cosmétique : `ci.yml` attache `dist/*.exe` à la release, et `core/maj.py` retient le PREMIER
+    asset qui finit par `-setup.exe`. Une release à deux installeurs ferait télécharger l'un ou
+    l'autre selon l'ordre rendu par l'API.
+
+    En intégration continue le dossier est neuf : le piège ne se voit que sur une machine qui a
+    déjà servi."""
+    from tools import geler
+
+    monkeypatch.setattr(geler, "DIST", str(tmp_path))
+    courant = tmp_path / f"Angelith-{__version__}-windows-x64-setup.exe"
+    perime = tmp_path / "Angelith-0.9.0-windows-x64-setup.exe"
+    voisin = tmp_path / "SHA256SUMS.txt"
+    for fichier in (courant, perime, voisin):
+        fichier.write_bytes(b"x")
+
+    geler._retirer_installeurs_perimes(dire=lambda *a, **k: None)
+
+    assert courant.is_file(), "l'installeur de la version courante a été effacé"
+    assert not perime.exists(), "l'installeur périmé est resté"
+    assert voisin.is_file(), "le nettoyage a débordé sur un fichier qui n'est pas un installeur"

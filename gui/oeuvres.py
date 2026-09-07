@@ -77,6 +77,11 @@ class PanneauOeuvres(QWidget):
     #: `(projet, tome, brique)` — la fenêtre décide de la destination à ouvrir.
     demande_lancement = Signal(str, str, str)
     demande_retouche = Signal(str, str)
+    #: Réintégrer un `build/` corrigé par un tiers — lot 40, exposé ICI depuis le
+    #: lot 41. Il n'existait que dans le menu « Projet », et seulement pour le tome
+    #: DÉJÀ OUVERT : c'est-à-dire nulle part pour qui gère ses œuvres depuis cette
+    #: page, qui est pourtant l'endroit où l'on choisit un tome.
+    demande_import = Signal(str, str)
     demande_export_glossaire = Signal(str, str)
     demande_exports = Signal(str, str)
     demande_dossier = Signal(str)
@@ -86,8 +91,9 @@ class PanneauOeuvres(QWidget):
     #: L'ordre de tabulation. Déclaré — cf. le critère 6 du `PLAN-19`.
     PARCOURS: tuple[str, ...] = (
         "champ_recherche", "choix_brique", "choix_statut", "case_legende", "arbre",
-        "bouton_lancer", "bouton_retoucher", "bouton_exports", "bouton_glossaire",
-        "bouton_dossier", "bouton_creer", "bouton_sources", "bouton_rafraichir")
+        "bouton_lancer", "bouton_retoucher", "bouton_importer", "bouton_exports",
+        "bouton_glossaire", "bouton_dossier", "bouton_creer", "bouton_sources",
+        "bouton_rafraichir")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -175,6 +181,12 @@ class PanneauOeuvres(QWidget):
         self.bouton_retoucher = QPushButton("Retoucher")
         self.bouton_retoucher.setToolTip("Ouvre ce tome dans l'éditeur de planches.")
         self.bouton_retoucher.clicked.connect(self._retoucher)
+        self.bouton_importer = QPushButton("Importer un tome corrigé…")
+        self.bouton_importer.setToolTip(
+            "Réintègre le travail d'un relecteur : répliques corrigées, zones retouchées, "
+            "textes déplacés. ⚠ Rien n'est supprimé, et ce qui est remplacé part d'abord "
+            "dans une sauvegarde datée. L'aperçu dit ce qui changerait AVANT d'écrire.")
+        self.bouton_importer.clicked.connect(self._importer)
         self.bouton_exports = QPushButton("Sorties…")
         self.bouton_exports.setToolTip(
             "Ce qui existe sur le disque pour ce tome, avec sa date et sa taille — et ce "
@@ -188,8 +200,9 @@ class PanneauOeuvres(QWidget):
         self.bouton_dossier = QPushButton("Ouvrir le dossier")
         self.bouton_dossier.setToolTip("Ouvre le dossier de sources de cette œuvre.")
         self.bouton_dossier.clicked.connect(self._ouvrir_dossier)
-        for bouton in (self.bouton_lancer, self.bouton_retoucher, self.bouton_exports,
-                       self.bouton_glossaire, self.bouton_dossier):
+        for bouton in (self.bouton_lancer, self.bouton_retoucher, self.bouton_importer,
+                       self.bouton_exports, self.bouton_glossaire,
+                       self.bouton_dossier):
             gestes.addWidget(bouton)
         gestes.addStretch(1)
         colonne.addLayout(gestes)
@@ -310,6 +323,11 @@ class PanneauOeuvres(QWidget):
         # écran qui s'ouvrirait vide.
         self.bouton_retoucher.setEnabled(
             info is not None and info.brique in (biblio.MANGA, biblio.WEBTOON))
+        # ⚠ Même garde que la retouche, et pour la même raison : l'import réintègre des
+        # CHECKPOINTS DE PLANCHES. Le proposer sur un roman promettrait un geste qui n'a rien
+        # à écrire.
+        self.bouton_importer.setEnabled(
+            info is not None and info.brique in (biblio.MANGA, biblio.WEBTOON))
 
     def _a_un_glossaire(self, projet: str) -> bool:
         return any(o.projet == projet and o.glossaire is not None for o in self._oeuvres)
@@ -325,6 +343,11 @@ class PanneauOeuvres(QWidget):
         info = self.selection()
         if info is not None and info.brique in (biblio.MANGA, biblio.WEBTOON):
             self.demande_retouche.emit(info.projet, info.tome)
+
+    def _importer(self) -> None:
+        info = self.selection()
+        if info is not None and info.brique in (biblio.MANGA, biblio.WEBTOON):
+            self.demande_import.emit(info.projet, info.tome)
 
     def _exports(self) -> None:
         info = self.selection()

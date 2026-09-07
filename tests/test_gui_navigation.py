@@ -211,3 +211,44 @@ def test_la_bascule_de_theme_redemande_les_icones(pane):
     for index in range(pane.liste.count()):
         assert not pane.liste.item(index).icon().isNull()
     theme.appliquer(QApplication.instance(), theme.CLAIR)
+
+
+# --------------------------------------------------------------------------- #
+#  Le pied du pane — lot 41
+#
+#  ⚠ Le pied porte DEUX sortes d'entrées, et le code n'en servait qu'une : « Réglages » a une
+#  `action` (un dialogue), « Diagnostic » n'en a pas — c'est une PAGE depuis le lot 36.
+#  Cliquer sur Diagnostic ne faisait donc RIEN, en silence.
+# --------------------------------------------------------------------------- #
+
+def test_le_pied_porte_bien_les_deux_sortes_d_entrees():
+    """Si un jour les deux avaient une `action`, les tests suivants passeraient au vert sans
+    rien prouver. On vérifie donc d'abord que le cas existe."""
+    pied = dst.pied()
+    assert any(d.action for d in pied), "aucune entrée à action : le test ne prouve rien"
+    assert any(not d.action for d in pied), "aucune entrée-page : le test ne prouve rien"
+
+
+def test_une_entree_de_pied_SANS_action_navigue(qt_app):
+    """**Le défaut du lot 41.** Un clic qui ne produit rien passe pour une application
+    cassée — c'est le reproche que `gui/depot.py` fait déjà au lâcher muet."""
+    pane = PanneauNavigation()
+    page = next(d for d in dst.pied() if not d.action)
+    vus: list[str] = []
+    pane.choisie.connect(vus.append)
+    pane.liste_pied.itemClicked.emit(pane._items[page.identifiant])
+    assert vus == [page.identifiant]
+    assert pane.courante() == page.identifiant
+
+
+def test_une_entree_de_pied_AVEC_action_ouvre_son_dialogue(qt_app):
+    """Iso : « Réglages » continue d'ouvrir un dialogue, et ne navigue PAS."""
+    pane = PanneauNavigation()
+    avec = next(d for d in dst.pied() if d.action)
+    actions: list[str] = []
+    navigations: list[str] = []
+    pane.demande_action.connect(actions.append)
+    pane.choisie.connect(navigations.append)
+    pane.liste_pied.itemClicked.emit(pane._items[avec.identifiant])
+    assert actions == [avec.action]
+    assert navigations == []

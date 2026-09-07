@@ -39,6 +39,106 @@ prompt.
 
 ---
 
+## [2.35.0] - 2026-09-07
+
+### MINEUR — trois gestes qui existaient sans être atteignables
+
+> **Rien n'est périmé, et `config.yaml` ne change pas d'un octet.** Aucun cache invalidé,
+> `manga/checkpoints.py:FORMAT_VERSION` reste à **3**.
+
+Les trois défauts de ce lot ont la même forme, et elle mérite d'être nommée : **une capacité
+livrée, testée, et inatteignable depuis l'écran**. Aucun n'aurait été trouvé par les tests du
+module correspondant — ils étaient tous les trois verts.
+
+#### 1. Le bouton « Diagnostic » du pane ne faisait rien
+
+`gui/navigation.py:_sur_pied` n'émettait que pour les entrées portant une `action`. Or le pied
+en porte **deux sortes** : « Réglages » a une action (elle ouvre un dialogue), « Diagnostic »
+n'en a pas — c'est une **page** depuis le lot 36, et `destinations.pages()` le dit
+explicitement (« le pied sans `action` »).
+
+Résultat : cliquer sur Diagnostic dans le pane **ne produisait rien, en silence**. Un clic qui
+ne produit rien passe pour une application cassée — c'est le reproche que `gui/depot.py` fait
+déjà au lâcher muet, et il valait ici mot pour mot.
+
+⚠ Le test qui garde la correction **échoue sans elle** (vérifié en rétablissant l'ancien
+comportement), et il est doublé d'un test qui refuse de valider si un jour les deux entrées du
+pied portaient une action — auquel cas il passerait au vert sans rien prouver.
+
+#### 2. « Importer un tome corrigé » était inatteignable depuis la page Œuvres
+
+Le geste est livré depuis la 2.34.0, mais **uniquement dans le menu « Projet »** et
+**uniquement pour le tome déjà ouvert**. C'est-à-dire nulle part pour qui gère ses œuvres
+depuis la page Œuvres — qui est pourtant l'endroit où l'on choisit un tome.
+
+- la page gagne un bouton **« Importer un tome corrigé… »**, à côté de « Retoucher », avec la
+  **même garde** : manga et webtoon seulement, parce que l'import réintègre des checkpoints de
+  planches et qu'un roman n'a rien à en faire ;
+- le signal porte **le projet ET le tome** (`demande_import = Signal(str, str)`). Un signal sans
+  argument aurait obligé à repasser par le tome courant, donc aurait reconduit exactement le
+  défaut ;
+- `Fenetre.action_importer_build` accepte désormais un tome explicite et retombe sur le tome
+  ouvert quand on ne lui en donne pas — le menu et la page marchent tous les deux, sans que
+  l'un impose son chemin à l'autre.
+
+#### 3. « Vérification impossible : aucune version n'est publiée »
+
+La phrase se contredisait : la vérification a parfaitement abouti, c'est la **réponse** qui est
+« il n'y en a pas ». Et c'est le **cas nominal** d'un dépôt public tant qu'aucun tag n'y a été
+poussé — donc la première phrase que tout le monde lit.
+
+Elle devient : « Aucune version n'est encore publiée sur le dépôt — vous avez la dernière
+disponible », avec l'adresse de la page. ⚠ Un vrai échec réseau continue de dire « impossible » :
+un test iso l'exige, pour que la correction n'avale pas les échecs qui en sont vraiment.
+
+#### ⚠ Ce que ce lot ne corrige PAS, et qui n'est pas un défaut de code
+
+L'exécutable gelé ne proposait pas « Rechercher une mise à jour » parce qu'il **datait de la
+2.31.0** : la fonction est arrivée en 2.34.0. Les binaires sont regénérés ici.
+
+Et la vérification de mise à jour ne trouve rien parce que le dépôt public **ne porte aucune
+release** — mesuré le 2026-09-07 : l'API rend `200` sur le dépôt (il est bien public) et une
+liste **vide** sur `/releases`. Le mécanisme qui produit une release existe et est complet
+(`ci.yml`, job `artefact`, sur tag `v*`) ; il n'a simplement jamais été déclenché, faute de tag
+poussé sur le dépôt public. Ce n'est pas un correctif à écrire, c'est un geste de publication.
+
+#### 4. ⚠ Le gel réussissait ou échouait selon l'endroit où l'on avait cliqué
+
+Trouvé en regénérant les binaires, par la vérification du gel elle-même. La troisième
+vérification affirme que *« la fenêtre s'ouvre sur l'accueil »*. Or l'application rouvre la
+dernière destination visitée, et une installation gelée lit `.angelith/interface.json` dans
+`%LOCALAPPDATA%\Angelith` — c'est-à-dire **le profil réel de qui vient de se servir de
+l'application**.
+
+Une session laissée sur la page Diagnostic a donc fait échouer une compilation dont le code
+était sain. En intégration continue le profil est vide, le piège n'y apparaît jamais : c'est un
+garde-fou qui ne dit la vérité que sur une machine neuve.
+
+`tools/geler.py` isole désormais les réglages dans un dossier temporaire, par
+`ANGELITH_REGLAGES` — la variable existe précisément pour ça. La vérification mesure enfin ce
+qu'elle prétend mesurer : l'état d'un **premier lancement**.
+
+#### 5. Le manifeste d'empreintes listait des versions qui n'existaient plus
+
+Même famille, trouvée dans la foulée : `SHA256SUMS.txt` est écrit en balayant `dist/`, donc un
+installeur d'une version précédente resté là s'y retrouvait. Le fichier annonçait deux versions
+dont une seule existait encore.
+
+⚠ Ce n'est pas cosmétique. `ci.yml` attache `dist/*.exe` à la release, et `core/maj.py` retient
+le **premier** asset qui finit par `-setup.exe` : une release portant deux installeurs ferait
+télécharger l'un ou l'autre selon l'ordre rendu par l'API. `tools/geler.py` retire désormais de
+`dist/` les installeurs d'une autre version que celle qu'il vient de geler — **et rien d'autre**,
+ce qu'un test vérifie en posant un fichier voisin qu'il ne faut pas toucher.
+
+#### Fichiers
+
+`gui/navigation.py`, `gui/oeuvres.py`, `gui/fenetre.py`, `core/maj.py`, `tools/geler.py` ·
+`tests/test_gui_navigation.py`, `tests/test_gui_vue_oeuvres.py`, `tests/test_core_maj.py`.
+
+**Tests** : +9 — 5 025 → **5 034** collectés avec PySide6, 4 585 → **4 591** sans.
+
+---
+
 ## [2.34.0] - 2026-09-06
 
 ### MINEUR — créer un light novel, réintégrer un tome corrigé, et se mettre à jour

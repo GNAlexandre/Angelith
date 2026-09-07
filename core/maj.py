@@ -118,6 +118,11 @@ BLOC = 1024 * 256
 #: nom porte la version, qui est justement ce qu'on ne connaît pas avant d'avoir lu la release.
 SUFFIXE_INSTALLEUR = "-setup.exe"
 
+#: Le détail rendu quand le dépôt existe mais ne porte aucune release. ⚠ Une CONSTANTE, parce
+#: que `gui/vue_maj.py` et `Resultat.phrase` doivent reconnaître ce cas sans comparer une
+#: phrase française à une autre — c'est le cas nominal tant qu'aucun tag n'a été poussé.
+SANS_RELEASE = "aucune version n'est publiée"
+
 #: Le fichier d'empreintes attaché à la même release, écrit par
 #: `tools/verifier_gel.py --empreintes`. Format coreutils : `<hex>  <nom>`, deux espaces.
 NOM_SOMMES = "SHA256SUMS.txt"
@@ -175,6 +180,13 @@ class Resultat:
             return f"Une version {self.version} est disponible — {self.page}"
         if self.version:
             return f"Vous avez la dernière version publiée ({self.version})."
+        # ⚠ « Vérification impossible : aucune version n'est publiée » se contredisait : la
+        # vérification a parfaitement abouti, c'est la réponse qui est « il n'y en a pas ».
+        # Et c'est le cas NOMINAL d'un dépôt public tant qu'aucun tag n'y a été poussé — donc
+        # la première phrase que tout le monde lit.
+        if self.detail == SANS_RELEASE:
+            return (f"Aucune version n'est encore publiée sur le dépôt — vous avez la "
+                    f"dernière disponible. {self.page}")
         return f"Vérification impossible : {self.detail or 'aucune réponse'}."
 
     def installeur(self) -> Asset | None:
@@ -251,7 +263,7 @@ def verifier(config: dict, *, delai: float = DELAI, installee: str = "") -> Resu
         # HTTPStatusError » serait, sur une vérification désormais ARMÉE PAR DÉFAUT, la
         # première phrase que tout le monde lirait — et elle n'apprendrait rien.
         if reponse.status_code == 404:
-            return Resultat(arme=True, page=page, detail="aucune version n'est publiée")
+            return Resultat(arme=True, page=page, detail=SANS_RELEASE)
         reponse.raise_for_status()
         charge = reponse.json() or {}
         etiquette = str(charge.get("tag_name") or "")

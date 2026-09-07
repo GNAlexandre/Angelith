@@ -478,3 +478,19 @@ def test_gele_un_fichier_absent_est_refuse_avant_tout_lancement(tmp_path, monkey
         maj.installer(tmp_path / "absent.exe")
     assert lances == []
 
+
+def test_un_depot_sans_release_ne_dit_pas_verification_impossible():
+    """⚠ **Le cas NOMINAL d'un dépôt public tant qu'aucun tag n'y a été poussé**, donc la
+    première phrase que tout le monde lit. « Vérification impossible : aucune version n'est
+    publiée » se contredisait : la vérification a parfaitement abouti, c'est la réponse qui
+    est « il n'y en a pas »."""
+    resultat = maj.Resultat(arme=True, detail=maj.SANS_RELEASE)
+    phrase = resultat.phrase()
+    assert "impossible" not in phrase
+    assert "Aucune version n'est encore publiée" in phrase
+    assert resultat.page in phrase
+
+
+def test_un_vrai_echec_reseau_dit_toujours_impossible():
+    """Iso : la correction ci-dessus ne doit pas avaler les échecs qui en sont vraiment."""
+    assert "impossible" in maj.Resultat(arme=True, detail="TimeoutError").phrase()

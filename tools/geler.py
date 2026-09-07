@@ -43,6 +43,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -167,11 +168,39 @@ def geler(*, installeur: bool = True, dire=print) -> dict[str, float]:
         durees["installeur"] = _executer(
             "Construire l'installeur (Inno Setup)",
             [chemin_iscc(), str(RACINE / "installeur" / "angelith.iss")], dire=dire)
+        _retirer_installeurs_perimes(dire=dire)
         durees["empreintes"] = _executer(
             "Empreintes SHA-256 des fichiers publiés",
             [python, "tools/verifier_gel.py", "--empreintes", DIST,
              "--sortie", f"{DIST}/SHA256SUMS.txt"], dire=dire)
     return durees
+
+
+def _retirer_installeurs_perimes(*, dire=print) -> None:
+    """Efface de `dist/` les installeurs d'une AUTRE version que celle qu'on vient de geler.
+
+    ⚠ **Le manifeste ne doit lister que ce que cette compilation a produit.** `SHA256SUMS.txt`
+    est écrit en balayant `dist/` : un installeur d'une version précédente resté là s'y
+    retrouve, et le fichier d'empreintes annonce alors deux versions dont une seule existe
+    encore. Constaté le 2026-09-07 — la 2.31.0 traînait à côté de la 2.35.0.
+
+    Ce n'est pas cosmétique. `ci.yml` attache `dist/*.exe` à la release, et `core/maj.py`
+    retient le PREMIER asset qui finit par `-setup.exe` : une release portant deux installeurs
+    ferait télécharger l'un ou l'autre selon l'ordre rendu par l'API. En intégration continue
+    le dossier est neuf, donc le piège n'y apparaît jamais — comme celui des réglages plus
+    haut, il ne se voit que sur une machine qui a déjà servi.
+
+    On n'efface QUE les installeurs, et QUE ceux d'une autre version : le reste de `dist/` ne
+    nous appartient pas."""
+    from core.version import __version__
+
+    dossier = Path(DIST)
+    attendu = f"Angelith-{__version__}-windows-x64-setup.exe"
+    perimes = [f for f in dossier.glob("Angelith-*-windows-x64-setup.exe")
+               if f.name != attendu]
+    for fichier in perimes:
+        fichier.unlink()
+        dire(f"  · installeur périmé retiré de dist/ : {fichier.name}")
 
 
 def verifier(*, dire=print) -> dict[str, float]:
@@ -204,12 +233,30 @@ def verifier(*, dire=print) -> dict[str, float]:
               [python, "tools/verifier_gel.py", "--diagnostic", str(diagnostic)], dire=dire)
 
     demarrage = RACINE / "demarrage-gel.json"
-    environnement = dict(os.environ, QT_QPA_PLATFORM="offscreen")
     dire("\n— 3/3 — la fenêtre s'ouvre sur l'accueil, sans ouvrir de tome —")
-    depart = time.perf_counter()
-    resultat = subprocess.run([str(exe), "--verifier-demarrage"], cwd=RACINE,
-                              capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", env=environnement)
+    # ⚠ **RÉGLAGES ISOLÉS, et ce n'est pas une précaution de confort** — lot 41.
+    #
+    # Cette vérification affirme que la fenêtre s'ouvre sur l'ACCUEIL. Or l'application rouvre
+    # la dernière destination visitée, persistée dans `.angelith/interface.json` — et une
+    # installation gelée lit celui de `%LOCALAPPDATA%\Angelith`, c'est-à-dire le profil réel
+    # du développeur qui vient de se servir de l'application.
+    #
+    # Sans isolation, le gel réussissait ou échouait **selon l'endroit où l'on avait cliqué la
+    # dernière fois** : constaté le 2026-09-07, où une session laissée sur la page Diagnostic a
+    # fait échouer une compilation dont le code était sain. Un artefact dont la validation
+    # dépend de l'humeur d'un profil n'est pas un artefact vérifié.
+    #
+    # `ANGELITH_REGLAGES` l'emporte sur toute autre résolution (`gui/reglages.py:chemin`) : on
+    # lui donne un dossier temporaire, donc les réglages par défaut, donc l'accueil. C'est
+    # exactement l'état d'un premier lancement — et c'est bien ce que la vérification prétend
+    # mesurer.
+    with tempfile.TemporaryDirectory(prefix="angelith-gel-") as reglages_neufs:
+        environnement = dict(os.environ, QT_QPA_PLATFORM="offscreen",
+                             ANGELITH_REGLAGES=str(Path(reglages_neufs) / "interface.json"))
+        depart = time.perf_counter()
+        resultat = subprocess.run([str(exe), "--verifier-demarrage"], cwd=RACINE,
+                                  capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", env=environnement)
     demarrage.write_text(resultat.stdout or "", encoding="utf-8")
     durees["demarrage_du_gel"] = time.perf_counter() - depart
     if resultat.returncode != 0:

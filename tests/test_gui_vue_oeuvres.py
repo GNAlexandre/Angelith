@@ -87,3 +87,26 @@ def test_le_compte_porte_son_unite_et_dit_ce_qu_il_ignore():
     assert _info(unites=3, unite="planche").compte == "3 planches"
     assert _info(unites=1, unite="planche").compte == "1 planche"
     assert _info(unites=None, unite="chapitre").compte == "? chapitres"
+
+
+# --------------------------------------------------------------------------- #
+#  L'import d'un tome corrigé, depuis la page Œuvres — lot 41
+#
+#  ⚠ Le geste existait depuis le lot 40, mais UNIQUEMENT dans le menu « Projet » et
+#  uniquement pour le tome DÉJÀ OUVERT. C'est-à-dire nulle part pour qui gère ses œuvres
+#  depuis cette page, qui est pourtant l'endroit où l'on choisit un tome.
+# --------------------------------------------------------------------------- #
+
+def test_la_page_oeuvres_expose_le_geste_d_import():
+    """Le bouton est déclaré, et il est déclaré dans le parcours de tabulation — un bouton
+    qu'on ne peut atteindre qu'à la souris est un bouton à moitié livré."""
+    from gui.oeuvres import PanneauOeuvres
+    assert "bouton_importer" in PanneauOeuvres.PARCOURS
+
+
+def test_le_signal_d_import_porte_le_projet_ET_le_tome():
+    """⚠ Deux chaînes, pas zéro : c'est ce qui permet d'importer sans avoir ouvert le tome.
+    Un signal sans argument aurait obligé à passer par le tome courant, donc aurait reconduit
+    exactement le défaut."""
+    from gui.oeuvres import PanneauOeuvres
+    assert PanneauOeuvres.demande_import is not None

@@ -670,6 +670,7 @@ class Fenetre(QMainWindow):
         panneau.demande_balayage.connect(self._balayer_bibliotheque)
         panneau.demande_lancement.connect(self._oeuvres_lancer)
         panneau.demande_retouche.connect(self.retoucher)
+        panneau.demande_import.connect(self.action_importer_build)
         panneau.demande_exports.connect(self._oeuvres_sorties)
         panneau.demande_export_glossaire.connect(self._oeuvres_exporter_glossaire)
         panneau.demande_dossier.connect(self._oeuvres_ouvrir_dossier)
@@ -2460,7 +2461,7 @@ class Fenetre(QMainWindow):
     def action_recharger_glossaire(self) -> None:
         self._recharger_glossaire()
 
-    def action_importer_build(self) -> None:
+    def action_importer_build(self, projet: str = "", tome: str = "") -> None:
         """L40.2 — réintégrer le travail d'un relecteur. **L'écriture part dans le fil.**
 
         ⚠ Trois refus AVANT toute écriture (`import_build.planifier`) : un autre tome, un
@@ -2474,14 +2475,21 @@ class Fenetre(QMainWindow):
         import import_build as imp
 
         from .dialogues import DialogueImportBuild
-        if self.tome is None:
-            QMessageBox.information(
-                self, "Importer un tome corrigé",
-                "Ouvre d'abord le tome dans lequel réintégrer les corrections : l'import "
-                "vérifie que le paquet est bien celui de CE tome avant d'écrire quoi que ce "
-                "soit.")
-            return
-        cible = build_dir_de(self.config, "manga", self.tome.projet, self.tome.tome)
+        # ⚠ Deux appelants, deux façons de désigner le tome — lot 41. Le menu « Projet »
+        # n'en donne aucun et vise le tome OUVERT ; la page Œuvres donne celui qui est
+        # sélectionné, sans rien ouvrir. Exiger un tome ouvert dans les deux cas rendait le
+        # geste inatteignable depuis la page qui sert justement à choisir un tome.
+        if not (projet and tome):
+            if self.tome is None:
+                QMessageBox.information(
+                    self, "Importer un tome corrigé",
+                    "Choisis d'abord le tome dans lequel réintégrer les corrections — ouvre-le, "
+                    "ou sélectionne-le dans « Œuvres » et clique « Importer un tome corrigé… ». "
+                    "L'import vérifie que le paquet est bien celui de CE tome avant d'écrire "
+                    "quoi que ce soit.")
+                return
+            projet, tome = self.tome.projet, self.tome.tome
+        cible = build_dir_de(self.config, "manga", projet, tome)
         boite = DialogueImportBuild(cible, parent=self)
         if boite.exec() != boite.DialogCode.Accepted:
             return

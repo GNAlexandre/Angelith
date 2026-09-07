@@ -253,6 +253,24 @@ class PanneauNavigation(QWidget):
         self.choisie.emit(identifiant)
 
     def _sur_pied(self, item) -> None:
+        """Le pied porte DEUX sortes d'entrées, et il n'en servait qu'une.
+
+        ⚠ **Le défaut que ceci corrige** : « Réglages » a une `action` (elle ouvre un
+        dialogue), « Diagnostic » n'en a pas — depuis le lot 36 c'est une PAGE, et
+        `destinations.pages()` le dit explicitement (« le pied sans `action` »). La condition
+        `if destination.action` ne laissait donc passer que la première : cliquer sur
+        Diagnostic dans le pied du pane **ne faisait rien du tout**, en silence.
+
+        Un clic qui ne produit rien passe pour une application cassée — c'est le reproche que
+        `gui/depot.py` fait déjà au lâcher muet, et il vaut ici mot pour mot."""
         destination = dest.par_identifiant(item.data(Qt.UserRole))
-        if destination is not None and destination.action:
+        if destination is None:
+            return
+        if destination.action:
             self.demande_action.emit(destination.action)
+            return
+        # Une entrée de pied SANS action est une destination comme une autre : on navigue, et
+        # on marque la sélection pour que le pane dise où l'on est.
+        self._courante = destination.identifiant
+        self._marquer_active()
+        self.choisie.emit(destination.identifiant)

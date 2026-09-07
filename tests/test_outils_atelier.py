@@ -210,9 +210,7 @@ def test_les_motifs_se_lisent_dans_la_procedure_reelle():
     ⚠ **D'où le `skipif`** : ce test décrit une propriété de la branche de DÉVELOPPEMENT. Le
     fichier est retiré de l'arbre publié — c'est tout l'objet du dispositif —, donc la
     propriété y est fausse par construction, et l'outil le dit lui-même dans son message
-    d'erreur. Sans ce garde, l'arbre publié embarque un test rouge dès le premier clone. Le
-    test voisin, qui vérifie que l'ABSENCE lève bien, garde le fond de l'affaire : il ne
-    dépend d'aucun fichier réel."""
+    d'erreur. Sans ce garde, l'arbre publié embarque un test rouge dès le premier clone."""
     motifs = verifier_arbre.motifs_de_fuite()
     assert len(motifs) >= 5
     assert all(m.strip() == m and m for m in motifs)
