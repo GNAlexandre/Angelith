@@ -8,7 +8,7 @@ pull request will save you time.
 ```bash
 pip install -r requirements.txt
 pip install -r requirements-dev.txt          # pytest + psd-tools + pytest-cov
-python -m pytest -q                          # 5 036 tests (2026-09-06), no LLM call required
+python -m pytest -q                          # 5 038 tests (2026-09-06), no LLM call required
 ```
 
 No test needs a real model: the agents are simulated. If a test needs a network connection or

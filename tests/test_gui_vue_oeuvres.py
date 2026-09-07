@@ -76,8 +76,7 @@ def test_le_filtre_a_faire_couvre_non_traite_et_partiel():
 
 def test_la_recherche_porte_sur_le_titre_et_le_tome():
     info = _info(projet="roman Q", tome="Vol.2")
-    # ⚠ Casse DIFFÉRENTE de celle du titre : c'est cela que ce test vérifie, et non qu'une
-    # sous-chaîne quelconque corresponde.
+    # ⚠ Casse DIFFÉRENTE de celle du titre : c'est cela que ce test vérifie.
     assert oe.retenu(info, "", "", "Roman")
     assert oe.retenu(info, "", "", "VOL.2")
     assert not oe.retenu(info, "", "", "manga A")

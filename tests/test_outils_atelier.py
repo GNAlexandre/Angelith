@@ -205,12 +205,7 @@ def test_un_bloc_de_motifs_supprime_est_une_erreur(tmp_path):
                     reason="la procédure de publication n'est pas dans l'arbre publié")
 def test_les_motifs_se_lisent_dans_la_procedure_reelle():
     """Le bloc vit dans `docs/PUBLICATION-ANGELITH.md` et nulle part ailleurs : le recopier
-    dans un fichier publié publierait les titres avec l'outil.
-
-    ⚠ **D'où le `skipif`** : ce test décrit une propriété de la branche de DÉVELOPPEMENT. Le
-    fichier est retiré de l'arbre publié — c'est tout l'objet du dispositif —, donc la
-    propriété y est fausse par construction. Sans ce garde, l'arbre publié embarque un test
-    rouge dès le premier clone."""
+    dans un fichier publié publierait les titres avec l'outil."""
     motifs = verifier_arbre.motifs_de_fuite()
     assert len(motifs) >= 5
     assert all(m.strip() == m and m for m in motifs)

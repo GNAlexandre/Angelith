@@ -151,9 +151,18 @@ class Encodeur:
             return False
         return True
 
-    def _ouvrir(self):
-        if self._session is not None:
-            return self._session
+    def _exiger_encodeur(self) -> None:
+        """Refuse tout de suite si le poids manque. **Ne charge rien** — un `is_file()`.
+
+        ⚠ **Appelée par `encoder()` AVANT de regarder l'image**, et c'est le correctif du
+        lot 43. `encoder` commençait par `chemin.stat()` sur l'image : avec un encodeur absent
+        ET une image absente, le message parlait de l'image et **jamais du modèle**, alors que
+        le manque du modèle est la cause et le seul remède. Le test qui prétendait garder
+        cette propriété — « l'encodeur absent le dit AVANT de mesurer » — passait pour une
+        raison qui n'avait rien à voir : cf. `tests/test_illustration_juge.py`.
+
+        Elle ne charge délibérément pas la session : la poser dans `encoder()` ferait payer
+        l'ouverture du modèle même sur un succès de cache, que le cache existe pour éviter."""
         if not self.chemin.is_file():
             raise JugeIndisponible(
                 f"encodeur du juge introuvable : {self.chemin}\n"
@@ -161,6 +170,11 @@ class Encodeur:
                 f"Renseigne illustration.identite.encodeur.fichier et dépose le poids "
                 f"(voir illustration_models/README.md) — aucune URL n'est codée en dur ici, "
                 f"la licence des poids se vérifie à la source primaire.")
+
+    def _ouvrir(self):
+        if self._session is not None:
+            return self._session
+        self._exiger_encodeur()
         try:
             import onnxruntime as ort
         except ImportError as err:
@@ -180,6 +194,10 @@ class Encodeur:
         `image` est un chemin **ou des octets PNG**. Les octets servent à juger une image
         AVANT de l'écrire : le plan demande qu'une image trop proche de sa référence soit
         *rejetée*, et ne pas l'écrire est plus net que l'effacer après coup."""
+        # ⚠ **Le modèle d'abord, l'image ensuite** — lot 43. Sans cet ordre, un encodeur
+        # absent se signalait par « image illisible », c'est-à-dire par la mauvaise cause et
+        # le mauvais remède. Le contrôle ne coûte qu'un `is_file()` et ne charge rien.
+        self._exiger_encodeur()
         if isinstance(image, (bytes, bytearray)):
             import hashlib
             cle = ("octets", hashlib.sha256(image).hexdigest(),

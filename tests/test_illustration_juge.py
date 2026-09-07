@@ -13,6 +13,8 @@ fait que le corpus réel impose, et le publier vaut mieux que d'afficher deux co
 recopient.
 """
 import io
+import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -93,10 +95,54 @@ def test_le_cote_est_ramene_a_un_multiple_de_quatorze(tmp_path):
 
 
 def test_l_encodeur_absent_le_dit_avant_de_mesurer(tmp_path):
+    """⚠ **Ce test était vert POUR LA MAUVAISE RAISON, et le lot 43 le corrige.**
+
+    Il cherchait « introuvable ». Or `encoder` commençait par un `stat()` sur l'IMAGE et
+    rendait « image illisible : … ([WinError 2] Le fichier spécifié est introuvable) » : le mot
+    attendu venait du message d'erreur du SYSTÈME, en français, et pas du dépôt. Sur un runner
+    de langue anglaise le même code rend « The system cannot find the file specified » — le
+    test échouait donc en intégration continue et nulle part ailleurs, ce qui l'a rendu
+    invisible jusqu'à la première publication sur un dépôt public.
+
+    Deux leçons, et la seconde compte plus : la propriété annoncée par le nom du test — dire
+    l'absence du modèle AVANT de mesurer — **n'était pas tenue du tout**, et l'accident de
+    langue le cachait. On vérifie donc le texte que le dépôt écrit, jamais celui que le
+    système traduit."""
     encodeur = juge_mod.Encodeur(tmp_path / "absent.onnx")
     assert encodeur.disponible() is False
-    with pytest.raises(juge_mod.JugeIndisponible, match="introuvable"):
+    with pytest.raises(juge_mod.JugeIndisponible, match="encodeur du juge introuvable"):
         encodeur.encoder(tmp_path / "peu importe")
+
+
+def test_le_modele_absent_l_emporte_sur_une_image_pourtant_lisible(tmp_path):
+    """Un encodeur absent se signale lui-même, même quand l'image est parfaitement lisible.
+
+    ⚠ **Ce test ne garde PAS l'ordre**, contrairement à ce qu'on pourrait attendre de son
+    nom — vérifié en retirant le correctif : il reste vert. Avec une image lisible, le
+    `stat()` réussit et l'on atteint `_ouvrir()`, qui rend le bon message dans les deux ordres.
+
+    C'est le test précédent — modèle absent ET image absente — qui garde l'ordre, et lui seul.
+    Celui-ci garde autre chose, qui vaut aussi : l'absence de repli silencieux vers une mesure
+    dégradée quand tout le reste est en place."""
+    image = tmp_path / "vraie.png"
+    Image.new("RGB", (32, 32), "white").save(image)
+    with pytest.raises(juge_mod.JugeIndisponible, match="encodeur du juge introuvable"):
+        juge_mod.Encodeur(tmp_path / "absent.onnx").encoder(image)
+
+
+def test_aucun_test_de_ce_fichier_ne_lit_un_message_du_systeme(tmp_path):
+    """⚠ Le garde-fou de la leçon ci-dessus : un `match=` qui viserait un mot des messages
+    d'erreur de l'OS serait de nouveau vert en français et rouge en anglais. On refuse donc
+    que le fichier attende un mot qui n'apparaît pas dans le code du dépôt."""
+    source = Path(__file__).read_text(encoding="utf-8")
+    racine = Path(__file__).resolve().parent.parent
+    code = (racine / "illustration" / "juge.py").read_text(encoding="utf-8")
+    # ⚠ Restreint aux `pytest.raises`, sinon l'expression ci-dessous se capture elle-même.
+    for attendu in re.findall(r'pytest\.raises\([^)]*match="([^"]+)"', source):
+        premier = attendu.split()[0]
+        assert premier in code, (
+            f"« {attendu} » n'apparaît pas dans illustration/juge.py : ce test attend "
+            f"probablement un message du système, qui change avec la langue de la machine.")
 
 
 # ──────────────────────────  Les trois grandeurs  ──────────────────────────

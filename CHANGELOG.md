@@ -39,6 +39,70 @@ prompt.
 
 ---
 
+## [2.35.2] - 2026-09-07
+
+### CORRECTIF — un test vert parce que Windows parle français
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+
+#### Le défaut, et il est double
+
+`illustration/juge.py:Encodeur.encoder` commençait par un `stat()` sur l'**image**. Avec un
+encodeur absent, le message rendu était donc :
+
+```
+image illisible : …\peu importe ([WinError 2] Le fichier spécifié est introuvable)
+```
+
+— la mauvaise cause et le mauvais remède : ce qui manque est le **modèle**, et c'est lui qu'il
+faut déposer. `_ouvrir()` savait le dire (« encodeur du juge introuvable : … »), mais n'était
+atteint qu'après.
+
+Le test censé garder cette propriété s'appelle
+`test_l_encodeur_absent_le_dit_avant_de_mesurer` et cherchait le mot **« introuvable »**. Il
+passait — mais sur le mot du **message d'erreur de Windows en français**, pas sur celui du
+dépôt. La propriété annoncée par son nom n'était donc **pas tenue du tout**, et l'accident de
+langue le cachait.
+
+Sur un runner de langue anglaise, le même code rend *« The system cannot find the file
+specified »* : le test échouait en intégration continue **et nulle part ailleurs**. Il est
+resté invisible jusqu'à la première publication sur un dépôt public, où la CI a tourné pour de
+bon.
+
+#### Ce qui est corrigé
+
+- le refus du modèle absent devient `_exiger_encodeur()`, appelée par `_ouvrir()` **et** en
+  tête de `encoder()`. Elle ne charge rien — un `is_file()` —, de sorte qu'un succès de cache
+  ne paie pas l'ouverture du modèle ;
+- le test vérifie désormais **le texte que le dépôt écrit**, jamais celui que le système
+  traduit. ⚠ Vérifié en retirant le correctif : il devient rouge ;
+- un **garde-fou de la leçon** : un test refuse qu'un `match=` de ce fichier attende un mot
+  absent de `illustration/juge.py`. Un motif qui viserait de nouveau un message de l'OS serait
+  vert en français et rouge en anglais — exactement le piège qu'on vient de payer.
+
+⚠ **Une affirmation de test a été corrigée en cours de route**, et elle mérite d'être notée :
+le second test ajouté ici prétendait d'abord garder l'ORDRE des deux contrôles. Vérification
+faite en retirant le correctif, il reste vert — avec une image lisible, les deux ordres
+aboutissent au même message. Sa docstring dit maintenant ce qu'il garde réellement. Un test qui
+surpromet est précisément le défaut que ce lot corrige ; le reproduire dans le correctif aurait
+été le comble.
+
+#### Ce que cette séquence dit de la vérification
+
+Cinq combinaisons ont été exécutées avant de trouver — arbre de travail et arbre publié,
+dépendances complètes et dépendances d'intégration, clone en LF, `--cov` — **et toutes étaient
+vertes**. Ce qui manquait n'était reproductible sur aucune d'elles : il fallait une machine
+dont la langue n'est pas le français. Le journal de la CI, lu par le mainteneur, a donné la
+réponse en une ligne.
+
+#### Fichiers
+
+`illustration/juge.py` · `tests/test_illustration_juge.py`.
+
+**Tests** : +2 — 5 036 → **5 038** collectés avec PySide6, 4 593 → **4 595** sans.
+
+---
+
 ## [2.35.1] - 2026-09-07
 
 ### CORRECTIF — la publication a montré ce qu'aucun test local ne pouvait montrer
