@@ -51,9 +51,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -138,7 +138,7 @@ jobs:
           --sortie compte-${{ matrix.os }}.json
 
       - name: Relevé de collecte en artefact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: compte-${{ matrix.os }}
           path: compte-${{ matrix.os }}.json
@@ -171,7 +171,7 @@ jobs:
         # `if: always()` serait un piège ici : sur suite rouge, le rapport est partiel, et le
         # publier ferait afficher à Sonar une couverture calculée sur une exécution incomplète.
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-tests
           path: coverage.xml
@@ -189,11 +189,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: compte-*
           merge-multiple: true
@@ -224,9 +224,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -252,7 +252,7 @@ jobs:
         # 104 Mo. Les mettre en cache évite de retélécharger depuis Hugging Face à chaque
         # push, et évite surtout qu'une indisponibilité amont fasse échouer une PR qui n'y est
         # pour rien. La clé porte le SHA-256 attendu : republier les poids invalide le cache.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: manga_models
           key: detecteur-36c26bdefe15
@@ -326,7 +326,7 @@ jobs:
 
       - name: Téléverser le tableau
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: banc-synthetique
           path: banc-ci.md
@@ -334,7 +334,7 @@ jobs:
           retention-days: 90
 
       - name: Couverture du banc en artefact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-banc
           path: coverage-banc.xml
@@ -370,9 +370,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -453,7 +453,7 @@ jobs:
         run: python tools/notes_de_version.py "$VERSION" --sortie dist/notes.md
 
       - name: Téléverser l'installeur
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: angelith-installeur
           path: |
@@ -477,7 +477,7 @@ jobs:
         # Épinglée au correctif, comme les deux autres actions tierces de ce dépôt : celle-ci
         # reçoit un jeton d'écriture sur le dépôt, et une étiquette flottante changerait ce
         # qu'elle en fait sans qu'un commit l'indique.
-        uses: softprops/action-gh-release@v2.0.8
+        uses: softprops/action-gh-release@v3.0.3
         with:
           files: |
             dist/*.exe
@@ -496,7 +496,7 @@ jobs:
           body_path: dist/notes.md
 
       - name: Téléverser le dossier gelé
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: angelith-gel
           path: dist/Angelith
@@ -505,7 +505,7 @@ jobs:
 
       - name: Relevés des trois tests
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: angelith-verifications
           path: |
@@ -540,7 +540,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Obligatoire. Sans historique complet, Sonar ne peut ni attribuer les lignes à leur
           # auteur ni calculer le « New Code » — c'est-à-dire la seule vue qui serve à décider
@@ -549,12 +549,12 @@ jobs:
 
       # Les deux rapports atterrissent à la RACINE du checkout, parce que
       # `sonar.python.coverage.reportPaths` les y nomme en relatif.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: coverage-tests
           path: .
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: coverage-banc
           path: .
