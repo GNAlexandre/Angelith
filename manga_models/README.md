@@ -82,8 +82,8 @@ Modèle — **`comic-text-detector`** (dmMaze), export ONNX par `mayocream`.
 - Entrée `[1, 3, 1024, 1024]`, trois sorties : `blk` (boîtes de blocs), `seg` (masque de
   texte dense), `det` (cartes de lignes).
 
-**Seule `seg` est utilisée.** Mesuré sur les planches réelles du Vol.2 de *manga A* : page 63,
-la tête `blk` ne propose que 3 boîtes au-dessus de 0,5 — toutes sur du
+**Seule `seg` est utilisée.** Mesuré sur les planches réelles du Vol.2 de *manga A* : page 63, la
+tête `blk` ne propose que 3 boîtes au-dessus de 0,5 — toutes sur du
 petit texte horizontal — alors que la colonne de katakana géants qui barre la planche est
 parfaitement dessinée dans `seg`. Une tête entraînée sur des *blocs de texte* ne reconnaît
 pas un ゴォォォ de 400 px de haut ; un masque par pixel, si. `seg` donne en plus un

@@ -148,7 +148,7 @@ compiler (`docs/mesures/empaquetage-2026-09-06.md` §4).
 $ python tools/geler.py --outils
 ❌ PyInstaller introuvable
    → pip install pyinstaller
-✓ Inno Setup (ISCC) — C:\Users\tourn\AppData\Local\Programs\Inno Setup 6\ISCC.exe
+✓ Inno Setup (ISCC) — C:\Users\<nom>\AppData\Local\Programs\Inno Setup 6\ISCC.exe
 ```
 
 ⚠ **`ci.yml` cherchait Inno Setup uniquement dans `C:\Program Files (x86)\Inno Setup 6\`.** Sur

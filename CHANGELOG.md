@@ -39,6 +39,59 @@ prompt.
 
 ---
 
+## [2.35.4] - 2026-09-07
+
+### CORRECTIF — un nom de compte publié pendant six versions, et le garde-fou ne pouvait pas le voir
+
+> `config.yaml` change de **trois valeurs** — les chemins de police du lettrage manga, qui
+> passent d'absolus à relatifs. Empreinte SHA-256 (fins de ligne LF) `62da35fab412…` →
+> `12c4627e9637…`. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+
+#### Ce qui était publié
+
+```yaml
+font_path: 'C:\Users\<nom>\Yume-Trad\templates\fonts\Wildjess_normal_complet.ttf'
+```
+
+Trois clés portaient un chemin absolu vers le dossier personnel de la machine de
+développement. Le dépôt étant miroité vers un dépôt **public**, le nom de compte de
+l'utilisateur y était publié — depuis la 2.30.0, soit six versions.
+
+⚠ **Le garde-fou de fuite ne pouvait pas le voir** : il ne cherche que des **titres d'œuvres**.
+Un chemin personnel n'en est pas un, et il n'a pas davantage à sortir du dépôt de travail. Le
+bloc de motifs porte désormais aussi le nom de compte, sous ses deux formes — c'est la première
+fois qu'il contient autre chose qu'un titre, et le fichier dit pourquoi.
+
+Une seconde occurrence a été trouvée dans la foulée, dans un compte rendu de mesure qui collait
+la sortie de `tools/geler.py --outils`. Le nom est masqué ; **l'emplacement reste**, parce que
+c'était l'information de la mesure — Inno Setup installé en portée *utilisateur* et non dans
+`Program Files`, ce qui est précisément ce que le lot 38 avait corrigé dans la CI.
+
+#### Ce que le chemin relatif change, et ce qu'il ne change pas
+
+`templates/fonts/…` est résolu depuis le répertoire de lancement, qui est la racine du dépôt
+dans tous les usages documentés — c'est déjà ainsi que `manga/typeset.py` désigne ses polices
+livrées. **Iso** pour qui lance depuis la racine : les trois fichiers se résolvent, vérifié.
+
+Et le mode d'échec, lui, était déjà mauvais avant : pour tout autre utilisateur, le chemin
+absolu ne désignait rien et le lettrage retombait sur la police livrée. `run_manga.py --check`
+le signale — mais après coup.
+
+#### Le job d'analyse statique quitte l'arbre publié
+
+Décision du mainteneur. Il exige un secret que le dépôt public n'a pas, et son étape de scan
+échouait à chaque exécution — peignant en rouge une intégration continue dont les tests passent
+sur les deux plateformes. ⚠ **C'est une divergence permanente entre les deux arbres**, à
+refaire à chaque publication : la procédure reproche déjà cela aux correctifs propres à la
+branche publique, et le noter ici est le minimum.
+
+#### Fichiers
+
+`config.yaml`, `docs/mesures/compilation-licences-2026-09-06.md`,
+`docs/PUBLICATION-ANGELITH.md` (bloc de motifs).
+
+---
+
 ## [2.35.3] - 2026-09-07
 
 ### CORRECTIF — un exemple de test qui n'était absolu que sous Windows

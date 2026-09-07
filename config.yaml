@@ -1697,14 +1697,30 @@ manga:
     # `\` comme une échappe : le `\U` de `\Users` réclame 8 chiffres hexadécimaux et le
     # chargement échoue, tandis que le `\t` de `\tome` passerait en SILENCE en produisant
     # une tabulation, donc un chemin faux.
-    font_path: 'C:\Users\tourn\Yume-Trad\templates\fonts\Wildjess_normal_complet.ttf'
+    #
+    # ⚠ MISE À JOUR 2026-09-07, lot 45 — CHEMIN RELATIF, et ce n'est pas une préférence de
+    # style. Ces trois clés portaient un chemin ABSOLU vers le dossier personnel de la machine
+    # de développement. Deux conséquences, et la seconde ne se voyait pas :
+    #
+    #   · il ne vaut que sur CETTE machine. Pour tout autre utilisateur le fichier est absent,
+    #     et le lettrage retombe sur la police livrée — ce que `manga/doctor.py` signale, mais
+    #     seulement après coup ;
+    #   · le dépôt étant miroité vers un dépôt PUBLIC, le nom de compte de l'utilisateur y
+    #     était publié. Le garde-fou de fuite ne l'a jamais vu : il ne cherche que des titres
+    #     d'œuvres, et un chemin personnel n'en est pas un.
+    #
+    # Le chemin relatif est résolu depuis le répertoire de lancement, qui est la racine du
+    # dépôt dans tous les usages documentés — c'est déjà ainsi que `manga/typeset.py` désigne
+    # ses polices livrées. Iso pour qui lance depuis la racine ; et si la résolution échoue,
+    # `run_manga.py --check` le DIT au lieu de le taire.
+    font_path: 'templates/fonts/Wildjess_normal_complet.ttf'
     # ⚠ CLÉS SANS EFFET. Aucun code ne les lit : `grep -rn font_path_italique manga/` ne rend
     # rien, et l'orchestrateur ne passe que `font_path` au rendu. Le comportement `*…*` →
     # italique qu'elles suggèrent n'existe pas davantage : manga/consignes.py demande au
     # modèle de NE PAS produire d'italique, faute de savoir le lettrer. Conservées pour ne
     # pas casser les configs existantes ; les modifier ne change rien à la sortie.
-    font_path_italique: 'C:\Users\tourn\Yume-Trad\templates\fonts\Wildjess_Italic.TTF'
-    font_path_gras: 'C:\Users\tourn\Yume-Trad\templates\fonts\Wildjess_BoldItalic.TTF'
+    font_path_italique: 'templates/fonts/Wildjess_Italic.TTF'
+    font_path_gras: 'templates/fonts/Wildjess_BoldItalic.TTF'
     taille_min: 11
     taille_max: 60
     # Plancher EMPRUNTABLE, jamais la taille de travail : on n'y descend que lorsque la bulle
