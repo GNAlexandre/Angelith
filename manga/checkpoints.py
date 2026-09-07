@@ -208,7 +208,8 @@ FORMAT_VERSION = 3
 # ## Ce que la mesure dit, et ce qu'elle ne dit pas
 #
 # Sur les **1 513 planches** des dix volumes de `build/`, le maximum est de **17 régions**
-# (manga A Vol.4 p61) et de **9 zones hors bulle** (manga C Family Vol.1 p102). Sur la seule bande
+# (manga A Vol.4 p61) et de **9 zones hors bulle** (manga C Family Vol.1 p102). Sur la seule
+# bande
 # de webtoon du corpus — 1080×10 000 px, soit six planches paginées — le maximum est **16**.
 # Le plafond n'est donc jamais approché, pas même de loin, et l'idée reçue selon laquelle le
 # webtoon le ferait sauter est **fausse** : les plateformes découpent les chapitres en bandes

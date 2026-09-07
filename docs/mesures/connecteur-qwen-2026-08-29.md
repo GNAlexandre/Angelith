@@ -8,7 +8,8 @@ Windows 11, 32 678 Mio de RAM
 nœud `ComfyUI-GGUF` (city96, Apache-2.0), `gguf` 0.19.0
 **Modèle** : `Qwen-Image-2512` GGUF **Q4_1**, encodeur `Qwen2.5-VL-7B` fp8, VAE `qwen_image_vae`,
 LoRA `Qwen-Image-2512-Lightning-4steps` bf16
-**Corpus** : `roman S` Vol.1 — bible visuelle du lot 23, 11 personnages, 16 illustrations sources
+**Corpus** : `roman S` Vol.1 — bible visuelle du lot 23, 11 personnages, 16 illustrations
+sources
 
 ---
 
@@ -255,7 +256,8 @@ un nœud est un objet portant `class_type`, tout le reste est de la prose.
 
 `core/bible.py` accepte une référence existant sous **n'importe quel** tome du projet — la
 bible est **par projet** — et `illustration/requete.py` en avait écrit une seconde qui ne
-cherchait que sous le tome courant. Sur `roman S`, **7 des 10 références vivent dans le Vol.2** et
+cherchait que sous le tome courant. Sur `roman S`, **7 des 10 références vivent dans le Vol.2**
+et
 étaient donc déclarées introuvables, ce qui bloquait la phase image sur un corpus sain.
 
 `core.bible.reference_existe` devient publique et devient **la** règle. Deux règles, c'était

@@ -1444,7 +1444,8 @@ def test_extract_glossary_skips_optimization_on_resumed_chapter(tmp_path, monkey
     # 2e run : reprise → le chapitre 1 est sauté (pas de nouvelle optim pour lui)
     monkeypatch.setattr(orch, "should_stop", lambda bd: False)
     orch.run_extract_glossary("OT", "Vol.1", cfg, reporter=Reporter())
-    # Seuls les chapitres 2 (et éventuellement re-optim finale) tournent : le ch.1 n'est PAS ré-optimisé.
+    # Seuls les chapitres 2 (et éventuellement re-optim finale) tournent : le ch.1 n'est PAS
+    # ré-optimisé.
     # Sur 2 chapitres, on attend donc 1 (ch1, run1) + 1 (ch2, run2) = 2 optim au total, jamais 3.
     assert opt_calls["n"] == 2
 

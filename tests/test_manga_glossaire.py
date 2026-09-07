@@ -401,8 +401,8 @@ def test_en_dry_run_le_glossaire_n_est_pas_reecrit(tmp_path, monkeypatch, modele
     laisserait plus rien à répéter en blanc.
 
     ⚠ Le cas `avec_terminologue` est celui qui compte, et il n'est pas théorique : re-fusionner
-    des notes DÉJÀ en cache change le glossaire **sans un seul appel LLM**. Mesuré sur *manga A*
-    Vol.2 — 150 planches reprises, 0 appel, 23 fusions.
+    des notes DÉJÀ en cache change le glossaire **sans un seul appel LLM**. Mesuré sur
+    *manga A* Vol.2 — 150 planches reprises, 0 appel, 23 fusions.
 
     ⚠ Cette garantie vaut pour `--extract-glossary`, et pour lui seul : le `--dry-run` d'un run
     manga ordinaire écrit l'OCR, les pages, le rapport et le CBZ (cf.

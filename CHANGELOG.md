@@ -39,6 +39,239 @@ prompt.
 
 ---
 
+## [2.36.3] - 2026-09-07
+
+### CORRECTIF — le garde-fou de fuite était aveugle à cinq titres, et personne ne pouvait le voir
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+> **Aucun titre n'a atteint le dépôt public** — vérifié titre par titre sur son arbre.
+
+Le défaut le plus sérieux de la série, et il n'a rien de spectaculaire : **deux listes qui ont
+divergé**.
+
+#### Ce qui s'est passé
+
+L'anonymisation lit la **table de correspondance** ; le contrôle de fuite lit le **bloc de
+motifs**. Deux listes, deux blocs. Le lot 40 avait découvert cinq titres que la liste de motifs
+ne connaissait pas — `manga D`, `roman Q`, `roman S`, `webtoon A` et
+l'abréviation `manga C` — les avait anonymisés à la main, et **ne les avait jamais ajoutés au
+bloc
+de motifs**.
+
+Depuis, le contrôle annonçait « **0 infraction** » sur des arbres où ces titres pouvaient
+rester. Il ne mentait pas : il ne les cherchait pas.
+
+#### Le défaut qu'il a laissé passer
+
+Le nouvel outil bornait ses motifs par `\b`. Or `\b` ne s'active qu'entre un caractère de mot
+et un autre qui n'en est pas — et le **tiret bas en est un**. Un titre suivi de `_Vol.1` n'était
+donc pas remplacé :
+
+```python
+nom = gx.nom_propose("roman Q", "Vol.1")            # remplacé
+assert nom == "roman Q_Vol.1_glossaire.yaml"   # PAS remplacé
+```
+
+Un fichier à moitié anonymisé, un test rendu incohérent — et un contrôle de fuite qui disait
+vert. C'est la **suite de tests de l'arbre publié** qui l'a montré, pas le garde-fou.
+
+⚠ L'ancien script manuel, lui, employait `[ _]` sans borne : il attrapait ce cas. **La
+régression est venue de l'outil**, et l'aveuglement du garde-fou l'a laissée passer.
+
+#### Les trois corrections
+
+1. **les bornes** deviennent `(?<![A-Za-z0-9])` / `(?![A-Za-z0-9])` : un tiret bas n'arrête plus
+   le remplacement. ⚠ Cette forme dépend de l'**ordre** de la table — sans `\b`, un titre court
+   se retrouverait dans un titre long qui le contient — et un test en fait une règle vérifiée ;
+2. **le bloc de motifs est complété** : les cinq titres, plus `roman P`, variante courte qu'un
+   motif plus long ne couvrait pas ;
+3. **l'invariant devient un test** : *tout titre de la table doit contenir au moins un motif*.
+   Un correcteur et un garde-fou qui ne partagent pas leur liste finissent par diverger — celui
+   d'aujourd'hui aurait été trouvé le jour même.
+
+#### Ce que je n'ai pas fait, et pourquoi
+
+Fusionner les deux blocs en un seul serait plus simple. Ils ne disent pourtant pas la même
+chose : la table dit *par quoi remplacer*, les motifs disent *quoi chercher* — et les motifs
+portent aussi le nom de compte, qui n'a pas de désignation neutre. L'invariant testé règle la
+divergence sans confondre les deux rôles.
+
+#### Fichiers
+
+`tools/preparer_publication.py`, `tests/test_outils_publication.py`,
+`docs/PUBLICATION-ANGELITH.md`.
+
+**Tests** : +4 — 5 072 → **5 076** collectés avec PySide6, 4 629 → **4 633** sans.
+
+---
+
+## [2.36.2] - 2026-09-07
+
+### CORRECTIF — le réenroulement coupait des lignes de code
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+
+Troisième défaut de `preparer_publication.py`, trouvé à sa **deuxième utilisation réelle**.
+
+#### Ce qui s'est passé
+
+Le réenroulement coupe les lignes que l'anonymisation a rallongées. Il ne distinguait pas la
+prose du **code** : il a coupé une ligne de `tests/test_orchestrator.py` au milieu d'une chaîne
+littérale, produisant **quinze erreurs de syntaxe**. L'arbre préparé ne compilait plus.
+
+⚠ Ce n'est pas le contrôle de fuite qui l'a vu — il sortait `0 infraction sur 624 fichiers`,
+et il avait raison : l'anonymisation était correcte. C'est `ruff`, lancé après, à la main.
+
+#### Deux gardes, qui ne font pas double emploi
+
+- **`enroulable()` empêche** : dans un fichier Python, seuls les **commentaires** sont
+  enroulables — pas une ligne de code, pas une signature, pas une ligne de docstring. Une
+  docstring trop longue est laide ; une chaîne coupée en deux ne compile pas. Ailleurs, on
+  épargne ce qui a une structure de colonne : une ligne de tableau Markdown coupée cesse d'être
+  un tableau, et un bloc indenté est du code affiché ;
+- **le contrôle syntaxique prouve** : chaque fichier Python produit doit encore s'analyser
+  (`ast.parse`) avant que quoi que ce soit ne soit écrit. Le premier est une heuristique sur la
+  forme des lignes, le second une vérification sur ce qui sortirait.
+
+Comme les autres refus de cet outil : **rien n'est écrit**, l'arbre reste intact.
+
+#### Le motif, pour la quatrième fois en deux jours
+
+Le mécanisme de release, les tests dépendants de la plateforme, l'écriture au fil de l'eau, et
+maintenant le réenroulement. À chaque fois : du code écrit, couvert de tests, livré — et
+défaillant à sa première exécution réelle. Les tests de cet outil ne pouvaient pas voir
+celui-ci : ils vérifiaient que le réenroulement **enroule**, pas qu'il **s'abstient**.
+
+⚠ Un défaut de robustesse corrigé dans la foulée : `preparer()` lisait le fichier de workflow
+sans vérifier qu'il existe. Il est désormais tolérant à son absence, comme `retirer_job` l'est
+à celle du job — la préparation doit pouvoir tourner sur un arbre réduit, ce que font ses tests.
+
+#### Fichiers
+
+`tools/preparer_publication.py`, `tests/test_outils_publication.py`.
+
+**Tests** : +12 — 5 060 → **5 072** collectés avec PySide6, 4 617 → **4 629** sans.
+
+---
+
+## [2.36.1] - 2026-09-07
+
+### CORRECTIF — un refus de publier laissait l'arbre à moitié anonymisé
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+
+Trouvé en se servant de l'outil livré une heure plus tôt, sur une vraie publication.
+
+#### 1. Le refus écrivait quand même
+
+`preparer_publication.py` écrivait chaque fichier **au fil de l'eau** et ne levait qu'à la fin.
+Un refus laissait donc l'arbre **à moitié anonymisé** — l'état le plus difficile à reprendre,
+et le contraire de ce que « il refuse de publier » laisse entendre.
+
+Il calcule désormais tout, **juge l'ensemble, puis écrit**. Le message le dit : *« rien n'a été
+écrit : l'arbre est intact »*. Un test le vérifie en fabriquant une cascade et en relisant les
+octets des deux fichiers.
+
+#### 2. Le contrôle se signalait lui-même
+
+Le contrôle de vraisemblance cherche un libellé répété deux fois de suite. Or **les fichiers
+qui parlent du contrôle en portent l'exemple** — une docstring, une donnée de test. La
+préparation refusait donc de publier à cause de sa propre documentation.
+
+`EPARGNE_DOUBLONS` nomme les deux fichiers concernés, exactement comme
+`tools/verifier_arbre.py` exclut le fichier qui porte ses motifs : *se signaler soi-même
+n'apprend rien*. ⚠ La liste est **courte et doit le rester** — chaque nom qu'on y ajoute est un
+endroit où une vraie cascade passerait —, et un test l'exige, y compris que le CHANGELOG
+**décrive** l'exemple sans l'écrire.
+
+#### Ce que cet enchaînement dit
+
+L'outil du lot 46 a été écrit, testé par vingt tests, puis livré. Ses deux défauts sont apparus
+à sa **première utilisation réelle**. C'est la troisième fois en deux jours que ce motif se
+répète — le mécanisme de release, les tests dépendants de la plateforme, et maintenant l'outil
+de publication : *ce qui manquait n'était pas un test, c'était d'exécuter la chose pour de
+vrai*.
+
+#### Fichiers
+
+`tools/preparer_publication.py`, `tests/test_outils_publication.py`.
+
+**Tests** : +2 — 5 058 → **5 060** collectés avec PySide6, 4 615 → **4 617** sans.
+
+---
+
+## [2.36.0] - 2026-09-07
+
+### MINEUR — préparer une publication devient une commande, et elle refuse de publier du charabia
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+> Rien ne change pour qui utilise l'application : ce lot outille la **publication**.
+
+#### Le défaut, chiffré
+
+La publication vers le dépôt public transpose l'arbre par `git read-tree --reset -u main`, ce
+qui **écrase tout ce qui était propre à la branche publique** : l'anonymisation des titres
+d'œuvres, et trois correctifs sans lesquels l'arbre publié embarque des tests rouges.
+
+Entre le 2026-09-06 et le 2026-09-07, la séquence a été rejouée **cinq fois à la main**. La
+procédure nommait déjà le risque — « une purge à refaire est une purge qu'on peut rater » —
+et elle avait raison : **deux artefacts de purge antérieurs traînaient dans l'arbre**,
+« *manga A Zero manga A* » et « *manga A <reste du titre>* », restes de remplacements en
+cascade que personne n'avait vus.
+
+#### `tools/preparer_publication.py`
+
+Une commande, qui applique dans l'ordre :
+
+1. **l'anonymisation**, tolérante aux titres **coupés par un retour à la ligne** — la prose de
+   ce dépôt est enroulée à 98 colonnes et vit largement dans des commentaires, si bien qu'une
+   coupure tombe au milieu d'un titre une fois sur trois. Le passage manuel, ligne à ligne, les
+   laissait toutes ;
+2. **l'élision** — un titre commençant par une voyelle donnait « de manga A », qui n'est pas du
+   français, et aucun relecteur ne repasse derrière un outil ;
+3. **le réenroulement** des seules lignes que le remplacement a rallongées. Pas les autres : le
+   dépôt porte des lignes longues légitimes, et les enrouler toutes rendrait le diff de
+   publication illisible ;
+4. **les correctifs de publication**, déclaratifs, chacun échouant si son ancre a disparu ;
+5. **le retrait du job d'analyse statique**, avec son bloc de commentaires — celui qui précède
+   un job lui appartient, et le laisser ferait flotter une explication au-dessus du job suivant.
+
+> ⚠ **Un contrôle de vraisemblance refuse de continuer** si un libellé se retrouve doublé
+> (le même libellé deux fois de suite). Publier du charabia est pire que publier un titre :
+> le second se voit.
+> **Il a servi à son premier essai** — c'est lui qui a trouvé les deux artefacts ci-dessus.
+
+#### ⚠ L'outil est PUBLIÉ, donc il ne peut pas connaître les titres
+
+La correspondance vit dans le fichier de procédure, **retiré de l'arbre publié**. Y recopier la
+table publierait les titres avec l'outil qui sert à les retirer. Sur la branche publique il est
+donc **inerte, et il le dit** — un garde-fou qui ne sait pas ce qu'il cherche doit se taire
+bruyamment, jamais rendre un vert silencieux. Même dispositif que `tools/verifier_arbre.py`.
+
+Un test le vérifie, et il a attrapé **trois fuites dans mon propre travail** pendant l'écriture
+de ce lot : un titre cité en exemple dans la docstring de l'outil, puis trois dans celles de
+ses tests.
+
+⚠ **Il CORRIGE, il ne juge pas.** `tools/verifier_arbre.py --suivi` reste l'étape suivante.
+Deux outils, deux rôles — celui qui corrige n'est jamais celui qui dit que c'est bon.
+
+#### Un défaut de lecture corrigé dans la procédure
+
+`verifier_arbre.py --index` ne juge que le **delta** depuis le dernier commit de la branche. Sur
+une publication incrémentale il annonce « 0 infraction sur 89 fichiers » là où l'arbre en compte
+plus de six cents — ce qui **se lit comme un contrôle complet et n'en est pas un**. La
+procédure demande désormais `--suivi`.
+
+#### Fichiers
+
+`tools/preparer_publication.py`, `tests/test_outils_publication.py` (neufs) ·
+`docs/PUBLICATION-ANGELITH.md` (table de correspondance, étape 3 bis) ·
+`tests/test_manga_glossaire.py`, `manga_models/README.md` (les deux artefacts).
+
+**Tests** : +20 — 5 038 → **5 058** collectés avec PySide6, 4 595 → **4 615** sans.
+
+---
+
 ## [2.35.4] - 2026-09-07
 
 ### CORRECTIF — un nom de compte publié pendant six versions, et le garde-fou ne pouvait pas le voir

@@ -525,7 +525,8 @@ jobs:
             demarrage-gel.json
           if-no-files-found: warn
 
-  # ⚠ **LE JOB `sonar` EST RETIRÉ DE L'ARBRE PUBLIÉ**, sur décision du mainteneur.
+  # ⚠ **LE JOB `sonar` EST RETIRÉ DE L'ARBRE PUBLIÉ**, sur décision du mainteneur
+  # (2026-09-07).
   #
   # Il exige un secret `SONAR_TOKEN` que ce dépôt n'a pas, et son étape de scan échouait
   # donc à chaque exécution — peignant en rouge une intégration continue dont les tests,

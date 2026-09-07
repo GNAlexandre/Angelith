@@ -152,6 +152,10 @@ chiffre, avec sa date.
 > | après le lot 41 | **5 034** | **4 591** | **443** |
 > | après le lot 42 | **5 036** | **4 593** | **443** |
 > | après le lot 43 | **5 038** | **4 595** | **443** |
+> | après le lot 46 | **5 058** | **4 615** | **443** |
+> | après le lot 47 | **5 060** | **4 617** | **443** |
+> | après le lot 48 | **5 072** | **4 629** | **443** |
+> | après le lot 49 | **5 076** | **4 633** | **443** |
 >
 > ⚠ Le lot 28 (2026-09-02) ajoute **61 tests**, tous hors marqueur. La colonne « sans PySide6 »
 > n'a pas été remesurée ce jour-là : aucun des 61 ne touche à l'interface, donc l'écart de 219
