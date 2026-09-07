@@ -20,6 +20,7 @@ import pytest
 import yaml
 from PIL import Image, ImageDraw
 
+from core.reporter import Reporter
 from manga import checkpoints
 from manga.detection import BubbleRegion
 
@@ -67,6 +68,10 @@ def _config(tmp_path: Path, modeles=None) -> dict:
     config["chemins"]["sources"] = str(tmp_path / "sources")
     config["chemins"]["build"] = str(tmp_path / "build")
     config["chemins"]["prompts"] = str(ROOT / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    config.setdefault("langues", {})["packs"] = str(ROOT / "langues")
     config["manga"]["detection"]["model_path"] = str(tmp_path / "absent.onnx")
     # ⚠ Neutraliser le détecteur de BULLES ne suffisait pas : la passe `sfx` est
     # délibérément hors du graphe d'invalidation, donc elle tournait même sur un tome dont
@@ -200,7 +205,7 @@ def test_le_rapport_somme_les_clients_de_tous_les_agents(tmp_path, faux_llm):
     l'agent tourne pour de vrai et le test n'a plus rien à injecter à la main."""
     from core.reporter import Reporter
 
-    build_dir = _semer(tmp_path)
+    _semer(tmp_path)
     config = _config(tmp_path, modeles={
         "manga_traducteur": {"model": "m", "endpoint": "reflexion"},
         "terminologue": {"model": "m"}})
@@ -241,3 +246,74 @@ def test_un_run_sans_aucun_appel_le_dit_au_lieu_dannoncer_zero(tmp_path, faux_ll
     rapport = (build_dir / "RAPPORT.md").read_text(encoding="utf-8")
     assert "aucun appel" in rapport
     assert "Appels LLM : 0" not in rapport
+
+
+# --------------------------------------------------------------------------- #
+#  Lot 32 — la sortie console ne bouge pas d'un octet
+# --------------------------------------------------------------------------- #
+
+class _ReporterDAvantLeLot(Reporter):
+    """Un `Reporter` qui **ignore** les deux canaux du lot 32.
+
+    C'est l'état d'avant, reproduit : avant le lot, `Reporter` n'avait pas de `phase` et son
+    `progres` ne prenait pas d'objet. Si la sortie console d'un run est identique avec ce
+    reporter-là et avec le reporter courant, alors l'extension du protocole est **iso pour la
+    console** — c'est le critère 4 du `PLAN-32`, et c'est aussi ce qui la garde iso : le jour
+    où quelqu'un glisse un `print()` dans `phase`, les deux sorties divergent et ce test
+    tombe."""
+
+    def phase(self, identifiant: str, libelle: str = "") -> None:
+        return None
+
+    def progres(self, courant: int, total: int, objet: str = "") -> None:
+        return None
+
+
+def _sortie_dun_dry_run(racine: Path, reporter) -> str:
+    """Lance un run `--dry-run` complet sous `racine` et rend ce qui est allé sur stdout."""
+    import contextlib
+    import io
+
+    racine.mkdir(parents=True, exist_ok=True)
+    _semer(racine)
+    config = _config(racine)
+    config["options"]["dry_run"] = True
+    config["options"]["verbose"] = False       # les lignes de perf portent des durées
+    tampon = io.StringIO()
+    with contextlib.redirect_stdout(tampon):
+        _run(racine, config, reporter)
+    # Le seul élément variable est le chemin du tome : deux runs vivent dans deux dossiers.
+    return tampon.getvalue().replace(str(racine), "<racine>")
+
+
+def test_la_sortie_console_dun_dry_run_est_identique_octet_pour_octet(tmp_path):
+    """Critère 4 — `progres(…, objet=…)` et `phase(…)` n'écrivent rien au terminal."""
+    avant = _sortie_dun_dry_run(tmp_path / "avant", _ReporterDAvantLeLot())
+    apres = _sortie_dun_dry_run(tmp_path / "apres", Reporter())
+    assert apres, "le run n'a rien imprimé : le test ne compare rien"
+    assert apres == avant
+
+
+def test_le_run_annonce_ses_phases_dans_l_ordre(tmp_path):
+    """Le canal neuf existe VRAIMENT, et il est monotone dans l'ordre déclaré."""
+    from core import progression as prg
+
+    class _Espion(Reporter):
+        def __init__(self):
+            self.phases = []
+
+        def phase(self, identifiant, libelle=""):
+            self.phases.append(identifiant)
+
+    espion = _Espion()
+    _semer(tmp_path)
+    config = _config(tmp_path)
+    config["options"]["dry_run"] = True
+    _run(tmp_path, config, espion)
+
+    ordre = [p.identifiant for p in prg.PHASES_MANGA]
+    vues = [p for p in espion.phases if p in ordre]
+    assert vues, "aucune phase annoncée"
+    rangs = [ordre.index(p) for p in vues]
+    assert rangs == sorted(rangs), f"les phases reculent : {vues}"
+    assert "finalisation" in vues

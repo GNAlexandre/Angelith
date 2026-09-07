@@ -1,0 +1,129 @@
+{
+  "_commentaire": [
+    "Workflow ComfyUI au FORMAT API pour Qwen-Image-Edit-2511 (transformeur GGUF Q4_1).",
+    "C'est le graphe de la VOIE A du PLAN-25 : conditionner l'identite du personnage par des",
+    "images de reference. Il porte donc %reference_1%, %reference_2% et %reference_3% —",
+    "trois, parce que TextEncodeQwenImageEditPlus n'expose que image1, image2 et image3.",
+    "Les noeuds LoadImage dont le marqueur n'est pas substitue sont ELAGUES par le client :",
+    "c'est ce qui permet de balayer 1, 2 ou 3 references avec un seul fichier.",
+    "LoRA Qwen-Image-Edit-2511-Lightning 4 steps (lightx2v, Apache-2.0), donc guidage 1.0 :",
+    "elle est distillee sans guidage libre de classifieur.",
+    "⚠ device DEFAUT (GPU) sur le CLIPLoader, et c'est l'INVERSE du workflow texte-vers-image",
+    "du lot 24. Ce n'est pas une incoherence : c'est une premisse heritee que la mesure a",
+    "renversee. En texte-vers-image, l'encodeur ne fait que du texte, et le mettre sur CPU",
+    "rend la carte entiere au transformeur (facteur 9,6 sur le pas de debruitage, lot 24).",
+    "En EDITION, le meme encodeur fait tourner la TOUR DE VISION de Qwen2.5-VL sur chaque",
+    "image de reference — en fp8, emule sur CPU. Mesure du 2026-08-29, meme image, meme",
+    "graine, reference 1024 : sur GPU 233,7 s ; sur CPU, le noeud TextEncodeQwenImageEditPlus",
+    "tournait encore apres 307 s et n'a jamais ete vu terminer.",
+    "Le latent part d'EmptySD3LatentImage et non d'un VAEEncode de la reference : a denoise",
+    "1.0 le contenu initial ne compte pas, seule sa FORME compte, et on veut choisir la",
+    "dimension de sortie plutot que de la subir de la page source.",
+    "Ce graphe ne porte NI %masque_1% NI %image_controle% : les canaux entites et",
+    "image_controle sont donc refuses avec leur motif, et le refus arrive avant la premiere",
+    "seconde de GPU."
+  ],
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "_meta": { "title": "Transformeur Qwen-Image-Edit-2511 Q4_1 (GGUF)" },
+    "inputs": { "unet_name": "qwen-image-edit-2511-Q4_1.gguf" }
+  },
+  "2": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "LoRA Edit Lightning 4 pas" },
+    "inputs": {
+      "model": ["1", 0],
+      "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "3": {
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": { "title": "Décalage de bruit — 3.1, valeur du template officiel" },
+    "inputs": { "model": ["2", 0], "shift": 3.1 }
+  },
+  "4": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "Encodeur de texte Qwen2.5-VL-7B — sur GPU (cf. commentaire)" },
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "5": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "VAE" },
+    "inputs": { "vae_name": "qwen_image_vae.safetensors" }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Référence 1 (téléversée par Angelith)" },
+    "inputs": { "image": "%reference_1%" }
+  },
+  "11": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Référence 2 — élaguée si la requête n'en porte qu'une" },
+    "inputs": { "image": "%reference_2%" }
+  },
+  "12": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Référence 3 — élaguée si la requête n'en porte pas trois" },
+    "inputs": { "image": "%reference_3%" }
+  },
+  "20": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": { "title": "Prompt + références" },
+    "inputs": {
+      "clip": ["4", 0],
+      "vae": ["5", 0],
+      "prompt": "%prompt%",
+      "image1": ["10", 0],
+      "image2": ["11", 0],
+      "image3": ["12", 0]
+    }
+  },
+  "21": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": { "title": "Prompt négatif + références" },
+    "inputs": {
+      "clip": ["4", 0],
+      "vae": ["5", 0],
+      "prompt": "%prompt_negatif%",
+      "image1": ["10", 0],
+      "image2": ["11", 0],
+      "image3": ["12", 0]
+    }
+  },
+  "30": {
+    "class_type": "EmptySD3LatentImage",
+    "_meta": { "title": "Toile — la dimension est choisie, pas héritée de la référence" },
+    "inputs": { "width": "%largeur%", "height": "%hauteur%", "batch_size": 1 }
+  },
+  "31": {
+    "class_type": "KSampler",
+    "_meta": { "title": "Échantillonnage" },
+    "inputs": {
+      "model": ["3", 0],
+      "positive": ["20", 0],
+      "negative": ["21", 0],
+      "latent_image": ["30", 0],
+      "seed": "%graine%",
+      "steps": "%pas%",
+      "cfg": "%guidage%",
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "40": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "Décodage" },
+    "inputs": { "samples": ["31", 0], "vae": ["5", 0] }
+  },
+  "41": {
+    "class_type": "SaveImage",
+    "_meta": { "title": "Sortie (récupérée puis MARQUÉE par Angelith)" },
+    "inputs": { "images": ["40", 0], "filename_prefix": "angelith-edit" }
+  }
+}

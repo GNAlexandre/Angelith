@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from PIL import Image
 
+from ._config import fusion
 from .detection import BubbleRegion
 from .geometry import adaptive_radius, dilate, safe_erode
 
@@ -86,13 +87,27 @@ class BubbleStyle:
     center_x: int
     ok: bool = True
     text_mask: np.ndarray | None = field(default=None, repr=False)
+    #: Masque de DÉCOUPE, dissocié de la zone d'habillage (lot 22, L22.3 capacité 1).
+    #:
+    #: `None` — le cas de TOUTES les bulles — signifie « découper à `interior` », c'est-à-dire
+    #: exactement le comportement d'avant le lot 22, au bit près. Le champ n'existe que pour le
+    #: texte HORS bulle, où les deux masques ne peuvent pas coïncider : `interior` y borne
+    #: l'habillage (où le texte se replie), `decoupe` où il a le droit d'apparaître. Une
+    #: onomatopée française n'a ni la forme ni l'emprise du `ゴォォォ` qu'elle traduit ; les
+    #: confondre, comme `style_impose` doit le faire pour un rectangle déplacé, ferait
+    #: disparaître tout ce qui sort du masque source — « écrit hors du calque, donc simplement
+    #: perdu ».
+    #:
+    #: ⚠ Il ne relâche PAS l'invariant de `clean.py`, il le déplace explicitement : `calque_fit`
+    #: multiplie toujours l'alpha par un masque, et ce masque est toujours celui que
+    #: l'appelant a nommé. Ce qui est interdit reste interdit — écrire sans masque.
+    decoupe: np.ndarray | None = field(default=None, repr=False)
 
 
 def _cfg(cfg: dict | None) -> dict:
-    out = dict(_DEFAUTS)
-    if cfg:
-        out.update({k: v for k, v in cfg.items() if v is not None})
-    return out
+    """Gardait `None` mais pas la clé inconnue — c'est la version la plus faible des deux
+    motifs corrects que la brique portait. `fusion` généralise la plus stricte."""
+    return fusion(_DEFAUTS, cfg)
 
 
 def _luma(px: np.ndarray) -> np.ndarray:
@@ -200,6 +215,242 @@ def _centre_x(interior: np.ndarray, bbox: tuple[int, int, int, int]) -> int:
     if total == 0:
         return (bbox[0] + bbox[2]) // 2
     return int(round(float(par_colonne @ np.arange(interior.shape[1]) / total)))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mesurer une zone HORS BULLE (lot 21, L21.2)
+#
+# `analyze_regions` rend délibérément un style VIDE pour `kind != "bulle"` — `interior`
+# nul, `background` blanc, `inverted` faux, `uniformity` nulle, `ok` faux — afin que la
+# liste reste **alignée par position** avec `regions`, `ocr.json` et `traduction.json`.
+# C'est la bonne raison de ne pas y toucher, et ce bloc ne la touche pas : il ajoute une
+# fonction SÉPARÉE, qui rend un objet distinct.
+#
+# ⚠ Ce que le style vide coûtait, dit franchement : `inverted=False` y est **codé en dur**.
+# Un `ゴォォォ` est typiquement blanc à contour noir sur un dessin sombre, ou l'inverse ;
+# une polarité constante est donc fausse une fois sur deux — et `BubbleStyle` prévient déjà
+# que « ces informations ne peuvent pas être redécouvertes après le nettoyage ».
+#
+# ## Ce qui est mesuré, et pourquoi chaque mesure
+#
+# · **polarité réelle** — ce que `inverted=False` codait en dur ;
+# · **couleur de l'encre** — pour qu'un contour de glose ne soit pas blanc par accident ;
+# · **couleur dominante du fond AUTOUR** — le seul indice de ce qu'un effacement devrait
+#   reconstruire (`PLAN-22`), et il disparaît dès qu'on a peint ;
+# · **uniformité du fond local** — la mesure qui décide de `PLAN-22` (cf. ci-dessous) ;
+# · **étendue, remplissage, orientation** — le garde-fou de forme de L21.1.
+#
+# ## Pourquoi l'uniformité du fond LOCAL, et pas celle de l'intérieur
+#
+# `clean_bubbles` gouverne son échelle à trois modes par l'uniformité de l'INTÉRIEUR d'une
+# bulle : ≥ 0,60 → remplir tout l'intérieur ; ≥ 0,35 → remplir le masque de texte dilaté ;
+# < 0,35 → **ne rien peindre**. Ce dernier seuil vient d'un contrôle visuel et non d'un
+# plan : sur la page 44, un gratte-ciel aux fenêtres sombres avait été pris pour une bulle
+# (uniformité 0,131) et le mode « texte » repeignait toute la structure claire du bâtiment
+# en noir — le dessin est détruit.
+#
+# Une onomatopée n'a **pas d'intérieur** : elle est un trait posé SUR le dessin. La question
+# transposée n'est donc pas « son intérieur est-il uni ? » mais « le dessin AUTOUR est-il
+# assez uni pour qu'un remplissage de couleur suffise, sans aucun modèle ? ». C'est
+# exactement ce que `PLAN-22` doit trancher, et c'est cela qui se mesure ici. Le pourtour
+# est donc échantillonné **hors de la boîte**, jamais dedans : à l'intérieur, l'encre de
+# l'onomatopée elle-même ferait chuter l'uniformité de toute zone, y compris celles posées
+# sur un aplat de ciel.
+#
+# ## La méthode de couleur n'est pas réinventée
+#
+# `_couleur_de_fond` — histogramme de luminance Rec. 601 à 32 classes, classe modale,
+# affinage à ±16, médiane RGB — est déjà calibrée, et son choix est documenté par une
+# mesure : sur une bulle inversée, un p90 rend « la couleur du TEXTE ». Elle est réutilisée
+# telle quelle, sur deux nuages de pixels différents (le pourtour, puis l'encre).
+
+_DEFAUTS_HORS_BULLE = {
+    # Épaisseur du pourtour échantillonné, en fraction du PLUS PETIT côté de la boîte.
+    # Relative, comme `adaptive_radius` et `GROUPEMENT_FRAC` : un pourtour de 12 px fixes est
+    # un anneau généreux autour d'un petit bruitage et un liseré autour d'une colonne de
+    # katakana de 1 470 px.
+    "pourtour_frac": 0.25,
+    # Bornes en pixels du pourtour. Le plancher évite qu'une zone minuscule n'échantillonne
+    # que son propre anti-crénelage ; le plafond évite qu'une zone pleine page n'échantillonne
+    # la moitié de la planche — ce ne serait plus « le fond local ».
+    "pourtour_min": 6,
+    "pourtour_max": 64,
+    # Nombre de pixels de pourtour en dessous duquel la mesure n'est pas conduite. Une zone
+    # collée aux quatre bords d'une planche n'a pas de fond local, et le dire vaut mieux que
+    # rendre une couleur tirée de douze pixels.
+    "pourtour_pixels_min": 64,
+    # Écart de luminance au fond au-delà duquel un pixel de la boîte est compté comme encre.
+    # Repris de `seuil_texte` de `analyze_bubble`, et pour la même raison : c'est le même
+    # contraste, mesuré contre un fond au lieu d'un intérieur.
+    "seuil_texte": 45,
+    # Rapport des côtés à partir duquel une boîte est dite orientée. Une colonne de katakana
+    # est un objet vertical ; une ligne de narration, un objet horizontal.
+    "orientation_ratio": 1.4,
+}
+
+
+@dataclass
+class StyleHorsBulle:
+    """Ce qu'une zone hors bulle porte, mesuré sur l'image d'ORIGINE.
+
+    ⚠ Distinct de `BubbleStyle`, et volontairement : `analyze_regions` doit continuer de
+    rendre un style vide pour ces zones, sans quoi l'alignement par position avec `ocr.json`
+    et `traduction.json` — sur lequel tout le cache repose — changerait de sens. Deux objets,
+    deux listes, aucun contrat déplacé."""
+
+    bbox: tuple[int, int, int, int]
+    fond: tuple[int, int, int]           # couleur dominante du pourtour
+    fond_luma: float
+    uniformite_fond: float               # part du pourtour dans la tolérance — cf. PLAN-22
+    encre: tuple[int, int, int]          # couleur dominante des pixels d'encre
+    encre_luma: float
+    inverted: bool                       # l'encre est-elle PLUS CLAIRE que le fond ?
+    part_encre: float                    # part de la boîte occupée par l'encre
+    remplissage: float                   # part de la boîte occupée par le masque
+    aire: int                            # aire du masque (ou de la boîte, à défaut)
+    aire_frac: float                     # aire rapportée à celle de la planche
+    orientation: str                     # "verticale" | "horizontale" | "carree"
+    pourtour_pixels: int
+    ok: bool = True
+
+
+def _pourtour(forme: tuple[int, int], bbox: tuple[int, int, int, int],
+              epaisseur: int) -> np.ndarray:
+    """Masque de l'anneau de `epaisseur` pixels AUTOUR de `bbox`, découpé à la planche.
+
+    Un anneau, et non un rectangle plein : la boîte elle-même en est retirée, parce que
+    l'encre de l'onomatopée y est et qu'elle ferait chuter l'uniformité de toute zone, y
+    compris celles posées sur un aplat parfaitement uni."""
+    h, w = forme
+    x0, y0, x1, y1 = bbox
+    ex0, ey0 = max(0, x0 - epaisseur), max(0, y0 - epaisseur)
+    ex1, ey1 = min(w, x1 + epaisseur), min(h, y1 + epaisseur)
+    anneau = np.zeros((h, w), dtype=bool)
+    if ex1 <= ex0 or ey1 <= ey0:
+        return anneau
+    anneau[ey0:ey1, ex0:ex1] = True
+    anneau[max(0, y0):min(h, y1), max(0, x0):min(w, x1)] = False
+    return anneau
+
+
+def _orientation(largeur: int, hauteur: int, ratio: float) -> str:
+    """Orientation dominante d'une boîte. Une colonne de katakana est verticale, une ligne de
+    narration horizontale, et un gros blob de dessin n'est ni l'un ni l'autre."""
+    if largeur <= 0 or hauteur <= 0:
+        return "carree"
+    if hauteur >= ratio * largeur:
+        return "verticale"
+    if largeur >= ratio * hauteur:
+        return "horizontale"
+    return "carree"
+
+
+def analyser_zone_hors_bulle(image: Image.Image, region: BubbleRegion,
+                             cfg: dict | None = None) -> StyleHorsBulle:
+    """Mesure une zone hors bulle sur l'image d'ORIGINE, sans rien écrire.
+
+    Quatre étapes, dans cet ordre parce que chacune dépend de la précédente :
+
+    1. **Pourtour** — l'anneau autour de la boîte, d'épaisseur relative à sa taille.
+    2. **Fond** — couleur dominante et uniformité de cet anneau (`_couleur_de_fond`).
+    3. **Encre** — les pixels de la boîte qui s'écartent du fond de plus de `seuil_texte`,
+       intersectés au masque quand il en existe un. Leur couleur dominante, puis la
+       **polarité réelle** : l'encre est-elle plus claire que le fond ?
+    4. **Forme** — remplissage et orientation, pour le garde-fou de L21.1.
+
+    ⚠ `ok=False` quand le pourtour est trop maigre pour dire quoi que ce soit (zone collée
+    aux bords) ou quand la boîte ne porte aucun contraste. Ne jamais deviner : c'est la règle
+    de `analyze_bubble`, qui rend un style non-ok plutôt que de supposer du blanc."""
+    c = fusion(_DEFAUTS_HORS_BULLE, cfg)
+    arr = np.asarray(image.convert("RGB"))
+    h, w = arr.shape[:2]
+    x0, y0, x1, y1 = (int(v) for v in region.bbox)
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(w, x1), min(h, y1)
+    aire_boite = max(0, x1 - x0) * max(0, y1 - y0)
+    aire_page = max(1, w * h)
+    if aire_boite <= 0:
+        return StyleHorsBulle(
+            bbox=region.bbox, fond=(255, 255, 255), fond_luma=255.0, uniformite_fond=0.0,
+            encre=(0, 0, 0), encre_luma=0.0, inverted=False, part_encre=0.0,
+            remplissage=0.0, aire=0, aire_frac=0.0, orientation="carree",
+            pourtour_pixels=0, ok=False)
+
+    cote = min(x1 - x0, y1 - y0)
+    epaisseur = int(min(int(c["pourtour_max"]),
+                        max(int(c["pourtour_min"]),
+                            round(cote * float(c["pourtour_frac"])))))
+    anneau = _pourtour((h, w), (x0, y0, x1, y1), epaisseur)
+    n_anneau = int(anneau.sum())
+    orientation = _orientation(x1 - x0, y1 - y0, float(c["orientation_ratio"]))
+    if n_anneau < int(c["pourtour_pixels_min"]):
+        return StyleHorsBulle(
+            bbox=region.bbox, fond=(255, 255, 255), fond_luma=255.0, uniformite_fond=0.0,
+            encre=(0, 0, 0), encre_luma=0.0, inverted=False, part_encre=0.0,
+            remplissage=0.0, aire=0, aire_frac=0.0, orientation=orientation,
+            pourtour_pixels=n_anneau, ok=False)
+
+    fond, fond_luma = _couleur_de_fond(arr[anneau])
+    lum_anneau = _luma(arr[anneau].astype(np.float64))
+    uniformite = float((np.abs(lum_anneau - fond_luma) <= _TOL_UNIFORMITE).mean())
+
+    # Encre : ce qui, DANS la boîte, s'écarte du fond local. Le masque du détecteur de texte
+    # la borne quand il existe — c'est une carte de probabilité de texte, pas un tracé
+    # d'encre, et le contraste au fond reste le juge.
+    boite = arr[y0:y1, x0:x1]
+    ecart = np.abs(_luma(boite.astype(np.float64)) - fond_luma)
+    encre_mask = ecart > float(c["seuil_texte"])
+    masque = getattr(region, "mask", None)
+    remplissage = 0.0
+    aire = aire_boite
+    if masque is not None and getattr(masque, "shape", None) == (h, w):
+        sous = masque[y0:y1, x0:x1]
+        if sous.any():
+            encre_mask = encre_mask & sous
+            aire = int(masque.sum())
+            remplissage = float(sous.sum()) / aire_boite
+
+    n_encre = int(encre_mask.sum())
+    if n_encre == 0:
+        # Aucun contraste : la zone est un aplat. On rend le fond mesuré, une polarité neutre
+        # et `ok=False` — il n'y a là ni lettrage à poser ni encre à effacer.
+        return StyleHorsBulle(
+            bbox=region.bbox, fond=fond, fond_luma=fond_luma,
+            uniformite_fond=uniformite, encre=fond, encre_luma=fond_luma, inverted=False,
+            part_encre=0.0, remplissage=remplissage, aire=aire,
+            aire_frac=aire / aire_page, orientation=orientation,
+            pourtour_pixels=n_anneau, ok=False)
+
+    encre, encre_luma = _couleur_de_fond(boite[encre_mask])
+    if not remplissage:
+        remplissage = n_encre / aire_boite
+
+    return StyleHorsBulle(
+        bbox=region.bbox, fond=fond, fond_luma=fond_luma, uniformite_fond=uniformite,
+        encre=encre, encre_luma=encre_luma, inverted=bool(encre_luma > fond_luma),
+        part_encre=n_encre / aire_boite, remplissage=remplissage, aire=aire,
+        aire_frac=aire / aire_page, orientation=orientation,
+        pourtour_pixels=n_anneau, ok=True)
+
+
+def analyser_zones_hors_bulle(image: Image.Image, regions: list[BubbleRegion],
+                              cfg: dict | None = None) -> list[StyleHorsBulle]:
+    """Styles hors bulle de toutes les régions, **alignés par position** sur `regions`.
+
+    Les régions de genre « bulle » y reçoivent un objet non-ok : la liste garde le même
+    alignement que `analyze_regions`, et un appelant qui zippe les deux ne se décale
+    jamais."""
+    out: list[StyleHorsBulle] = []
+    for r in regions:
+        if r.kind == "bulle":
+            out.append(StyleHorsBulle(
+                bbox=r.bbox, fond=(255, 255, 255), fond_luma=255.0, uniformite_fond=0.0,
+                encre=(0, 0, 0), encre_luma=0.0, inverted=False, part_encre=0.0,
+                remplissage=0.0, aire=0, aire_frac=0.0, orientation="carree",
+                pourtour_pixels=0, ok=False))
+        else:
+            out.append(analyser_zone_hors_bulle(image, r, cfg))
+    return out
 
 
 def analyze_regions(image: Image.Image, regions: list[BubbleRegion],

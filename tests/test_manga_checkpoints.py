@@ -4,6 +4,8 @@
 """Points de reprise par étage : sauvegarde/rechargement fidèle des régions
 (bbox+masque), de l'OCR et de la traduction ; calcul du point de reprise. Aucune
 dépendance aux modèles CV/OCR (numpy + PIL uniquement)."""
+import json
+
 import numpy as np
 
 from manga import bubbles_split, checkpoints
@@ -465,6 +467,50 @@ def test_load_sfx_absent_vaut_none(tmp_path):
     assert checkpoints.load_sfx(tmp_path) is None
 
 
+# --- Lot 21, L21.2 : le STYLE mesuré des zones hors bulle -------------------------------
+#
+# ⚠ Clé OPTIONNELLE, et `FORMAT_VERSION` n'est PAS incrémentée. Elle encode le contrat de
+# *nombre et d'ordre* auquel `ocr.json` et `traduction.json` s'alignent, qu'un champ de
+# provenance ne touche pas ; l'incrémenter déclencherait `downstream("detection")` sur tous
+# les projets — des heures de GPU pour un champ que personne n'attend encore.
+
+def test_les_styles_hors_bulle_font_l_aller_retour(tmp_path):
+    zones = [_region((10, 10, 40, 40), kind="onomatopee")]
+    styles = [{"fond": [255, 255, 255], "uniformite_fond": 0.87, "inverted": True,
+               "orientation": "verticale", "ok": True}]
+    checkpoints.save_sfx(tmp_path, zones, ["ゴォォォ"], (100, 100), styles=styles)
+    charge = checkpoints.load_sfx_complet(tmp_path)
+    assert charge["styles"] == styles
+
+
+def test_un_cache_ECRIT_AVANT_le_lot_21_rend_une_liste_vide(tmp_path):
+    """Le seul comportement qui compte pour la compatibilité : aucun cache n'est invalidé,
+    rien ne se relance, et l'appelant reçoit `[]` au lieu d'une `KeyError`."""
+    checkpoints.save_sfx(tmp_path, [_region((10, 10, 40, 40), kind="onomatopee")],
+                         ["ゴォォォ"], (100, 100))
+    brut = json.loads((tmp_path / checkpoints.SFX_FILENAME).read_text(encoding="utf-8"))
+    del brut["styles"]
+    (tmp_path / checkpoints.SFX_FILENAME).write_text(
+        json.dumps(brut, ensure_ascii=False), encoding="utf-8")
+    charge = checkpoints.load_sfx_complet(tmp_path)
+    assert charge is not None
+    assert charge["styles"] == []
+    assert charge["textes"] == ["ゴォォォ"]
+
+
+def test_une_page_sans_zone_porte_aussi_la_cle_styles(tmp_path):
+    checkpoints.save_sfx(tmp_path, [], [], (100, 100))
+    assert checkpoints.load_sfx_complet(tmp_path)["styles"] == []
+
+
+def test_le_format_du_cache_sfx_n_a_pas_bouge(tmp_path):
+    """Un lot qui incrémente `FORMAT_VERSION` sans le vouloir invalide tous les caches du
+    corpus. Ce test est le filet, et il est volontairement littéral."""
+    checkpoints.save_sfx(tmp_path, [], [], (100, 100), styles=[])
+    brut = json.loads((tmp_path / checkpoints.SFX_FILENAME).read_text(encoding="utf-8"))
+    assert brut["format"] == checkpoints.FORMAT_VERSION == 3
+
+
 def test_sfx_traduction_roundtrip(tmp_path):
     checkpoints.save_sfx_traduction(tmp_path, ["VROOOM", "BADABOUM"])
     assert checkpoints.load_sfx_traduction(tmp_path) == ["VROOOM", "BADABOUM"]
@@ -571,3 +617,109 @@ def test_une_correction_manuelle_peut_VIDER_une_bulle(tmp_path):
                                                                     encoding="utf-8")
     manuelles = checkpoints.load_traduction_manuelle(tmp_path)
     assert checkpoints.appliquer_manuelles(["Bavard"], manuelles) == ([""], [0])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CACHE ABÎMÉ
+#
+# Un JSON tronqué — Ctrl+C, coupure, collision de synchro OneDrive en plein écrit — doit se
+# lire comme un cache ABSENT, jamais lever. La raison est dans `stage_cache_present` : il
+# interroge les LECTEURS, si bien qu'un `None` replanifie l'étage et le recalcul réécrit le
+# fichier fautif. Une exception, elle, condamnait la planche à vie, et remontait hors du
+# filet par planche depuis `_passe_terminologie` / `_passe_contexte`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_ocr_tronque_se_lit_comme_absent(tmp_path):
+    checkpoints.save_ocr(tmp_path, ["こんにちは", "さようなら"])
+    (tmp_path / checkpoints.OCR_FILENAME).write_text('[ "こんに', encoding="utf-8")
+
+    assert checkpoints.load_ocr(tmp_path) is None
+
+
+def test_traduction_tronquee_se_lit_comme_absente(tmp_path):
+    checkpoints.save_traduction(tmp_path, ["Bonjour", "Au revoir"])
+    (tmp_path / checkpoints.TRADUCTION_FILENAME).write_text("{ pas du json", encoding="utf-8")
+
+    assert checkpoints.load_traduction(tmp_path) is None
+
+
+def test_regions_tronquees_se_lisent_comme_absentes(tmp_path):
+    checkpoints.save_regions(tmp_path, [_region((10, 10, 40, 40))], (100, 100))
+    (tmp_path / "regions.json").write_text('{"format": 3, "regi', encoding="utf-8")
+
+    assert checkpoints.load_regions(tmp_path) is None
+
+
+def test_masque_abime_se_lit_comme_absent(tmp_path):
+    """Le PNG compte autant que le JSON : `_lire_regions_brut` exige les DEUX."""
+    checkpoints.save_regions(tmp_path, [_region((10, 10, 40, 40))], (100, 100))
+    (tmp_path / "masks.png").write_bytes(b"\x89PNG\r\n\x1a\n tronqu\xc3\xa9")
+
+    assert checkpoints.load_regions(tmp_path) is None
+
+
+def test_sfx_tronque_se_lit_comme_absent(tmp_path):
+    checkpoints.save_sfx(tmp_path, [_region((5, 5, 20, 20), kind="onomatopee")],
+                         ["ドン"], (100, 100))
+    (tmp_path / checkpoints.SFX_FILENAME).write_text('{"format": 3, "reg', encoding="utf-8")
+
+    assert checkpoints.load_sfx(tmp_path) is None
+    assert checkpoints.load_sfx_complet(tmp_path) is None
+
+
+def test_cache_abime_replanifie_l_etage(tmp_path):
+    """Le point qui fait tout tenir : un `ocr.json` illisible doit remettre `ocr` dans les
+    étapes à refaire. Sans cela, rendre `None` remplacerait une exception bruyante par une
+    perte de texte SILENCIEUSE — strictement pire."""
+    clean = tmp_path / "page_0001.png"
+    checkpoints.save_regions(tmp_path, [_region((10, 10, 40, 40))], (100, 100))
+    clean.write_bytes(b"")
+    checkpoints.save_ocr(tmp_path, ["こんにちは"])
+    assert "ocr" not in checkpoints.stages_to_redo(tmp_path, clean)
+
+    (tmp_path / checkpoints.OCR_FILENAME).write_text('[ "こん', encoding="utf-8")
+    assert "ocr" in checkpoints.stages_to_redo(tmp_path, clean)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ÉCRITURE ATOMIQUE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_ecriture_ne_laisse_aucun_temporaire(tmp_path):
+    """Un `.tmp` oublié dans `.checkpoints/` finirait par être pris pour un cache."""
+    checkpoints.save_regions(tmp_path, [_region((10, 10, 40, 40))], (100, 100))
+    checkpoints.save_ocr(tmp_path, ["こんにちは"])
+    checkpoints.save_traduction(tmp_path, ["Bonjour"])
+    checkpoints.save_terminologie(tmp_path, "Mikage — nom propre")
+    checkpoints.save_origines(tmp_path, {0: "manuelle"})
+    checkpoints.save_mise_en_page(tmp_path, {0: {"corps": 14}})
+    checkpoints.save_traduction_manuelle(tmp_path, {0: "Bonjour !"})
+    checkpoints.save_sfx(tmp_path, [_region((5, 5, 20, 20), kind="onomatopee")],
+                         ["ドン"], (100, 100))
+
+    assert [p.name for p in tmp_path.iterdir() if ".tmp" in p.name] == []
+
+
+def test_ecriture_interrompue_preserve_l_ancien(tmp_path):
+    """La garantie même de `os.replace` : la cible est soit l'ancien intact, soit le nouveau
+    complet — jamais un entre-deux. On simule la mort du processus en faisant échouer
+    l'écriture du temporaire."""
+    checkpoints.save_ocr(tmp_path, ["こんにちは", "さようなら"])
+
+    original = checkpoints._ecrire_atomique
+
+    def _mourir(chemin, contenu):
+        if chemin.name == checkpoints.OCR_FILENAME:
+            raise OSError("disque plein")
+        return original(chemin, contenu)
+
+    checkpoints._ecrire_atomique = _mourir
+    try:
+        try:
+            checkpoints.save_ocr(tmp_path, ["autre chose"])
+        except OSError:
+            pass
+    finally:
+        checkpoints._ecrire_atomique = original
+
+    assert checkpoints.load_ocr(tmp_path) == ["こんにちは", "さようなら"]

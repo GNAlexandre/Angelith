@@ -12,7 +12,6 @@ rattrapage l'emprunte réellement, au lieu d'avoir gardé sa propre version.
 """
 from __future__ import annotations
 
-import pytest
 
 from manga import quality_manga, traduction_unitaire
 
@@ -124,15 +123,25 @@ def test_le_rattrapage_emprunte_bien_la_fonction_partagee(monkeypatch):
 
     vus: list[str] = []
 
-    def _faux(agent, source, *, gloss_text="", bbox=None):
+    langues: list[str] = []
+    packs: list[object] = []
+
+    def _faux(agent, source, *, gloss_text="", bbox=None, langue="jp", pack=None):
         vus.append(source)
+        langues.append(langue)
+        packs.append(pack)
         return "Rattrapée", None
 
+    sentinelle = object()
     monkeypatch.setattr(orch.traduction_unitaire, "traduire_bulle", _faux)
     textes, rattrapees, refus = orch._rattraper_bulles(
-        _Agent(), ["アアア", "イイイ"], ["Un", ""], page=1)
+        _Agent(), ["アアア", "イイイ"], ["Un", ""], page=1, langue="en", pack=sentinelle)
 
     assert vus == ["イイイ"], "seule la bulle vide est reprise"
+    assert langues == ["en"], "la langue source suit jusqu'au prompt unitaire"
+    # Le PACK de la langue cible suit lui aussi : sans lui, `prompt_bulle` retombe sur
+    # `CONSIGNE`, qui réclame du français — au beau milieu d'un run anglais.
+    assert packs == [sentinelle], "le pack de langue cible suit jusqu'au prompt unitaire"
     assert textes == ["Un", "Rattrapée"]
     assert rattrapees == [1] and refus == []
 

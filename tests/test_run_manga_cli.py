@@ -30,6 +30,7 @@ def _config(tmp_path, dry_run=True):
         "chemins": {"sources": str(tmp_path / "sources"), "build": str(tmp_path / "build")},
         "options": {"dry_run": dry_run},
         "llm": {"base_url": "http://localhost:11434/v1"},
+        "langues": {"dossiers": {"ENG": "en", "JAP": "jp", "FR": "fr"}},
         "manga": {"modeles": {"manga_traducteur": {"model": "qwen3.6:27b"}},
                   "llm": {}, "chemins": {}, "lot": {}, "rendu": {}},
     }
@@ -39,7 +40,7 @@ def _args(**over):
     base = dict(projet="Oeuvre", tome=None, verbose=False, dry_run=True,
                 keep_awake=False, shutdown=False, shutdown_delay=120,
                 force=False, from_stage=None, page=None, conf=None, iou=None,
-                lot=None, think=None, all=True)
+                lot=None, think=None, all=True, langue=None, format_planche=None)
     base.update(over)
     return SimpleNamespace(**base)
 

@@ -24,34 +24,32 @@ rien, et se lance donc pendant qu'un run tourne.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 import numpy as np
-import yaml
-from PIL import Image
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 
-from core import config as core_config                     # noqa: E402
 from core.cli import charger_config, configurer_stdout     # noqa: E402
 from manga import bubbles_split, checkpoints               # noqa: E402
 from manga.detection import BubbleRegion                   # noqa: E402
 from manga.geometry import remplissage                     # noqa: E402
+from tools import _banc_commun                             # noqa: E402
 
 
 def _build_dir(config: dict, projet: str, tome: str) -> Path:
-    chemins = core_config.section(config, "manga", "chemins")
-    return Path(chemins["build"]) / projet / tome / "manga"
+    return _banc_commun.build_dir_de(_banc_commun.racine_build(config), projet, tome)
 
 
 def _regions_de(ckpt_dir: Path) -> list[BubbleRegion]:
     """Régions d'une planche, **quel que soit le format** du cache : on veut pouvoir mesurer un
-    tome AVANT sa migration aussi bien qu'après."""
-    lu = checkpoints._lire_regions_brut(ckpt_dir)
-    return [] if lu is None else lu[0]
+    tome AVANT sa migration aussi bien qu'après.
+
+    Déléguée à `_banc_commun.charger_regions` depuis le lot 10 : `tools/banc.py` posait la
+    même question, et deux lectures de cache divergent toujours."""
+    return _banc_commun.charger_regions(ckpt_dir)
 
 
 def _percentiles(valeurs: list[float]) -> str:
@@ -91,23 +89,17 @@ def main() -> int:
     suspectes: list[tuple] = []
     scindables: list[tuple] = []
 
-    dossiers = sorted((build_dir / ".checkpoints").glob("page_*"))
-    for d in dossiers:
-        page = int(d.name.split("_")[1])
+    for page in _banc_commun.numeros_de_planches(build_dir):
         if args.page is not None and page != args.page:
             continue
+        d = checkpoints.page_checkpoint_dir(build_dir, page)
         regions = _regions_de(d)
         if not regions:
             continue
         n_pages += 1
-        qa = checkpoints.QA_FILENAME
-        taille = {}
-        if (d / qa).exists():
-            try:
-                donnees = json.loads((d / qa).read_text(encoding="utf-8"))
-                taille = {b["index"]: b.get("taille_police") for b in donnees.get("bulles", [])}
-            except (json.JSONDecodeError, KeyError):
-                taille = {}
+        donnees = _banc_commun.charger_json(d / checkpoints.QA_FILENAME) or {}
+        taille = {b["index"]: b.get("taille_police")
+                  for b in (donnees.get("bulles") or []) if "index" in b}
 
         for i, r in enumerate(regions):
             if r.mask is None or int(r.mask.sum()) < args.aire_min:

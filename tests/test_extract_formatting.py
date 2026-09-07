@@ -6,6 +6,7 @@ du filigrane/pied de page dans l'extraction PDF et DOCX (`pipeline/extract.py`).
 Fixtures construites directement avec `fitz`/`python-docx` (déjà des dépendances) —
 pas besoin de fichiers de production réels pour ces tests unitaires."""
 import re
+from pathlib import Path
 
 import docx
 import fitz
@@ -32,7 +33,7 @@ def _add_page(doc, lines):
     return page
 
 
-def _make_pdf(pages: list[list[tuple]], tmp_path) -> "Path":
+def _make_pdf(pages: list[list[tuple]], tmp_path) -> Path:
     doc = fitz.open()
     for lines in pages:
         _add_page(doc, lines)
@@ -144,7 +145,7 @@ def _bold_paragraph(doc, text, pt):
     return p
 
 
-def _make_docx(tmp_path, builder) -> "Path":
+def _make_docx(tmp_path, builder) -> Path:
     d = docx.Document()
     builder(d)
     path = tmp_path / "fixture.docx"

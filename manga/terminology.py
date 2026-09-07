@@ -52,9 +52,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from core import glossary, glossary_build
+from core import glossary, glossary_build, glossary_lang
 from core.glossary import ENTITY_CATS
 from core.glossary_force import enforce_force
+
+from ._config import fusion
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Détection de DÉRIVE : les formes que le glossaire n'a pas encore bannies
@@ -244,6 +246,28 @@ def _eligible(nom: str, candidat: str, connues: set[str]) -> bool:
     return 0 < distance_edition(nom, candidat, budget) <= budget
 
 
+def _derives_de_bulle(glo: dict, connues: set, fr: str, jp: str,
+                      *, page: int, bulle: int) -> list[Derive]:
+    """Les dérives ancrées d'UNE bulle.
+
+    L'ancre est la graphie source relevée dans l'OCR de CETTE bulle : sans elle, il n'y a
+    pas de preuve, seulement une ressemblance orthographique — c'est ce qui sépare T1 des
+    dérives de volume."""
+    mots = candidats(fr)
+    if not mots:
+        return []
+    out: list[Derive] = []
+    for cat, e, nom in _entrees(glo):
+        ancre = next((s for s in (e.get("termes_source") or []) if s and s in jp), "")
+        if not ancre:
+            continue
+        out.extend(Derive(nom=nom, candidat=candidat, categorie=cat, niveau="T1",
+                          page=page, bulle=bulle, source=ancre,
+                          forcee=bool(e.get("force")))
+                   for candidat in sorted(mots) if _eligible(nom, candidat, connues))
+    return out
+
+
 def derives_ancrees(glo: dict, texts_jp: list[str], textes_fr: list[str],
                     *, page: int = 0) -> list[Derive]:
     """**T1** — dérives prouvées par le japonais de la bulle elle-même.
@@ -258,18 +282,7 @@ def derives_ancrees(glo: dict, texts_jp: list[str], textes_fr: list[str],
         jp = texts_jp[i] if texts_jp and i < len(texts_jp) else ""
         if not (fr or "").strip() or not (jp or "").strip():
             continue
-        mots = candidats(fr)
-        if not mots:
-            continue
-        for cat, e, nom in _entrees(glo):
-            ancre = next((s for s in (e.get("termes_source") or []) if s and s in jp), "")
-            if not ancre:
-                continue
-            for candidat in sorted(mots):
-                if _eligible(nom, candidat, connues):
-                    out.append(Derive(nom=nom, candidat=candidat, categorie=cat, niveau="T1",
-                                      page=page, bulle=i + 1, source=ancre,
-                                      forcee=bool(e.get("force"))))
+        out.extend(_derives_de_bulle(glo, connues, fr, jp, page=page, bulle=i + 1))
     return out
 
 
@@ -282,7 +295,7 @@ def derives_de_volume(glo: dict, textes: list[str], *, deja: set[str] | None = N
     c'est un choix de traduction — et l'écraser serait pire que de la laisser.
 
     T3 n'écrit rien : c'est une piste pour le rapport, pas une décision."""
-    c = {**_DEFAUTS_DERIVE, **(cfg or {})}
+    c = fusion(_DEFAUTS_DERIVE, cfg)
     connues = formes_connues(glo)
     deja = {d.lower() for d in (deja or set())}
     tous = candidats("\n".join(t for t in textes if t))
@@ -349,14 +362,18 @@ def proposer_pluriels(glo: dict, textes: list[str]) -> list[tuple[str, str, int]
     return out
 
 
-def forcer_bulles(textes: list[str], glo: dict) -> tuple[list[str], int, list[str]]:
+def forcer_bulles(textes: list[str], glo: dict,
+                  accord=None) -> tuple[list[str], int, list[str]]:
     """Applique les entrées `force: true` du glossaire à chaque bulle.
 
     Renvoie `(textes, n_remplacements, refus)`. Bulle par bulle et non sur la page
     concaténée : `enforce_force` lit une fenêtre de contexte arrière pour décider de l'accord
     et de l'élision, et la fin d'une bulle n'est pas le contexte grammatical du début de la
     suivante — concaténer ferait lire « … arrive. » comme déterminant du premier mot d'après.
-    """
+
+    `accord` porte les règles grammaticales de la LANGUE CIBLE (cf. `Pack.accorder`) : le
+    français accorde le déterminant, l'anglais n'a rien à accorder. `None` = français, le
+    comportement d'avant les packs."""
     if not glo or not textes:
         return textes, 0, []
     sortie: list[str] = []
@@ -366,7 +383,7 @@ def forcer_bulles(textes: list[str], glo: dict) -> tuple[list[str], int, list[st
         if not texte or not texte.strip():
             sortie.append(texte)
             continue
-        forced, n = enforce_force(texte, glo, refus)
+        forced, n = enforce_force(texte, glo, refus, accord=accord)
         sortie.append(forced)
         total += n
     return sortie, total, refus
@@ -382,19 +399,26 @@ def compter_forcees(glo: dict) -> int:
 
 
 def contexte_terminologue(glo_txt: str, page: int, total: int,
-                          texts_jp: list[str], deja_fr: list[str] | None = None) -> str:
+                          texts_jp: list[str], deja_fr: list[str] | None = None,
+                          langue: str = "jp") -> str:
     """Message utilisateur du terminologue pour une planche.
 
-    Le japonais OCR est donné comme SOURCE (champ `termes_source` du glossaire) : c'est lui
-    qui permet au relevé d'ancrer « リベルティナ → Libertina » plutôt que de constater une
+    Le texte OCR est donné comme SOURCE (champ `termes_source` du glossaire) : c'est lui qui
+    permet au relevé d'ancrer « リベルティナ → Libertina » plutôt que de constater une
     orthographe française au hasard. Le français déjà traduit est joint quand il existe — sur
     un tome déjà traduit, il donne au terminologue les variantes réellement produites, donc de
-    quoi les lister en `interdits`."""
+    quoi les lister en `interdits`.
+
+    ⚠ `langue` est nommée EN CLAIR dans l'en-tête, et ce n'est pas cosmétique : `prompts/
+    terminologue.md` est partagé avec le light novel, donc la langue ne peut pas y être
+    écrite. Annoncer « bulles en JAPONAIS » sur un chapitre anglais faisait chercher au modèle
+    des graphies qui n'existent pas. Même précédent que
+    `core.glossary_lang.consigne_pivot_cjk()` : la langue va dans le MESSAGE."""
     bulles = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts_jp) if (t or "").strip())
     parts = [p for p in (glo_txt,) if p]
     parts.append(
-        "# PLANCHE {}/{} — bulles en JAPONAIS (source, ordre de lecture)\n{}".format(
-            page, total, bulles or "(aucun texte)"))
+        "# PLANCHE {}/{} — bulles en {} (source, ordre de lecture)\n{}".format(
+            page, total, glossary_lang.nom_langue(langue).upper(), bulles or "(aucun texte)"))
     if deja_fr and any((t or "").strip() for t in deja_fr):
         parts.append("# TRADUCTION FRANÇAISE DÉJÀ PRODUITE POUR CES MÊMES BULLES\n"
                      "# (relève les variantes d'orthographe d'un même nom : elles vont en "
@@ -406,6 +430,7 @@ def contexte_terminologue(glo_txt: str, page: int, total: int,
 
 def relever_page(agent, glo: dict, index: dict, *, page: int, total: int,
                  texts_jp: list[str], deja_fr: list[str] | None = None,
+                 langue: str = "jp",
                  glo_budget: int = 1500, max_tokens: int = 1024) -> tuple[str, dict]:
     """Un appel de terminologue sur une planche, fusionné aussitôt dans `glo`.
 
@@ -418,7 +443,7 @@ def relever_page(agent, glo: dict, index: dict, *, page: int, total: int,
     if not any((t or "").strip() for t in texts_jp):
         return "", {"ajouts": 0, "fusions": 0, "conflits": 0}
     user = contexte_terminologue(glossary.to_text(glo, max_tokens=glo_budget),
-                                 page, total, texts_jp, deja_fr)
+                                 page, total, texts_jp, deja_fr, langue=langue)
     notes = agent.run(user, dry_payload="- (rien à signaler)", max_tokens=max_tokens)
     return notes, fusionner(notes, glo, index)
 

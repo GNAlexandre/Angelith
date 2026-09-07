@@ -1,3 +1,17 @@
+# ⚠ ENVELOPPE depuis le lot 37 (2.31.0, 2026-09-06). Les dépendances sont déclarées une seule
+# fois, dans `pyproject.toml` ; ce fichier les appelle par leur EXTRA. Motif : le `.spec` de
+# PyInstaller, la CI et cinq fichiers ne peuvent pas être trois sources de vérité — le jour où
+# deux divergent, le gel manque un module et le symptôme est un `ImportError` chez
+# l'utilisateur, pas chez toi.
+#
+# ⚠ **Ce fichier ne disparaît pas**, et sa prose non plus : la CI, les procédures et le README
+# le citent nommément, et les mesures écrites plus bas ne sont écrites nulle part ailleurs.
+#
+# ⚠ **Ce qui change pour toi**, et le CHANGELOG le dit : `-e .` installe aussi `angelith`
+# lui-même, en mode éditable. Conséquence pratique : lance la commande **depuis la racine du
+# dépôt**, parce qu'un `-e .` d'un fichier de requirements se résout contre le RÉPERTOIRE
+# COURANT, pas contre le fichier.
+
 # Dépendances de DÉVELOPPEMENT et de TEST uniquement.
 # Rien ici n'est nécessaire pour traduire un tome :
 #   pip install -r requirements-dev.txt
@@ -6,7 +20,7 @@
 # engagement de légèreté (pas d'OpenCV pour trois morphologies, pas de bibliothèque PSD pour
 # écrire du binaire documenté).
 
-pytest>=8.0
+-e .[dev]
 
 # Lecteur PSD indépendant, utilisé par tests/test_manga_psd_relecture.py pour relire ce que
 # manga/psd.py écrit. C'est la seule façon de valider un écrivain de format binaire : l'analyseur
@@ -14,4 +28,21 @@ pytest>=8.0
 # fidèlement un descripteur mal formé au lieu de le signaler — Photoshop, lui, refusait les
 # calques de texte et retombait sur leurs pixels.
 # `psd-tools` est orienté LECTURE (son écriture est marginale), ce qui est exactement l'usage ici.
-psd-tools>=1.9
+
+# Mesure de COUVERTURE, et une seule raison de l'ajouter : produire le `coverage.xml` que
+# SonarQube Cloud lit. Sans rapport, Sonar tourne en *Automatic Analysis*, un mode qui ne
+# CALCULE jamais la couverture Python — il affichait donc `0 %` sur un dépôt à 2 007 tests
+# collectés en CI. Le chiffre n'était pas faux par excès de sévérité, il n'était pas mesuré.
+#
+# Elle ne remonte pas dans `requirements.txt` ni `requirements-manga.txt`, comme tout ce
+# fichier : personne n'a besoin de mesurer une couverture pour traduire un tome. La
+# configuration vit dans `.coveragerc` — pas de `pyproject.toml` ici, et `pytest.ini` ne sait
+# pas lire de section coverage.
+
+# Linter. La configuration vit dans `ruff.toml`. ⚠ Le motif écrit ici — « pas de
+# `pyproject.toml` : le projet n'est pas empaqueté » — est LEVÉ depuis le lot 37 (2026-09-06) :
+# `pyproject.toml` existe. La configuration du linter, elle, reste dans `ruff.toml`, et
+# l'en-tête de ce fichier dit pourquoi. Elle vise les DÉFAUTS — code mort, import fantôme, `raise`
+# qui perd sa cause — et non la mise en forme : le dépôt a déjà son style, et 6 667 E501 de
+# rattrapage n'apprendraient rien à personne. Le détail des familles écartées, avec leurs
+# comptes mesurés, est dans `ruff.toml`.

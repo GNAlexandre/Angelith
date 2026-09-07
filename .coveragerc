@@ -1,0 +1,82 @@
+# Couverture de test — configuration de `coverage.py`, lue par `pytest-cov`.
+#
+# ⚠ **Pas dans `pyproject.toml`.** Le projet n'est pas empaqueté et ne veut pas l'être
+# (cf. `core/version.py` et l'en-tête de `ruff.toml`), et `pytest.ini` ne sait pas lire de
+# section coverage. Ce fichier-ci est donc le seul emplacement possible.#
+# ⚠ MISE À JOUR 2.31.0 (2026-09-06), lot 37 : **la phrase ci-dessus est LEVÉE pour moitié.**
+# `pyproject.toml` EXISTE depuis ce lot — le projet est empaqueté (gel un-dossier, installeur).
+# Ce qui TIENT est la conclusion : cette configuration-ci ne déménage pas. Les deux outils
+# lisent leur fichier dédié en priorité, un lot d'empaquetage n'a pas à changer ce que le
+# linter accepte ni ce que la couverture mesure, et un déménagement gratuit se paierait en
+# diff illisible sur un fichier que la CI exécute à chaque push.
+#
+# ## Pourquoi ce fichier existe
+#
+# SonarQube Cloud affichait `Coverage: 0 %` sur un dépôt qui collecte 2 007 tests en CI.
+# Ce n'était pas une erreur de Sonar : aucun rapport n'était produit, et l'analyse tournait en
+# *Automatic Analysis* — un mode qui ne CALCULE jamais la couverture Python, il ne sait que
+# lire un rapport qu'on lui fournit. Un zéro qui ressemble à un vrai zéro est précisément le
+# genre de signal que ce dépôt refuse ailleurs.
+
+[run]
+# ⚠ Chemins RELATIFS, et ce n'est pas cosmétique : les rapports sont produits sur des runners
+# Windows et lus par un scanner qui travaille sur un checkout Linux. Un chemin absolu
+# `D:\a\Yume-Trad\...` n'est résolu par aucun des deux, et Sonar range alors la couverture
+# sous « 0 fichier apparié » sans lever d'erreur — c'est-à-dire un faux zéro, indistinguable
+# d'un vrai.
+relative_files = True
+
+# ⚠ **UNE seule racine, la racine du dépôt**, et pas la liste des six paquets. C'est le
+# contrôle n° 1 du brief qui l'a imposé, et le défaut qu'il évite est du même genre que le
+# faux zéro ci-dessus.
+#
+# Écrit `source = core, pipeline, manga, …`, `coverage.py` traite chaque paquet comme une
+# racine et écrit des `filename` **sans préfixe** : `orchestrator.py`, `checkpoints.py`,
+# `agents.py`. Or le dépôt porte **12 collisions de basename** entre ces paquets —
+# `core/agents.py` et `pipeline/agents.py`, `manga/checkpoints.py` et `scan/checkpoints.py`,
+# et `__init__.py` six fois. Mesuré : le rapport tombait à **99 entrées** pour 111 fichiers,
+# les collisions s'étant écrasées l'une sur l'autre, et Sonar n'avait aucun moyen de trancher
+# entre six racines candidates. Un appariement PARTIEL est pire qu'un zéro : il a l'air
+# plausible.
+#
+# Depuis la racine, chaque `filename` porte son paquet (`manga/planche.py`) et l'ambiguïté
+# disparaît. Le périmètre est alors dessiné par `omit`, ci-dessous.
+source =
+    .
+
+omit =
+    tests/*
+    build/*
+    sources/*
+    manga_models/*
+    # Les cinq scripts racine, volontairement dehors : ce sont des points d'entrée minces —
+    # analyse d'arguments, appel de l'orchestrateur — et les compter ferait bouger le
+    # pourcentage sans rien dire du code qui décide. ⚠ Ils étaient déjà hors périmètre avant
+    # que la racine devienne la source ; c'est `source =` qui les excluait alors, et il faut
+    # donc les nommer maintenant pour que le chiffre reste comparable.
+    app.py
+    gui.py
+    run.py
+    run_manga.py
+    run_ocr.py
+    # `.venv`, `.sonarlint`, `.vscode` : des dossiers d'outillage qu'un `source = .` balaie
+    # sinon, et qui feraient entrer du code tiers dans le pourcentage.
+    .*/*
+    # ⚠ Les modules que PySide6 INJECTE dans l'interpréteur, sous des noms qui ressemblent à
+    # des chemins relatifs (`shibokensupport/signature/loader.py`, `pyscript`) sans exister
+    # sur le disque. `relative_files = True` les prend donc pour des fichiers du projet, et
+    # `coverage.py` publiait 30 avertissements « Couldn't parse » par run — mesuré. Ils
+    # n'atteignaient pas le XML (illisibles, donc jetés) et ne changeaient pas le
+    # pourcentage : ce qu'on corrige ici est du BRUIT, et le bruit finit par cacher un vrai
+    # avertissement.
+    shibokensupport/*
+    signature_bootstrap.py
+    pyscript
+
+[report]
+# Deux formes qu'aucun test ne peut couvrir sans mentir : un bloc réservé au vérificateur de
+# types, et une branche qui n'existe que pour lever. Les compter comme « non couvertes »
+# ferait baisser le chiffre sans qu'aucun test puisse y remédier.
+exclude_also =
+    if TYPE_CHECKING:
+    raise NotImplementedError

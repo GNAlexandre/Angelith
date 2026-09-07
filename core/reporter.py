@@ -12,6 +12,45 @@ from pathlib import Path
 from core.version import __version__
 
 
+#: Taille au-delà de laquelle `perf.log` est archivé, en octets. Les plus gros du dépôt
+#: tournent autour de 90 ko après plusieurs tomes ; 2 Mo laisse donc des dizaines de runs
+#: dans le fichier courant, ce qui est tout l'intérêt de l'empilement — comparer la perf
+#: d'avant et d'après un changement de code se fait dans UN fichier.
+TAILLE_MAX_LOG = 2 * 1024 * 1024
+
+#: Nombre d'archives conservées (`perf.log.1` … `perf.log.N`). Au-delà, la plus ancienne
+#: part : un log de perf n'a pas vocation à être un historique permanent.
+ARCHIVES_LOG = 3
+
+
+def _faire_tourner(chemin) -> None:
+    """Archive `perf.log` s'il a dépassé `TAILLE_MAX_LOG`.
+
+    Le fichier s'ouvre en `"a"` et les runs s'y EMPILENT — c'est voulu, et c'est ce qui
+    permet de comparer deux runs. Mais sans plafond il grossit sur toute la vie du projet,
+    et personne ne va relire le début.
+
+    ⚠ Best-effort de bout en bout : sous Windows, un `perf.log` ouvert dans un éditeur ne se
+    renomme pas. Échouer à archiver ne doit surtout pas coûter le log lui-même — on continue
+    d'écrire dans le fichier trop gros, ce qui est très exactement le comportement d'avant."""
+    import os
+    chemin = Path(chemin)
+    try:
+        if not chemin.exists() or chemin.stat().st_size < TAILLE_MAX_LOG:
+            return
+        plus_vieille = chemin.with_name(chemin.name + f".{ARCHIVES_LOG}")
+        if plus_vieille.exists():
+            plus_vieille.unlink()
+        # Décalage du haut vers le bas : .2 → .3, puis .1 → .2, sinon on écraserait.
+        for i in range(ARCHIVES_LOG - 1, 0, -1):
+            source = chemin.with_name(chemin.name + f".{i}")
+            if source.exists():
+                os.replace(source, chemin.with_name(chemin.name + f".{i + 1}"))
+        os.replace(chemin, chemin.with_name(chemin.name + ".1"))
+    except OSError:
+        return
+
+
 class Reporter:
     def volume(self, plan) -> None:
         print(f"\n=== {plan.project} / {plan.volume} ===")
@@ -31,6 +70,49 @@ class Reporter:
 
     def block(self, idx: int, total: int) -> None:
         print(f"     bloc {idx}/{total}")
+
+    def progres(self, courant: int, total: int, objet: str = "") -> None:
+        """Avancement CHIFFRÉ de l'étape en cours. Muet ici, et c'est voulu.
+
+        Le terminal dit déjà « Page 12/131 » dans le libellé de `stage` ; une seconde ligne
+        n'apprendrait rien. Ce canal existe pour les interfaces qui ont besoin du NOMBRE —
+        la barre de `gui/`, qui l'extrayait jusqu'ici du libellé humain à coups d'expression
+        régulière (`progression_de_stage`). Ce repli reste en place pour les libellés non
+        instrumentés ; là où `progres` est appelé, il n'a plus à deviner.
+
+        `total = 0` signifie « je ne sais pas combien il y en a » — une barre indéterminée,
+        pas une division par zéro. C'est le cas d'un lot de traduction en vol : l'unité
+        d'avancement est le lot, pas la planche, et prétendre le contraire ferait avancer la
+        barre pendant un appel LLM qui n'a encore rien produit.
+
+        `objet` — lot 32 — nomme **ce sur quoi** on progresse : un nom de fichier, une plage
+        de lot. C'est le « Updating address 3 of 50 » de NN/g : un compteur seul ne dit pas
+        sur quoi il compte, et le nom voyageait jusqu'ici dans le libellé humain, donc dans
+        le journal, donc nulle part pour une barre.
+
+        ⚠ **Argument OPTIONNEL, et c'est ce qui rend l'extension iso.** Tous les appelants
+        d'avant restent valides, la sortie console ne bouge d'aucun octet (cette méthode est
+        muette, ici comme dans `RichReporter`), et un reporter tiers qui n'a pas été mis à
+        jour continue de fonctionner."""
+
+    def phase(self, identifiant: str, libelle: str = "") -> None:
+        """La PHASE du run change. Muet ici — corps vide, exactement comme `progres`.
+
+        Un run manga traverse préparation → chargement du modèle → analyse des planches →
+        terminologie → traduction et rendu → assemblage ; un run light novel traverse
+        préparation → chapitres → assemblage. Rien ne le disait : l'interface n'affichait que
+        l'étape courante en texte, pendant huit secondes, dans une barre d'état.
+
+        C'est **le** canal qui manquait pour une barre monotone. Sans lui, deux balayages
+        successifs sur le même dénominateur sont indiscernables l'un de l'autre, et la barre
+        n'a d'autre choix que de retomber à 1 — le défaut que `PLAN-32` chiffre : 66 reculs
+        et 89,7 % d'un run de douze heures sans estimation, sur le light novel du corpus.
+
+        `identifiant` est une clé stable (`core/progression.py:PHASES`), pas un libellé
+        traduisible : c'est l'interface qui décide comment l'écrire.
+
+        ⚠ Le deviner sur le texte de `stage` serait remplacer un canal chiffré par une
+        expression régulière — exactement ce que `progres` a été créé pour éviter."""
 
     def info(self, msg: str) -> None:
         print(f"     {msg}")
@@ -87,6 +169,7 @@ class Reporter:
         self._to_log(f"⚠ {msg}")
 
     def set_verbose_log(self, path) -> None:
+        _faire_tourner(path)
         try:
             self._vlog = open(path, "a", encoding="utf-8")
         except Exception:

@@ -491,10 +491,12 @@ def test_version_reaches_docx_and_epub_metadata_for_real(tmp_path):
     cfg = {"rendu": {"metadata": {"titre": "Light Novel", "auteur": "Angelith Novel",
                                   "langue": "fr"},
                      "formats": ["docx", "epub"],
-                     "styles": {"dialogue": "List Paragraph", "pensee": "Pensée"},
-                     "reference_docx": str(racine / "templates" / "reference.docx"),
-                     "epub_css": str(racine / "templates" / "epub.css")},
-           "chemins": {}}
+                     "styles": {"dialogue": "List Paragraph", "pensee": "Pensée"}},
+           "chemins": {},
+           # Gabarits NON renseignés : servis par le pack de langue cible, qui est le
+           # chemin réel depuis que `langues/fr/templates/` les porte. La racine est
+           # absolue parce que `pytest` tourne depuis un `tmp_path`.
+           "langues": {"packs": str(racine / "langues")}}
     produced = R.render(md, tmp_path, cfg)
     noms = {p.suffix for p in produced}
     assert {".docx", ".epub"} <= noms, produced

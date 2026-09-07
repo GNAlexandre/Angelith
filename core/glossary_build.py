@@ -38,28 +38,63 @@ from . import glossary, glossary_lang, tokens
 from .glossary import ENTITY_CATS
 from .glossary_import import _clean
 
+# ⚠ AUCUN `\s*` collé à un quantificateur sur `.` dans les motifs ci-dessous, et c'est une
+# règle, pas un hasard. `(.+?)\s*` fait de `.` et de `\s` deux façons d'absorber le même
+# espace : le moteur doit alors essayer chaque partage possible avant de conclure, d'où un
+# coût qui croît plus vite que la ligne (`python:S8786`). Ces motifs lisent la sortie d'un
+# LLM, c'est-à-dire du texte dont la longueur n'est bornée par rien.
+#
+# Le rognage se fait donc EN PYTHON, chez l'appelant — qui le faisait déjà (`.strip()`,
+# `_clean`, `_tag_to_fields`) : la double sécurité était précisément ce qui rendait le `\s*`
+# invisible. L'équivalence des deux formes est vérifiée sur corpus par
+# `tests/test_glossary_build_motifs.py`.
 _BULLET = re.compile(r"^\s*[-•*]\s+")
-_HEADER = re.compile(r"^\s*#{1,6}\s*(.+?)\s*$")
+_HEADER = re.compile(r"^\s*#{1,6}\s*(.+)$")
 _FEM = {"féminin", "feminin", "female", "femme", "f"}
 _MASC = {"masculin", "male", "homme", "m"}
 _UNKNOWN = {"?", "??", "indéterminé", "indetermine", "indéterminée", "inconnu",
             "inconnue", "n/a", "na", "non déterminé", "non determine", "-", "—"}
-_ANGL_SEP = re.compile(r"\s*(?:→|=>|➔|⇒|->)\s*")
+#: Les cinq graphies de flèche que le modèle produit. Sortie en constante : trois motifs
+#: l'utilisaient, chacun avec sa propre copie.
+_FLECHE = r"(?:→|=>|➔|⇒|->)"
+_ANGL_SEP = re.compile(_FLECHE)
 # Garde-fous contre les sorties mal formées du glossariste/terminologue (observés en
 # pratique) : « Nom → interdits: X » écrit directement dans le nom (au lieu d'un « | »),
 # et « Nom — description » sans aucun « | » du tout.
-_ARROW_INTERDIT = re.compile(r"^(.*?)\s*(?:→|=>|➔|⇒|->)\s*interdits?\s*:\s*(.*)$", re.I)
-_NOM_TIRET = re.compile(r"^(.{1,60}?)\s+[—–]\s+(.+)$")
+_ARROW_INTERDIT = re.compile(rf"^(.*?){_FLECHE}\s*interdits?\s*:(.*)$", re.I)
+#: Le tiret cadratin qui sépare « Nom — description ». Cherché plutôt qu'apparié en entier :
+#: la borne « nom d'au plus 60 caractères » se vérifie en Python (cf. `_nom_et_description`),
+#: là où `(.{1,60}?)\s+` la faisait payer par un essai de partage à chaque position.
+_SEPARATEUR_TIRET = re.compile(r"\s[—–]\s")
+#: Longueur maximale du NOM dans « Nom — description ». Au-delà, la ligne est une phrase.
+_NOM_TIRET_MAX = 60
 _PHRASE_HINT = re.compile(r"\b(qui|dont|lors|ici|elle|il|leur|ses|son|sa)\b", re.I)
 # « X → Y [TAG] » ou « X → Y (TAG) » : renommage/reclassification proposé par le modèle
 # (ex. « Diablotin → diablotin [NE PAS TRADUIRE] », « Croyance → La Onzième Bête »).
 # Distinct de _ARROW_INTERDIT (qui exige littéralement « interdits: » après la flèche) —
 # ce motif-ci est plus général et n'a pas ce mot-clé.
+#
+# Le second groupe exclut `[` et `(` au lieu d'être un `.+?` que le tag optionnel devait
+# lui disputer : la frontière devient déterministe au lieu d'être négociée.
 _RENAME_ARROW = re.compile(
-    r"^(.+?)\s*(?:→|=>|➔|⇒|->)\s*(.+?)\s*(?:[\[\(]\s*([^\]\)]+?)\s*[\]\)])?\s*$")
+    rf"^(.+?){_FLECHE}([^\[\(]+)(?:[\[\(]([^\]\)]+)[\]\)])?\s*$")
 # « Nom [TAG] » ou « Nom (TAG) » SANS flèche — tag collé directement au nom au lieu
 # d'être un champ séparé (ex. « Homme-Bête [masculin] », « Gremian [masculin] »).
-_TAG_ONLY = re.compile(r"^(.+?)\s*[\[\(]\s*([^\]\)]+?)\s*[\]\)]\s*$")
+_TAG_ONLY = re.compile(r"^(.+?)[\[\(]([^\]\)]+)[\]\)]\s*$")
+
+
+def _nom_et_description(ligne: str) -> tuple[str, str] | None:
+    """« Nom — longue description » sans aucun « | » : les deux morceaux, ou `None`.
+
+    Remplace le motif `^(.{1,60}?)\\s+[—–]\\s+(.+)$`, dont la borne de longueur obligeait le
+    moteur à réessayer chaque partage entre le nom et l'espace qui suit."""
+    m = _SEPARATEUR_TIRET.search(ligne)
+    if not m:
+        return None
+    gauche, droite = ligne[:m.start()].strip(), ligne[m.end():].strip()
+    if not gauche or len(gauche) > _NOM_TIRET_MAX or not droite:
+        return None
+    return gauche, droite
 
 
 def _tag_to_fields(tag: str) -> dict:
@@ -102,17 +137,36 @@ def _split_variants_strict(val: str) -> tuple[list[str], str]:
     return variantes, ", ".join(spill)
 
 # Mots-clés d'en-tête → catégorie
+# ⚠ Les mots-clés sont donnés en français ET en anglais, et ce n'est pas de la complaisance :
+# le prompt du terminologue vit dans un PACK DE LANGUE CIBLE (cf. `core/langues.py`), donc un
+# pack anglais demande ses sections en anglais — et un modèle à qui l'on parle anglais écrit
+# « ### CHARACTERS », pas « ### PERSONNAGES ». Sans ces alias, le glossaire d'un tome traduit
+# vers l'anglais ressortirait VIDE, sans qu'aucun compteur ne s'en aperçoive.
+#
+# C'est aussi un garde-fou côté français : un modèle dérive parfois vers l'anglais tout seul.
 _CAT_KEYS = [
-    (("personnage",), "personnages"),
-    (("lieu",), "lieux"),
-    (("organisation", "faction"), "organisations"),
-    (("creature", "créature", "race", "bete", "bête", "monstre"), "creatures"),
-    (("objet", "item"), "objets"),
-    (("terme", "concept", "lore", "vocab"), "termes"),
+    (("personnage", "character"), "personnages"),
+    (("lieu", "place", "location", "setting"), "lieux"),
+    (("organisation", "organization", "faction"), "organisations"),
+    (("creature", "créature", "race", "bete", "bête", "monstre", "beast", "monster"),
+     "creatures"),
+    (("objet", "item", "object"), "objets"),
+    (("terme", "term", "concept", "lore", "vocab"), "termes"),
     (("evenement", "événement", "event"), "evenements"),
-    (("groupe",), "groupes"),
-    (("anglicisme", "résidu", "residu", " vo"), "anglicismes"),
+    (("groupe", "group"), "groupes"),
+    (("anglicisme", "résidu", "residu", " vo", "loanword", "leftover", "untranslated"),
+     "anglicismes"),
 ]
+
+
+#: Nom de champ anglais → nom FRANÇAIS, qui est celui du schéma. Les valeurs, elles, sont
+#: déjà bilingues : `_truthy` accepte « yes »/« true », `_genre_of` accepte « male »/« female ».
+_ALIAS_CHAMPS = {
+    "gender": "genre", "plural": "pluriel", "variant": "variantes", "variants": "variantes",
+    "source_term": "termes_source", "source_terms": "termes_source",
+    "forbidden": "interdits", "banned": "interdits",
+    "translate": "traduire", "forced": "force",
+}
 
 
 # Marques de voisement des kana (dakuten ゛ / handakuten ゜). Ce sont des `Mn`, exactement
@@ -195,6 +249,183 @@ def _truthy(val: str) -> bool:
     return val.strip().lower() in ("oui", "yes", "true", "vrai", "1", "o")
 
 
+# ⚠ Noms de champs en français ET en anglais, pour la même raison que `_CAT_KEYS` : un pack
+# de langue cible anglais fait écrire `gender:`, `variants:`, `source_terms:`. Les alias sont
+# ramenés au nom FRANÇAIS juste après, parce que c'est lui le schéma du glossaire — rien ici
+# ne change le format du fichier, seulement ce qu'on sait lire.
+_CHAMP = re.compile(
+    r"(genre|gender|pluriel|plural|variantes?|variants?|termes?_sources?|"
+    r"source_terms?|interdits?|forbidden|banned|traduire|translate|force|"
+    r"forced|role|rôle)\s*[:=]\s*(.*)$", re.I)
+
+#: Le modèle écrit parfois « NE PAS TRADUIRE — description » comme PREMIER interdit au lieu
+#: d'utiliser le champ `traduire:`.
+_NE_PAS_TRADUIRE = re.compile(r"^ne\s+pas\s+traduire\b", re.I)
+_NE_PAS_TRADUIRE_PREFIXE = re.compile(r"^ne\s+pas\s+traduire\b\s*[—–:-]*\s*", re.I)
+
+
+def _contenu_de_puce(raw: str) -> str | None:
+    """Le texte d'une ligne à puce, ou `None` si la ligne n'est pas une entrée à lire.
+
+    Écarte les non-puces, les puces vides et les trois formes de « je n'ai rien relevé »
+    que le terminologue produit (« rien », « RAS », un ⚠, une divergence signalée)."""
+    if not _BULLET.match(raw):
+        return None
+    s = _BULLET.sub("", raw).strip()
+    low = s.lower()
+    if not s or low.startswith(("rien", "(rien", "ras")) or s.startswith("⚠") or "divergence" in low:
+        return None
+    return s
+
+
+def _anglicisme(s: str) -> dict | None:
+    """« vo → fr »."""
+    parts = _ANGL_SEP.split(s, maxsplit=1)
+    if len(parts) != 2:
+        return None
+    vo, fr = _clean(parts[0]), _clean(parts[1])
+    return {"vo": vo, "fr": fr} if vo and fr else None
+
+
+def _groupe(s: str) -> dict | None:
+    """« nom : note »."""
+    if ":" not in s:
+        return None
+    nom, note = s.split(":", 1)
+    nom = _clean(nom)
+    return {"nom": nom, "note": note.strip()} if nom else None
+
+
+def _nom_et_champs_implicites(nom_raw: str) -> tuple[str, list[str], dict, list[str]]:
+    """Les trois garde-fous qui rattrapent un nom que le modèle a mal formé.
+
+    1. « Nom → interdits: X » écrit directement dans le nom (au lieu d'un « | ») ;
+    1bis. « X → Y [TAG] » — renommage/reclassification (ex. « Diablotin → diablotin [NE PAS
+       TRADUIRE] »). On garde X (généralement mieux capitalisé dans les cas observés) comme
+       forme canonique, Y devient une variante ; le tag, s'il est reconnu, devient un champ
+       structuré. Évite de créer une entrée fantôme par mention ;
+    1ter. « Nom [TAG] » / « Nom (TAG) » SANS flèche — tag collé au nom
+       (ex. « Homme-Bête [masculin] », « Gremian [masculin] »).
+
+    Renvoie `(nom nettoyé, interdits, champs, variantes)`."""
+    auto_interdits: list[str] = []
+    auto_fields: dict = {}
+    auto_variantes: list[str] = []
+    ma = _ARROW_INTERDIT.match(nom_raw)
+    if ma:
+        nom_raw = ma.group(1).strip()
+        auto_interdits = _split_list(ma.group(2))
+    else:
+        mr = _RENAME_ARROW.match(nom_raw)
+        if mr:
+            left, right, tag = mr.group(1).strip(), mr.group(2).strip(), mr.group(3)
+            nom_raw = left
+            if right and _norm(right) != _norm(left):
+                auto_variantes.append(right)
+            if tag:
+                auto_fields.update(_tag_to_fields(tag))
+    nom_raw, tag_fields = _strip_trailing_tag(nom_raw)
+    auto_fields.update(tag_fields)
+    return nom_raw, auto_interdits, auto_fields, auto_variantes
+
+
+def _appliquer_champ(entry: dict, key: str, val: str, *, vnom: list[str],
+                     auto_interdits: list[str], desc_parts: list[str]) -> None:
+    """Range UN « champ: valeur » dans l'entrée, ou verse son trop-plein en description.
+
+    ⚠ Deux champs ont un garde-fou, et c'est la raison d'être de cette fonction : le modèle
+    verse régulièrement une phrase entière dans `variantes:` ou dans `termes_source:`. On
+    n'en garde que les formes COURTES, le reste part en description au lieu de polluer une
+    liste qui sert ensuite de clé de recherche."""
+    if key.startswith("genre"):
+        entry["genre"] = _genre_of(val)
+    elif key.startswith("pluriel"):
+        entry["pluriel"] = _clean(val)
+    elif key.startswith("terme"):
+        ts, spill = _split_variants_strict(val)
+        entry["termes_source"] = ts
+        if spill:
+            desc_parts.append(spill)
+    elif key.startswith("variante"):
+        vs, spill = _split_variants_strict(val)
+        entry["variantes"] = vnom + vs
+        if spill:
+            desc_parts.append(spill)
+    elif key.startswith("interdit"):
+        items = auto_interdits + _split_list(val)
+        if items and _NE_PAS_TRADUIRE.match(items[0]):
+            first = items.pop(0)
+            entry["traduire"] = False
+            rest = _NE_PAS_TRADUIRE_PREFIXE.sub("", first).strip()
+            if rest:
+                desc_parts.append(rest)
+        entry["interdits"] = items
+    elif key.startswith("traduire"):
+        entry["traduire"] = _truthy(val)
+    elif key.startswith("force"):
+        entry["force"] = _truthy(val)
+    elif key.startswith("role"):
+        entry["role"] = _clean(val)
+
+
+def _entree_entite(s: str, cat: str | None) -> tuple[dict | None, str]:
+    """Une ligne « Nom | champ: valeur | … | description » → `(entrée, catégorie)`.
+
+    `(None, …)` quand il ne reste aucun nom exploitable."""
+    segs = [seg.strip() for seg in s.split("|")]
+    nom_raw, auto_interdits, auto_fields, auto_variantes = _nom_et_champs_implicites(
+        segs[0].strip())
+
+    auto_desc = ""
+    # Garde-fou 2 : « Nom — longue description » sans AUCUN « | » dans toute la ligne (le
+    # modèle a oublié le format pipe) → on récupère quand même nom + description.
+    if len(segs) == 1:
+        md = _nom_et_description(nom_raw)
+        if md:
+            nom_raw, auto_desc = md
+    nom = _clean(nom_raw)
+    target = cat or "termes"
+    if not nom:
+        return None, target
+
+    # « Feodor Jessman / Féodor » → nom canonique + variantes (évite les doublons)
+    vnom: list[str] = list(auto_variantes)
+    if "/" in nom:
+        parts = [_clean(p) for p in nom.split("/") if _clean(p)]
+        if len(parts) > 1:
+            nom, vnom = parts[0], parts[1:] + vnom
+
+    entry: dict = {"nom": nom, **auto_fields}
+    if vnom:
+        entry["variantes"] = vnom
+    if auto_interdits:
+        entry["interdits"] = auto_interdits
+
+    desc_parts: list[str] = [auto_desc] if auto_desc else []
+    for seg in segs[1:]:
+        mf = _CHAMP.match(seg)
+        if mf:
+            brut = _strip_accents(mf.group(1).lower())
+            _appliquer_champ(entry, _ALIAS_CHAMPS.get(brut, brut), mf.group(2).strip(),
+                             vnom=vnom, auto_interdits=auto_interdits, desc_parts=desc_parts)
+        elif seg:
+            desc_parts.append(seg)
+    if desc_parts:
+        entry["description"] = _clean(" — ".join(desc_parts))
+
+    # Genre par défaut « ? » pour les catégories qui en portent un
+    if target in ENTITY_CATS and ENTITY_CATS[target].get("genre") and "genre" not in entry:
+        entry["genre"] = "?"
+    # Réparation déterministe AVANT d'entrer dans le glossaire : une graphie source dans
+    # `nom` ou `variantes` part vers `termes_source` (cf. `glossary_lang`). C'est le seul
+    # endroit où une entrée est créée, donc le seul à instrumenter — il couvre le
+    # terminologue, le glossariste (aller-retour `to_sectioned` → LLM → ici) et
+    # `glossary_import`. Les entrées non romanisables sont conservées et marquées ;
+    # `glossary_lang.auditer` les remonte ensuite au rapport.
+    entry, _ = glossary_lang.reparer_entree(entry)
+    return entry, target
+
+
 def parse_notes(text: str) -> dict:
     """Transforme les notes SECTIONNÉES du terminologue en dict de glossaire."""
     out = glossary.empty()
@@ -202,144 +433,24 @@ def parse_notes(text: str) -> dict:
     for raw in text.splitlines():
         h = _HEADER.match(raw)
         if h and not _BULLET.match(raw):
-            c = _header_to_cat(h.group(1))
-            if c:
-                cat = c
+            cat = _header_to_cat(h.group(1)) or cat
             continue
-        if not _BULLET.match(raw):
+        s = _contenu_de_puce(raw)
+        if s is None:
             continue
-        s = _BULLET.sub("", raw).strip()
-        low = s.lower()
-        if not s or low.startswith(("rien", "(rien", "ras")) or s.startswith("⚠") or "divergence" in low:
-            continue
-
-        # Anglicismes : « vo → fr »
         if cat == "anglicismes":
-            parts = _ANGL_SEP.split(s, maxsplit=1)
-            if len(parts) == 2:
-                vo, fr = _clean(parts[0]), _clean(parts[1])
-                if vo and fr:
-                    out["anglicismes"].append({"vo": vo, "fr": fr})
+            anglicisme = _anglicisme(s)
+            if anglicisme:
+                out["anglicismes"].append(anglicisme)
             continue
-
-        # Groupes : « nom : note »
         if cat == "groupes":
-            if ":" in s:
-                nom, note = s.split(":", 1)
-                nom = _clean(nom)
-                if nom:
-                    out["groupes"].append({"nom": nom, "note": note.strip()})
+            groupe = _groupe(s)
+            if groupe:
+                out["groupes"].append(groupe)
             continue
-
-        # Entités : « Nom | champ: valeur | … | description »
-        segs = [seg.strip() for seg in s.split("|")]
-        nom_raw = segs[0].strip()
-        auto_interdits: list[str] = []
-        auto_fields: dict = {}
-        auto_variantes: list[str] = []
-        # Garde-fou 1 : « Nom → interdits: X » écrit directement dans le nom (pas de « | »).
-        ma = _ARROW_INTERDIT.match(nom_raw)
-        if ma:
-            nom_raw = ma.group(1).strip()
-            auto_interdits = _split_list(ma.group(2))
-        else:
-            # Garde-fou 1bis : « X → Y [TAG] » — renommage/reclassification proposé par
-            # le modèle (ex. « Diablotin → diablotin [NE PAS TRADUIRE] »). On garde X
-            # (généralement mieux capitalisé dans les cas observés) comme forme
-            # canonique, Y devient une variante ; le tag, s'il est reconnu, devient un
-            # champ structuré. Évite de créer une entrée fantôme par mention.
-            mr = _RENAME_ARROW.match(nom_raw)
-            if mr:
-                left, right, tag = mr.group(1).strip(), mr.group(2).strip(), mr.group(3)
-                nom_raw = left
-                if right and _norm(right) != _norm(left):
-                    auto_variantes.append(right)
-                if tag:
-                    auto_fields.update(_tag_to_fields(tag))
-        # Garde-fou 1ter : « Nom [TAG] » / « Nom (TAG) » SANS flèche — tag collé au nom
-        # (ex. « Homme-Bête [masculin] », « Gremian [masculin] »).
-        nom_raw, tag_fields = _strip_trailing_tag(nom_raw)
-        auto_fields.update(tag_fields)
-        auto_desc = ""
-        # Garde-fou 2 : « Nom — longue description » sans AUCUN « | » dans toute la ligne
-        # (le modèle a oublié le format pipe) → on récupère quand même nom + description.
-        if len(segs) == 1:
-            md = _NOM_TIRET.match(nom_raw)
-            if md:
-                nom_raw, auto_desc = md.group(1).strip(), md.group(2).strip()
-        nom = _clean(nom_raw)
-        if not nom:
-            continue
-        # « Feodor Jessman / Féodor » → nom canonique + variantes (évite les doublons)
-        vnom: list[str] = list(auto_variantes)
-        if "/" in nom:
-            parts = [_clean(p) for p in nom.split("/") if _clean(p)]
-            if len(parts) > 1:
-                nom, vnom = parts[0], parts[1:] + vnom
-        entry: dict = {"nom": nom, **auto_fields}
-        if vnom:
-            entry["variantes"] = vnom
-        if auto_interdits:
-            entry["interdits"] = auto_interdits
-        desc_parts: list[str] = [auto_desc] if auto_desc else []
-        for seg in segs[1:]:
-            mf = re.match(r"(genre|pluriel|variantes?|termes?_sources?|interdits?|traduire|force|role|rôle)\s*[:=]\s*(.*)$", seg, re.I)
-            if mf:
-                key = _strip_accents(mf.group(1).lower())
-                val = mf.group(2).strip()
-                if key.startswith("genre"):
-                    entry["genre"] = _genre_of(val)
-                elif key.startswith("pluriel"):
-                    entry["pluriel"] = _clean(val)
-                elif key.startswith("terme"):
-                    # Même garde-fou que pour variantes : le(s) mot(s) source doivent
-                    # rester courts (un mot/une expression), pas une phrase entière.
-                    ts, spill = _split_variants_strict(val)
-                    entry["termes_source"] = ts
-                    if spill:
-                        desc_parts.append(spill)
-                elif key.startswith("variante"):
-                    # Garde-fou 3 : si le modèle a versé une longue description dans
-                    # `variantes:`, on n'en garde que les formes courtes ; le reste
-                    # part en description au lieu de polluer la liste de variantes.
-                    vs, spill = _split_variants_strict(val)
-                    entry["variantes"] = vnom + vs
-                    if spill:
-                        desc_parts.append(spill)
-                elif key.startswith("interdit"):
-                    items = auto_interdits + _split_list(val)
-                    # Garde-fou : le modèle écrit parfois « NE PAS TRADUIRE — description »
-                    # comme PREMIER interdit au lieu d'utiliser le champ `traduire:` —
-                    # on l'extrait plutôt que de garder cette phrase comme un faux interdit.
-                    if items and re.match(r"^ne\s+pas\s+traduire\b", items[0], re.I):
-                        first = items.pop(0)
-                        entry["traduire"] = False
-                        rest = re.sub(r"^ne\s+pas\s+traduire\b\s*[—–:-]*\s*", "", first, flags=re.I).strip()
-                        if rest:
-                            desc_parts.append(rest)
-                    entry["interdits"] = items
-                elif key.startswith("traduire"):
-                    entry["traduire"] = _truthy(val)
-                elif key.startswith("force"):
-                    entry["force"] = _truthy(val)
-                elif key.startswith("role"):
-                    entry["role"] = _clean(val)
-            elif seg:
-                desc_parts.append(seg)
-        if desc_parts:
-            entry["description"] = _clean(" — ".join(desc_parts))
-        # Genre par défaut « ? » pour les catégories qui en portent un
-        target = cat or "termes"
-        if target in ENTITY_CATS and ENTITY_CATS[target].get("genre") and "genre" not in entry:
-            entry["genre"] = "?"
-        # Réparation déterministe AVANT d'entrer dans le glossaire : une graphie source
-        # dans `nom` ou `variantes` part vers `termes_source` (cf. `glossary_lang`). C'est
-        # le seul endroit où une entrée est créée, donc le seul à instrumenter — il couvre
-        # le terminologue, le glossariste (aller-retour `to_sectioned` → LLM → ici) et
-        # `glossary_import`. Les entrées non romanisables sont conservées et marquées ;
-        # `glossary_lang.auditer` les remonte ensuite au rapport.
-        entry, _ = glossary_lang.reparer_entree(entry)
-        out.setdefault(target, []).append(entry)
+        entry, target = _entree_entite(s, cat)
+        if entry is not None:
+            out.setdefault(target, []).append(entry)
     return out
 
 
@@ -436,8 +547,11 @@ def _merge_entity(base_list: list[dict], e: dict, cat: str,
     status = "merge"
     # variantes : union (toutes les formes vues ≠ nom canonique deviennent des variantes)
     vs = list(cur.get("variantes") or [])
-    for v in ([e["nom"]] + (e.get("variantes") or [])):
-        if _norm(v) != _norm(cur.get("nom", "")) and all(_norm(v) != _norm(x) for x in vs):
+    for v in ([e.get("nom", "")] + (e.get("variantes") or [])):
+        # ⚠ `_norm(v)` vide : une entrée aplatie qui n'a PAS de rendu dans la cible courante
+        # porte un `nom` vide (cf. `glossary_cibles.aplatir`). L'ajouter en variante
+        # insérerait une chaîne vide qui ne désigne rien et que rien ne rattraperait.
+        if _norm(v) and _norm(v) != _norm(cur.get("nom", "")) and all(_norm(v) != _norm(x) for x in vs):
             vs.append(v)
     if vs:
         cur["variantes"] = vs
@@ -496,7 +610,19 @@ def merge_notes(base: dict, notes_text: str, index: dict[str, dict[str, dict]] |
     `index` (facultatif, cf. `build_index`) accélère la recherche de doublon sur un
     glossaire volumineux (accumulé sur toute une série) — sans lui, comportement
     identique à avant (scan linéaire), pour ne rien changer aux appelants existants."""
-    new = parse_notes(notes_text)
+    return fusionner_glossaire(base, parse_notes(notes_text), index=index)
+
+
+def fusionner_glossaire(base: dict, autre: dict,
+                        index: dict[str, dict[str, dict]] | None = None) -> dict:
+    """Fusionne un glossaire DÉJÀ PARSÉ dans `base` (muté sur place).
+
+    Pendant dict→dict de `merge_notes`, et mêmes règles exactement — c'est le même corps :
+    `base` prime sur `nom`/`description`/`role`, union sur `variantes`/`termes_source`/
+    `interdits`, genre « ? » → genre défini. Le terminologue arrive par du TEXTE, un ancien
+    glossaire YAML réintégré arrive par un dict ; les faire diverger ferait dédoublonner
+    différemment selon la porte d'entrée."""
+    new = autre
     added = {"ajouts": 0, "fusions": 0, "conflits": 0}
 
     for cat in ENTITY_CATS:

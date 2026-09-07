@@ -80,12 +80,16 @@ def main() -> None:
 
     if args.check:
         cli.avertir_config(config)
+        cli.bloc_langue(config)
         sys.exit(0 if _diagnostic(config) else 1)
 
     if args.list or not args.projet:
+        # ⚠ Pas de 6e positionnel : `afficher_liste` porte un `*`, donc `sous_dossier` et
+        # `etat` sont keyword-only. Ce `None` de trop levait un `TypeError` — `run_ocr.py
+        # --list` était cassé, et rien ne le disait parce qu'aucun test n'appelait ce chemin.
         cli.afficher_liste(scan_pages.lister_projets, scan_pages.lister_tomes,
                            Path(chemins["sources"]), Path(chemins["build"]),
-                           args.projet, None)
+                           args.projet)
         return
 
     if args.stop:

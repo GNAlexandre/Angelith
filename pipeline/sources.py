@@ -107,17 +107,16 @@ def _chapters_from_filenames(extracted: list[tuple[Path, str]]):
             for (_, parts, label) in groups]
 
 
-def scan_volume(vol_dir: Path, config: dict, build_dir: Path) -> VolumePlan:
-    vol_dir = Path(vol_dir)
-    mapping = config["langues"]["dossiers"]
-    # Motifs ADDITIONNELS : les défauts multilingues restent actifs (cf. detect_chapters).
-    patterns = config["decoupage"]["chapter_patterns"] or None
-    format_cfg = config["decoupage"].get("mise_en_forme")
-    epub_cfg = config["decoupage"].get("epub")
-    media_dir = build_dir / "media"
-    media_dir.mkdir(parents=True, exist_ok=True)
+#: Ce qu'une extraction rend pour UN fichier source : le fichier, son texte, ses images, et
+#: les lectures (furigana) relevées au passage. Le quadruplet était réécrit en toutes lettres
+#: à quatre endroits, ce qui rendait la signature des fonctions ci-dessous illisible.
+Extraction = tuple[Path, str, list[str], dict[str, str]]
 
-    # --- Pass 0 (léger, sans extraction) : quelles langues sont présentes ? ---
+
+def _langues_presentes(vol_dir: Path, mapping: dict) -> dict[str, list[Path]]:
+    """Pass 0, volontairement LÉGÈRE : quelles langues ce tome contient-il, avec quels
+    fichiers ? Aucune extraction ici — le filtre `sources_utilisees` s'applique juste après,
+    et une langue exclue ne doit être ni lue ni sondée pour ses images."""
     present: dict[str, list[Path]] = {}
     for sub in sorted(p for p in vol_dir.iterdir() if p.is_dir()):
         code = _map_folder(sub.name, mapping)
@@ -130,38 +129,50 @@ def scan_volume(vol_dir: Path, config: dict, build_dir: Path) -> VolumePlan:
         )
         if files:
             present[code] = files
-    if not present:
-        raise SystemExit(f"Aucune source exploitable dans {vol_dir}")
+    return present
 
-    warnings: list[str] = []
-    # Filtre des langues réellement utilisées (config : langues.sources_utilisees),
-    # appliqué AVANT toute extraction : une langue exclue n'est ni lue, ni sondée
-    # pour les images (aucun travail inutile). Permet de n'utiliser qu'UNE source
-    # (ex. [en]) ou PLUSIEURS (ex. [fr, jp, en]), en traduction comme en amélioration.
-    used = config["langues"].get("sources_utilisees")
-    if used:
-        kept = {c: f for c, f in present.items() if c in used}
-        if kept:
-            ignored = [c for c in present if c not in kept]
-            if ignored:
-                warnings.append("Langues présentes mais non utilisées (sources_utilisees) : "
-                                + ", ".join(ignored))
-            present = kept
-        else:
-            warnings.append("sources_utilisees ne correspond à aucune langue présente "
-                            "→ filtre ignoré (toutes les langues sont utilisées).")
 
-    # --- UNE SEULE langue fournit les images : la plus prioritaire (config
-    # langues.priorite_images) PARMI celles présentes. On sonde dans l'ordre de
-    # priorité et on s'arrête à la première qui produit réellement au moins une
-    # image ; toutes les AUTRES langues sont extraites en texte seul. Ceci élimine
-    # tout mélange d'images entre langues : chaque .docx/.pdf renumérote ses médias
-    # depuis 1, donc en extraire plusieurs dans le même dossier écrasait/confondait
-    # les fichiers (la mauvaise image ressortait, souvent à la mauvaise taille).
-    cache: dict[str, list[tuple[Path, str, list[str], dict[str, str]]]] = {}
+def _filtrer_langues_utilisees(present: dict[str, list[Path]], used,
+                               warnings: list[str]) -> dict[str, list[Path]]:
+    """Filtre des langues réellement utilisées (config : `langues.sources_utilisees`),
+    appliqué AVANT toute extraction : une langue exclue n'est ni lue, ni sondée pour les
+    images (aucun travail inutile). Permet de n'utiliser qu'UNE source (ex. `[en]`) ou
+    PLUSIEURS (ex. `[fr, jp, en]`), en traduction comme en amélioration.
 
-    def _extract_lang(code: str, want_images: bool) -> list[tuple[Path, str, list[str], dict[str, str]]]:
-        out: list[tuple[Path, str, list[str], dict[str, str]]] = []
+    ⚠ Un filtre qui ne garde RIEN est ignoré, pas obéi : il ne resterait aucune source, et le
+    tome échouerait sur ce qui est presque toujours une faute de frappe dans la config."""
+    if not used:
+        return present
+    kept = {c: f for c, f in present.items() if c in used}
+    if not kept:
+        warnings.append("sources_utilisees ne correspond à aucune langue présente "
+                        "→ filtre ignoré (toutes les langues sont utilisées).")
+        return present
+    ignored = [c for c in present if c not in kept]
+    if ignored:
+        warnings.append("Langues présentes mais non utilisées (sources_utilisees) : "
+                        + ", ".join(ignored))
+    return kept
+
+
+def _extraire_sources(present: dict[str, list[Path]], config: dict, media_dir: Path,
+                      format_cfg, epub_cfg,
+                      warnings: list[str]) -> tuple[dict[str, list[Extraction]], str | None]:
+    """Extrait toutes les langues, et élit celle qui fournira les images.
+
+    UNE SEULE langue fournit les images : la plus prioritaire (config
+    `langues.priorite_images`) PARMI celles présentes. On sonde dans l'ordre de priorité et
+    on s'arrête à la première qui produit réellement au moins une image ; toutes les AUTRES
+    langues sont extraites en texte seul. Ceci élimine tout mélange d'images entre langues :
+    chaque .docx/.pdf renumérote ses médias depuis 1, donc en extraire plusieurs dans le même
+    dossier écrasait/confondait les fichiers (la mauvaise image ressortait, souvent à la
+    mauvaise taille).
+
+    Renvoie `(extractions par langue, langue d'images ou None)`."""
+    cache: dict[str, list[Extraction]] = {}
+
+    def _extract_lang(code: str, want_images: bool) -> list[Extraction]:
+        out: list[Extraction] = []
         for f in present[code]:
             ex = extract.extract(f, media_dir, extract_images=want_images,
                                  format_cfg=format_cfg, epub_cfg=epub_cfg)
@@ -175,8 +186,7 @@ def scan_volume(vol_dir: Path, config: dict, build_dir: Path) -> VolumePlan:
 
     image_lang: str | None = None
     for cand in (c for c in config["langues"]["priorite_images"] if c in present):
-        res = _extract_lang(cand, want_images=True)
-        if any(imgs for _, _, imgs, _ in res):
+        if any(imgs for _, _, imgs, _ in _extract_lang(cand, want_images=True)):
             image_lang = cand
             break
 
@@ -195,37 +205,68 @@ def scan_volume(vol_dir: Path, config: dict, build_dir: Path) -> VolumePlan:
             list(pool.map(lambda c: _extract_lang(c, want_images=False), remaining))
     elif remaining:
         _extract_lang(remaining[0], want_images=False)
+    return cache, image_lang
 
-    langs: dict[str, LangSource] = {}
-    for code, files in present.items():
-        res = cache[code]
-        extracted = [(f, t) for f, t, _, _ in res]
-        imgs = [i for _, _, ii, _ in res for i in ii]
-        full_text = "\n\n".join(t for _, t in extracted)
-        # Lectures fusionnées sur tous les fichiers de la langue (un EPUB par tome le plus
-        # souvent, mais une source peut être découpée en plusieurs fichiers).
-        lectures: dict[str, str] = {}
-        for _, _, _, lex in res:
-            for base, lecture in lex.items():
-                lectures.setdefault(base, lecture)
 
-        # 1) Chapitres par NOM DE FICHIER (sources multi-fichiers nommées par chapitre) ;
-        # 2) sinon, détection structurelle dans le contenu.
-        chapters = _chapters_from_filenames(extracted) if len(files) > 1 else None
-        if not chapters:
-            chapters = split.detect_chapters(full_text, patterns)
-        langs[code] = LangSource(code=code, files=files, chapters=chapters,
-                                 full_text=full_text, images=imgs, lectures=lectures)
+def _source_de_langue(code: str, files: list[Path], res: list[Extraction],
+                      patterns) -> LangSource:
+    """Assemble UNE langue à partir de ses extractions : texte complet, images, lectures
+    fusionnées, et découpage en chapitres."""
+    extracted = [(f, t) for f, t, _, _ in res]
+    imgs = [i for _, _, ii, _ in res for i in ii]
+    full_text = "\n\n".join(t for _, t in extracted)
+    # Lectures fusionnées sur tous les fichiers de la langue (un EPUB par tome le plus
+    # souvent, mais une source peut être découpée en plusieurs fichiers).
+    lectures: dict[str, str] = {}
+    for _, _, _, lex in res:
+        for base, lecture in lex.items():
+            lectures.setdefault(base, lecture)
 
-    # --- Mode + pivot ---
+    # 1) Chapitres par NOM DE FICHIER (sources multi-fichiers nommées par chapitre) ;
+    # 2) sinon, détection structurelle dans le contenu.
+    chapters = _chapters_from_filenames(extracted) if len(files) > 1 else None
+    if not chapters:
+        chapters = split.detect_chapters(full_text, patterns)
+    return LangSource(code=code, files=files, chapters=chapters,
+                      full_text=full_text, images=imgs, lectures=lectures)
+
+
+def _mode_et_pivot(langs: dict, config: dict) -> tuple[str, str]:
+    """Le mode du tome et la langue qui sert de RÉFÉRENCE au découpage.
+
+    Une source française déjà présente veut dire « améliore-la » ; sinon on traduit, et le
+    pivot est la première langue de `langues.priorite_sens` effectivement disponible."""
     if "fr" in langs:
-        mode = "amelioration"
-        pivot = "fr"
-    else:
-        mode = "traduction"
-        pivot = next((c for c in config["langues"]["priorite_sens"] if c in langs), None)
-        if pivot is None:
-            pivot = next(iter(langs))
+        return "amelioration", "fr"
+    pivot = next((c for c in config["langues"]["priorite_sens"] if c in langs), None)
+    return "traduction", pivot if pivot is not None else next(iter(langs))
+
+
+def scan_volume(vol_dir: Path, config: dict, build_dir: Path) -> VolumePlan:
+    vol_dir = Path(vol_dir)
+    mapping = config["langues"]["dossiers"]
+    # Motifs ADDITIONNELS : les défauts multilingues restent actifs (cf. detect_chapters).
+    patterns = config["decoupage"]["chapter_patterns"] or None
+    format_cfg = config["decoupage"].get("mise_en_forme")
+    epub_cfg = config["decoupage"].get("epub")
+    media_dir = build_dir / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    present = _langues_presentes(vol_dir, mapping)
+    if not present:
+        raise SystemExit(f"Aucune source exploitable dans {vol_dir}")
+
+    warnings: list[str] = []
+    present = _filtrer_langues_utilisees(
+        present, config["langues"].get("sources_utilisees"), warnings)
+
+    cache, image_lang = _extraire_sources(present, config, media_dir,
+                                          format_cfg, epub_cfg, warnings)
+
+    langs = {code: _source_de_langue(code, files, cache[code], patterns)
+             for code, files in present.items()}
+
+    mode, pivot = _mode_et_pivot(langs, config)
 
     # --- Nombre de chapitres (référence = pivot) + contrôle d'alignement ---
     n_chapters = len(langs[pivot].chapters)

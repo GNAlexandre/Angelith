@@ -1,0 +1,1873 @@
+{
+ "meta": {
+  "_lisez_moi": "Vérité terrain du lot 21 (PLAN-21). 60 zones hors bulle tirées au sort par `python tools/banc_sfx.py --tous --echantillon 60`, graine 21, sur les six tomes de build/ dont le cache porte la passe onomatopées. Chaque zone a été transcrite À L'ŒIL sur son crop. Les MESURES sont ici ; les IMAGES ne sont pas dans le dépôt — les planches du corpus ne sont pas redistribuables, et le banc n'est donc pas reproductible par un tiers sur ce point (cf. docs/mesures/sfx-2026-08-28.md, « Ce que la mesure ne dit pas »). Les œuvres portent leur désignation neutre (docs/PUBLICATION-ANGELITH.md).",
+  "_graine": 21,
+  "_taille": 60,
+  "_date": "2026-08-28",
+  "_nature": "onomatopee | narration | mobilier | dessin | agregat",
+  "_polarite_reelle": "sombre | claire | evide — « evide » = glyphe clair à contour sombre (ou l'inverse) : un booléen ne sait pas le dire, et c'est un résultat du lot",
+  "_verdict": "exacte | partielle | plausible_fausse | absurde | ponctuation | ecartee_mobilier | ecartee_bruit — porté sur la lecture de manga-ocr"
+ },
+ "zones": [
+  {
+   "n": 1,
+   "cle": "manga A/Vol.1/p0004/z01",
+   "boite": [
+    60,
+    501
+   ],
+   "aire_bbox": 30060,
+   "aire_frac": 0.0167,
+   "nature": "narration",
+   "transcription": "logo de titre de l'œuvre (katakana verticaux + baseline latine)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "スペは、ＮｏＴＴ．ＮＥＲＯ外な",
+   "verdict": "absurde",
+   "uniformite_fond": 0.9952,
+   "remplissage": 0.2316,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    19,
+    159,
+    135
+   ]
+  },
+  {
+   "n": 2,
+   "cle": "manga A/Vol.1/p0022/z01",
+   "boite": [
+    59,
+    52
+   ],
+   "aire_bbox": 3068,
+   "aire_frac": 0.0017,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "ん",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.6261,
+   "remplissage": 0.442,
+   "orientation": "carree",
+   "fond": [
+    254,
+    254,
+    254
+   ],
+   "encre": [
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "n": 3,
+   "cle": "manga A/Vol.1/p0027/z02",
+   "boite": [
+    53,
+    167
+   ],
+   "aire_bbox": 8851,
+   "aire_frac": 0.00492,
+   "nature": "narration",
+   "transcription": "オレはたたかれたのに？",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "オレはたたかあたのに？",
+   "verdict": "partielle",
+   "uniformite_fond": 0.8018,
+   "remplissage": 0.1685,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 4,
+   "cle": "manga A/Vol.1/p0031/z01",
+   "boite": [
+    93,
+    189
+   ],
+   "aire_bbox": 17577,
+   "aire_frac": 0.00976,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "ソース",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.4664,
+   "remplissage": 0.4642,
+   "orientation": "verticale",
+   "fond": [
+    253,
+    253,
+    253
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 5,
+   "cle": "manga A/Vol.1/p0051/z00",
+   "boite": [
+    252,
+    268
+   ],
+   "aire_bbox": 67536,
+   "aire_frac": 0.03752,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.173,
+   "remplissage": 0.5908,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 6,
+   "cle": "manga A/Vol.1/p0058/z02",
+   "boite": [
+    64,
+    62
+   ],
+   "aire_bbox": 3968,
+   "aire_frac": 0.0022,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "！！",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.5779,
+   "remplissage": 0.4304,
+   "orientation": "carree",
+   "fond": [
+    219,
+    219,
+    219
+   ],
+   "encre": [
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "n": 7,
+   "cle": "manga A/Vol.1/p0069/z00",
+   "boite": [
+    192,
+    26
+   ],
+   "aire_bbox": 4992,
+   "aire_frac": 0.00277,
+   "nature": "mobilier",
+   "transcription": "filigrane de scan (latin)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "mobilier",
+   "lecture_manga_ocr": "",
+   "verdict": "ecartee_mobilier",
+   "uniformite_fond": 1.0,
+   "remplissage": 0.3774,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    244,
+    131,
+    132
+   ]
+  },
+  {
+   "n": 8,
+   "cle": "manga A/Vol.1/p0097/z03",
+   "boite": [
+    475,
+    757
+   ],
+   "aire_bbox": 359575,
+   "aire_frac": 0.19976,
+   "nature": "agregat",
+   "transcription": "onomatopées ド／ズ + bulle + dessin (2 cases)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.385,
+   "remplissage": 0.3933,
+   "orientation": "verticale",
+   "fond": [
+    252,
+    252,
+    252
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 9,
+   "cle": "manga A/Vol.1/p0098/z03",
+   "boite": [
+    601,
+    782
+   ],
+   "aire_bbox": 469982,
+   "aire_frac": 0.2611,
+   "nature": "agregat",
+   "transcription": "onomatopées ギ + 2 bulles + dessin",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.5622,
+   "remplissage": 0.5623,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 10,
+   "cle": "manga A/Vol.1/p0102/z00",
+   "boite": [
+    191,
+    25
+   ],
+   "aire_bbox": 4775,
+   "aire_frac": 0.00265,
+   "nature": "mobilier",
+   "transcription": "filigrane de scan (latin)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "mobilier",
+   "lecture_manga_ocr": "",
+   "verdict": "ecartee_mobilier",
+   "uniformite_fond": 0.8187,
+   "remplissage": 0.4551,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    242,
+    130,
+    131
+   ]
+  },
+  {
+   "n": 11,
+   "cle": "manga A/Vol.1/p0123/z00",
+   "boite": [
+    89,
+    83
+   ],
+   "aire_bbox": 7387,
+   "aire_frac": 0.0041,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "へ",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.3467,
+   "remplissage": 0.4485,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 12,
+   "cle": "manga A/Vol.2/p0006/z01",
+   "boite": [
+    94,
+    154
+   ],
+   "aire_bbox": 14476,
+   "aire_frac": 0.00804,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "claire",
+   "polarite_mesuree": "claire",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "そういった",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.4155,
+   "remplissage": 0.4724,
+   "orientation": "verticale",
+   "fond": [
+    2,
+    2,
+    2
+   ],
+   "encre": [
+    252,
+    252,
+    252
+   ]
+  },
+  {
+   "n": 13,
+   "cle": "manga A/Vol.2/p0013/z03",
+   "boite": [
+    136,
+    26
+   ],
+   "aire_bbox": 3536,
+   "aire_frac": 0.00196,
+   "nature": "mobilier",
+   "transcription": "filigrane de scan (latin)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "mobilier",
+   "lecture_manga_ocr": "",
+   "verdict": "ecartee_mobilier",
+   "uniformite_fond": 1.0,
+   "remplissage": 0.308,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    155,
+    124,
+    112
+   ]
+  },
+  {
+   "n": 14,
+   "cle": "manga A/Vol.2/p0017/z00",
+   "boite": [
+    192,
+    25
+   ],
+   "aire_bbox": 4800,
+   "aire_frac": 0.00267,
+   "nature": "mobilier",
+   "transcription": "filigrane de scan (latin)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "mobilier",
+   "lecture_manga_ocr": "",
+   "verdict": "ecartee_mobilier",
+   "uniformite_fond": 1.0,
+   "remplissage": 0.3925,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    244,
+    131,
+    132
+   ]
+  },
+  {
+   "n": 15,
+   "cle": "manga A/Vol.2/p0045/z01",
+   "boite": [
+    136,
+    26
+   ],
+   "aire_bbox": 3536,
+   "aire_frac": 0.00196,
+   "nature": "mobilier",
+   "transcription": "filigrane de scan (latin)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "mobilier",
+   "lecture_manga_ocr": "",
+   "verdict": "ecartee_mobilier",
+   "uniformite_fond": 1.0,
+   "remplissage": 0.308,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    155,
+    124,
+    112
+   ]
+  },
+  {
+   "n": 16,
+   "cle": "manga A/Vol.2/p0048/z01",
+   "boite": [
+    206,
+    573
+   ],
+   "aire_bbox": 118038,
+   "aire_frac": 0.06558,
+   "nature": "agregat",
+   "transcription": "bulle + narration verticale 「後にみんな無くなった」",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "しかし、なんですよね、お前はあちゃんの命に関わる大事な作戦をこんに任せることを信用できないとす",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.5218,
+   "remplissage": 0.3562,
+   "orientation": "verticale",
+   "fond": [
+    254,
+    254,
+    254
+   ],
+   "encre": [
+    208,
+    208,
+    208
+   ]
+  },
+  {
+   "n": 17,
+   "cle": "manga A/Vol.2/p0055/z01",
+   "boite": [
+    59,
+    91
+   ],
+   "aire_bbox": 5369,
+   "aire_frac": 0.00298,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "その",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.2343,
+   "remplissage": 0.52,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "n": 18,
+   "cle": "manga A/Vol.2/p0061/z02",
+   "boite": [
+    106,
+    131
+   ],
+   "aire_bbox": 13886,
+   "aire_frac": 0.00771,
+   "nature": "narration",
+   "transcription": "なっ……教官!?",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "なっ．．．．．教官！？",
+   "verdict": "exacte",
+   "uniformite_fond": 0.8209,
+   "remplissage": 0.1931,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 19,
+   "cle": "manga A/Vol.2/p0068/z01",
+   "boite": [
+    680,
+    443
+   ],
+   "aire_bbox": 301240,
+   "aire_frac": 0.16736,
+   "nature": "onomatopee",
+   "transcription": "gros katakana à corps clair et contour noir (lecture incertaine)",
+   "polarite_reelle": "claire",
+   "polarite_mesuree": "claire",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "それでも、",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.287,
+   "remplissage": 0.6736,
+   "orientation": "horizontale",
+   "fond": [
+    1,
+    1,
+    1
+   ],
+   "encre": [
+    252,
+    252,
+    252
+   ]
+  },
+  {
+   "n": 20,
+   "cle": "manga A/Vol.2/p0071/z05",
+   "boite": [
+    157,
+    149
+   ],
+   "aire_bbox": 23393,
+   "aire_frac": 0.013,
+   "nature": "onomatopee",
+   "transcription": "fragment de katakana (glyphe coupé)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "そう",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.5266,
+   "remplissage": 0.4429,
+   "orientation": "carree",
+   "fond": [
+    254,
+    254,
+    254
+   ],
+   "encre": [
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "n": 21,
+   "cle": "manga A/Vol.2/p0092/z00",
+   "boite": [
+    633,
+    261
+   ],
+   "aire_bbox": 165213,
+   "aire_frac": 0.09179,
+   "nature": "onomatopee",
+   "transcription": "quatre katakana géants + filigrane pris dans la boîte",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.4848,
+   "remplissage": 0.4681,
+   "orientation": "horizontale",
+   "fond": [
+    254,
+    254,
+    254
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 22,
+   "cle": "manga A/Vol.2/p0096/z03",
+   "boite": [
+    195,
+    419
+   ],
+   "aire_bbox": 81705,
+   "aire_frac": 0.04539,
+   "nature": "agregat",
+   "transcription": "bulle + petite onomatopée + dessin",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "あっと．．．カキちは張らせるとはあのドリル．．",
+   "verdict": "absurde",
+   "uniformite_fond": 0.6238,
+   "remplissage": 0.3468,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 23,
+   "cle": "manga A/Vol.2/p0118/z00",
+   "boite": [
+    252,
+    303
+   ],
+   "aire_bbox": 76356,
+   "aire_frac": 0.04242,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "この皆達は、",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.7007,
+   "remplissage": 0.3633,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    200,
+    199,
+    199
+   ]
+  },
+  {
+   "n": 24,
+   "cle": "manga A/Vol.2/p0123/z02",
+   "boite": [
+    71,
+    41
+   ],
+   "aire_bbox": 2911,
+   "aire_frac": 0.00162,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "«»",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.536,
+   "remplissage": 0.7815,
+   "orientation": "horizontale",
+   "fond": [
+    253,
+    253,
+    253
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 25,
+   "cle": "manga A/Vol.2/p0132/z01",
+   "boite": [
+    685,
+    849
+   ],
+   "aire_bbox": 581565,
+   "aire_frac": 0.32309,
+   "nature": "onomatopee",
+   "transcription": "うぅおぉおおりゃぁぁ!!",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "い．．．うっおおおちゃん！！",
+   "verdict": "partielle",
+   "uniformite_fond": 0.4285,
+   "remplissage": 0.5067,
+   "orientation": "carree",
+   "fond": [
+    254,
+    254,
+    254
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 26,
+   "cle": "manga A/Vol.2/p0142/z00",
+   "boite": [
+    935,
+    117
+   ],
+   "aire_bbox": 109395,
+   "aire_frac": 0.06078,
+   "nature": "narration",
+   "transcription": "私の知らないところで冗談のように変わっていく",
+   "polarite_reelle": "claire",
+   "polarite_mesuree": "claire",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "私の知らないところで歳のように変わっていく",
+   "verdict": "partielle",
+   "uniformite_fond": 1.0,
+   "remplissage": 0.0973,
+   "orientation": "horizontale",
+   "fond": [
+    0,
+    0,
+    0
+   ],
+   "encre": [
+    251,
+    251,
+    251
+   ]
+  },
+  {
+   "n": 27,
+   "cle": "manga A/Vol.3/p0015/z01",
+   "boite": [
+    136,
+    26
+   ],
+   "aire_bbox": 3536,
+   "aire_frac": 0.00196,
+   "nature": "mobilier",
+   "transcription": "filigrane de scan (latin)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "mobilier",
+   "lecture_manga_ocr": "",
+   "verdict": "ecartee_mobilier",
+   "uniformite_fond": 1.0,
+   "remplissage": 0.308,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    155,
+    124,
+    112
+   ]
+  },
+  {
+   "n": 28,
+   "cle": "manga A/Vol.3/p0016/z01",
+   "boite": [
+    87,
+    181
+   ],
+   "aire_bbox": 15747,
+   "aire_frac": 0.00874,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.5364,
+   "remplissage": 0.388,
+   "orientation": "verticale",
+   "fond": [
+    254,
+    254,
+    254
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 29,
+   "cle": "manga A/Vol.3/p0018/z01",
+   "boite": [
+    136,
+    26
+   ],
+   "aire_bbox": 3536,
+   "aire_frac": 0.00196,
+   "nature": "mobilier",
+   "transcription": "filigrane de scan (latin)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "mobilier",
+   "lecture_manga_ocr": "",
+   "verdict": "ecartee_mobilier",
+   "uniformite_fond": 1.0,
+   "remplissage": 0.308,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    155,
+    124,
+    112
+   ]
+  },
+  {
+   "n": 30,
+   "cle": "manga A/Vol.3/p0020/z01",
+   "boite": [
+    123,
+    525
+   ],
+   "aire_bbox": 64575,
+   "aire_frac": 0.03584,
+   "nature": "agregat",
+   "transcription": "bulle + onomatopée verticale",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "さまぁ見ろなんて言ったら",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.6968,
+   "remplissage": 0.406,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 31,
+   "cle": "manga A/Vol.3/p0092/z01",
+   "boite": [
+    121,
+    149
+   ],
+   "aire_bbox": 18029,
+   "aire_frac": 0.01001,
+   "nature": "onomatopee",
+   "transcription": "fragment de katakana (glyphe coupé)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.4945,
+   "remplissage": 0.4005,
+   "orientation": "carree",
+   "fond": [
+    196,
+    196,
+    196
+   ],
+   "encre": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "n": 32,
+   "cle": "manga A/Vol.4/p0031/z00",
+   "boite": [
+    150,
+    150
+   ],
+   "aire_bbox": 22500,
+   "aire_frac": 0.0125,
+   "nature": "onomatopee",
+   "transcription": "katakana stylisé (lecture incertaine)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.3757,
+   "remplissage": 0.5778,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 33,
+   "cle": "manga A/Vol.4/p0050/z01",
+   "boite": [
+    99,
+    128
+   ],
+   "aire_bbox": 12672,
+   "aire_frac": 0.00704,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.5623,
+   "remplissage": 0.5051,
+   "orientation": "carree",
+   "fond": [
+    254,
+    254,
+    254
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 34,
+   "cle": "manga A/Vol.4/p0052/z00",
+   "boite": [
+    205,
+    502
+   ],
+   "aire_bbox": 102910,
+   "aire_frac": 0.05717,
+   "nature": "agregat",
+   "transcription": "2 bulles + dessin, aucune onomatopée",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "だめだよリレティナ．．．クロアキ様と再生して頂かなくてはただ購入できる",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.6546,
+   "remplissage": 0.2171,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 35,
+   "cle": "manga A/Vol.4/p0081/z01",
+   "boite": [
+    482,
+    448
+   ],
+   "aire_bbox": 215936,
+   "aire_frac": 0.11996,
+   "nature": "agregat",
+   "transcription": "2 bulles + dessin + fragment d'onomatopée",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "荷物材子基本反応．．．アキタリアか！英雄な一度連な服のアンカーなくして子供の反動にはそうねん。",
+   "verdict": "absurde",
+   "uniformite_fond": 0.4141,
+   "remplissage": 0.2892,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 36,
+   "cle": "manga A/Vol.4/p0083/z04",
+   "boite": [
+    262,
+    357
+   ],
+   "aire_bbox": 93534,
+   "aire_frac": 0.05196,
+   "nature": "onomatopee",
+   "transcription": "gros katakana (lecture incertaine)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "へーーっ",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.4609,
+   "remplissage": 0.5768,
+   "orientation": "carree",
+   "fond": [
+    251,
+    251,
+    251
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 37,
+   "cle": "manga A/Vol.4/p0105/z00",
+   "boite": [
+    249,
+    350
+   ],
+   "aire_bbox": 87150,
+   "aire_frac": 0.04842,
+   "nature": "agregat",
+   "transcription": "bulle + dessin + filigrane",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "アルドノアドライブ出力最大ブレードフィールド領域拡大",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.6259,
+   "remplissage": 0.207,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    2,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 38,
+   "cle": "manga A/Vol.4/p0123/z02",
+   "boite": [
+    138,
+    393
+   ],
+   "aire_bbox": 54234,
+   "aire_frac": 0.03013,
+   "nature": "agregat",
+   "transcription": "bulle + dessin",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "愚かよなスパイの子よ",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.5885,
+   "remplissage": 0.4049,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 39,
+   "cle": "manga A/Vol.4/p0131/z01",
+   "boite": [
+    109,
+    62
+   ],
+   "aire_bbox": 6758,
+   "aire_frac": 0.00375,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "ponctuation",
+   "lecture_manga_ocr": "．．．",
+   "verdict": "ponctuation",
+   "uniformite_fond": 0.6384,
+   "remplissage": 0.3374,
+   "orientation": "horizontale",
+   "fond": [
+    253,
+    253,
+    253
+   ],
+   "encre": [
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "n": 40,
+   "cle": "manga A/Vol.4/p0146/z00",
+   "boite": [
+    836,
+    128
+   ],
+   "aire_bbox": 107008,
+   "aire_frac": 0.05945,
+   "nature": "narration",
+   "transcription": "冗談のように変わっていく",
+   "polarite_reelle": "claire",
+   "polarite_mesuree": "claire",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "冗談のように変わっていく",
+   "verdict": "exacte",
+   "uniformite_fond": 0.3647,
+   "remplissage": 0.4679,
+   "orientation": "horizontale",
+   "fond": [
+    0,
+    0,
+    0
+   ],
+   "encre": [
+    250,
+    250,
+    250
+   ]
+  },
+  {
+   "n": 41,
+   "cle": "manga C/Vol.1/p0009/z02",
+   "boite": [
+    323,
+    62
+   ],
+   "aire_bbox": 20026,
+   "aire_frac": 0.01123,
+   "nature": "narration",
+   "transcription": "遡ること一週間前 (furigana さかのぼ／いっしゅうかん まえ)",
+   "polarite_reelle": "evide",
+   "polarite_mesuree": "claire",
+   "polarite_juste": false,
+   "tri": "japonais",
+   "lecture_manga_ocr": "遡ること一週間前",
+   "verdict": "exacte",
+   "uniformite_fond": 0.6545,
+   "remplissage": 0.7452,
+   "orientation": "horizontale",
+   "fond": [
+    156,
+    156,
+    156
+   ],
+   "encre": [
+    253,
+    253,
+    253
+   ]
+  },
+  {
+   "n": 42,
+   "cle": "manga C/Vol.1/p0020/z02",
+   "boite": [
+    409,
+    336
+   ],
+   "aire_bbox": 137424,
+   "aire_frac": 0.07703,
+   "nature": "onomatopee",
+   "transcription": "ブツ ×6",
+   "polarite_reelle": "evide",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": false,
+   "tri": "japonais",
+   "lecture_manga_ocr": "オノデラナミ．．オノテラナ．．．．．．オノラウンの確かに名字はオノチラみたいに四文字のほうが語呂が良いわね．．",
+   "verdict": "absurde",
+   "uniformite_fond": 0.5877,
+   "remplissage": 0.3923,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 43,
+   "cle": "manga C/Vol.1/p0028/z01",
+   "boite": [
+    99,
+    181
+   ],
+   "aire_bbox": 17919,
+   "aire_frac": 0.01004,
+   "nature": "onomatopee",
+   "transcription": "ほっん…",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "まっん．．．",
+   "verdict": "partielle",
+   "uniformite_fond": 0.5572,
+   "remplissage": 0.4464,
+   "orientation": "verticale",
+   "fond": [
+    156,
+    156,
+    156
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 44,
+   "cle": "manga C/Vol.1/p0042/z00",
+   "boite": [
+    188,
+    264
+   ],
+   "aire_bbox": 49632,
+   "aire_frac": 0.02782,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "いくぶはーっ！",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.6827,
+   "remplissage": 0.2611,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 45,
+   "cle": "manga C/Vol.1/p0067/z02",
+   "boite": [
+    128,
+    39
+   ],
+   "aire_bbox": 4992,
+   "aire_frac": 0.0028,
+   "nature": "narration",
+   "transcription": "…古書店 (enseigne)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "ヒ冬古書店",
+   "verdict": "partielle",
+   "uniformite_fond": 0.6005,
+   "remplissage": 0.2923,
+   "orientation": "horizontale",
+   "fond": [
+    253,
+    253,
+    253
+   ],
+   "encre": [
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "n": 46,
+   "cle": "manga C/Vol.1/p0073/z03",
+   "boite": [
+    193,
+    231
+   ],
+   "aire_bbox": 44583,
+   "aire_frac": 0.02499,
+   "nature": "narration",
+   "transcription": "未成年なのに酒臭い…酔ってるのか？",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "未成年なのに酒臭い．．．酔ってるのか？",
+   "verdict": "exacte",
+   "uniformite_fond": 0.4591,
+   "remplissage": 0.3514,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "n": 47,
+   "cle": "manga C/Vol.1/p0076/z02",
+   "boite": [
+    397,
+    355
+   ],
+   "aire_bbox": 140935,
+   "aire_frac": 0.079,
+   "nature": "onomatopee",
+   "transcription": "katakana évidés (lecture incertaine)",
+   "polarite_reelle": "evide",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": false,
+   "tri": "japonais",
+   "lecture_manga_ocr": "んーーーふざけてるだけよおぼくたち",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.3967,
+   "remplissage": 0.4716,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "n": 48,
+   "cle": "manga C/Vol.1/p0080/z03",
+   "boite": [
+    116,
+    403
+   ],
+   "aire_bbox": 46748,
+   "aire_frac": 0.0262,
+   "nature": "agregat",
+   "transcription": "bulle + texte vertical 「傷口ない…？」",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "首を刺されて．．．．．．うん？何らか？",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.7127,
+   "remplissage": 0.2201,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 49,
+   "cle": "manga C/Vol.1/p0087/z00",
+   "boite": [
+    303,
+    248
+   ],
+   "aire_bbox": 75144,
+   "aire_frac": 0.04212,
+   "nature": "onomatopee",
+   "transcription": "katakana évidés (lecture incertaine)",
+   "polarite_reelle": "evide",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": false,
+   "tri": "japonais",
+   "lecture_manga_ocr": "そして、この一部くんだ",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.4251,
+   "remplissage": 0.5181,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    171,
+    171,
+    171
+   ]
+  },
+  {
+   "n": 50,
+   "cle": "manga C/Vol.1/p0102/z06",
+   "boite": [
+    177,
+    110
+   ],
+   "aire_bbox": 19470,
+   "aire_frac": 0.01091,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "bruit",
+   "lecture_manga_ocr": "７／１７：０１：",
+   "verdict": "ecartee_bruit",
+   "uniformite_fond": 0.4303,
+   "remplissage": 0.6372,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    45,
+    45,
+    45
+   ]
+  },
+  {
+   "n": 51,
+   "cle": "manga C/Vol.1/p0110/z00",
+   "boite": [
+    886,
+    338
+   ],
+   "aire_bbox": 299468,
+   "aire_frac": 0.16786,
+   "nature": "agregat",
+   "transcription": "onomatopées バン／パラ／ドン + 2 bulles",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "．．．そんなことじゃないんじゃねーなんかいいんだもういった",
+   "verdict": "absurde",
+   "uniformite_fond": 0.6708,
+   "remplissage": 0.3732,
+   "orientation": "horizontale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "n": 52,
+   "cle": "manga C/Vol.1/p0116/z05",
+   "boite": [
+    210,
+    215
+   ],
+   "aire_bbox": 45150,
+   "aire_frac": 0.02531,
+   "nature": "onomatopee",
+   "transcription": "ズッ",
+   "polarite_reelle": "evide",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": false,
+   "tri": "japonais",
+   "lecture_manga_ocr": "ズッ！！",
+   "verdict": "exacte",
+   "uniformite_fond": 0.3895,
+   "remplissage": 0.35,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "n": 53,
+   "cle": "manga C/Vol.1/p0138/z01",
+   "boite": [
+    99,
+    151
+   ],
+   "aire_bbox": 14949,
+   "aire_frac": 0.00838,
+   "nature": "narration",
+   "transcription": "それじゃネット注文の配送よろしく",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "それじゃネット注文の配送ようとした",
+   "verdict": "partielle",
+   "uniformite_fond": 0.1972,
+   "remplissage": 0.7205,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    164,
+    164,
+    164
+   ]
+  },
+  {
+   "n": 54,
+   "cle": "manga C/Vol.1/p0150/z01",
+   "boite": [
+    610,
+    442
+   ],
+   "aire_bbox": 269620,
+   "aire_frac": 0.15113,
+   "nature": "agregat",
+   "transcription": "logo de titre + trois blocs de narration verticale",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "いーなんだよな．．．わたくした日本人と暮らしないときちゃんといっ負けているようになっちゃったのね",
+   "verdict": "absurde",
+   "uniformite_fond": 0.8153,
+   "remplissage": 0.511,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 55,
+   "cle": "manga C/Vol.1/p0155/z01",
+   "boite": [
+    133,
+    169
+   ],
+   "aire_bbox": 22477,
+   "aire_frac": 0.0126,
+   "nature": "agregat",
+   "transcription": "enseigne + onomatopée + dessin",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "そんな．．．！！",
+   "verdict": "absurde",
+   "uniformite_fond": 0.5512,
+   "remplissage": 0.4994,
+   "orientation": "carree",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 56,
+   "cle": "manga B/Chap.5/p0013/z00",
+   "boite": [
+    62,
+    87
+   ],
+   "aire_bbox": 5394,
+   "aire_frac": 0.00183,
+   "nature": "dessin",
+   "transcription": "",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "【ド",
+   "verdict": "absurde",
+   "uniformite_fond": 0.5129,
+   "remplissage": 0.6884,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "n": 57,
+   "cle": "manga B/Chap.5/p0036/z01",
+   "boite": [
+    281,
+    281
+   ],
+   "aire_bbox": 78961,
+   "aire_frac": 0.02677,
+   "nature": "dessin",
+   "transcription": "pancartes latines dans le dessin",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "いや．．．",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.7063,
+   "remplissage": 0.2089,
+   "orientation": "carree",
+   "fond": [
+    253,
+    253,
+    253
+   ],
+   "encre": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "n": 58,
+   "cle": "manga B/Chap.5/p0037/z04",
+   "boite": [
+    56,
+    93
+   ],
+   "aire_bbox": 5208,
+   "aire_frac": 0.00177,
+   "nature": "onomatopee",
+   "transcription": "ゴッ",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "ゴッ",
+   "verdict": "exacte",
+   "uniformite_fond": 0.9627,
+   "remplissage": 0.4124,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "n": 59,
+   "cle": "manga B/Chap.5/p0081/z02",
+   "boite": [
+    201,
+    321
+   ],
+   "aire_bbox": 64521,
+   "aire_frac": 0.02188,
+   "nature": "agregat",
+   "transcription": "bulle + onomatopée ギリリ",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "誰の指示だ！",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.4727,
+   "remplissage": 0.3349,
+   "orientation": "verticale",
+   "fond": [
+    255,
+    255,
+    255
+   ],
+   "encre": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "n": 60,
+   "cle": "manga B/Chap.5/p0092/z03",
+   "boite": [
+    89,
+    148
+   ],
+   "aire_bbox": 13172,
+   "aire_frac": 0.00447,
+   "nature": "onomatopee",
+   "transcription": "katakana stylisé (lecture incertaine)",
+   "polarite_reelle": "sombre",
+   "polarite_mesuree": "sombre",
+   "polarite_juste": true,
+   "tri": "japonais",
+   "lecture_manga_ocr": "そりゃ",
+   "verdict": "plausible_fausse",
+   "uniformite_fond": 0.4156,
+   "remplissage": 0.4424,
+   "orientation": "verticale",
+   "fond": [
+    254,
+    254,
+    254
+   ],
+   "encre": [
+    1,
+    1,
+    1
+   ]
+  }
+ ]
+}

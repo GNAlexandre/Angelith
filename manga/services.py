@@ -52,11 +52,16 @@ class Services:
     ce qui permet à l'interface d'en poser un par fenêtre sans faire monter 500 Mo de modèles
     pour quelqu'un qui vient seulement regarder ses planches."""
 
-    def __init__(self, config: dict, projet: str, *, reporter=None):
+    def __init__(self, config: dict, projet: str, *, reporter=None,
+                 langue: str | None = None):
         self.config = config
         self.projet = projet
         self.reporter = reporter
         self.mcfg = config.get("manga") or {}
+        # Langue SOURCE du tome ouvert : elle décide du moteur d'OCR (`manga-ocr` ne lit que
+        # le japonais) et de la consigne envoyée au traducteur unitaire. Un `Services` vit le
+        # temps d'un tome, elle est donc posée une fois à l'ouverture.
+        self.langue = str(langue or self.mcfg.get("langue_source") or "jp").lower()
         self._cache: dict = {}
 
     # ------------------------------------------------------------------ #
@@ -71,34 +76,30 @@ class Services:
         """Détecteur de bulles (ONNX, ~104 Mo). Téléchargé au besoin, une seule fois."""
         if "det" not in self._cache:
             from . import detection
-            det_cfg = self.mcfg["detection"]
-            self._cache["det"] = detection.BubbleDetector(
-                det_cfg["model_path"], providers=det_cfg.get("providers"),
-                conf_threshold=det_cfg.get("conf_threshold", 0.35),
-                iou_threshold=det_cfg.get("iou_threshold", 0.45),
-                telechargement_auto=bool(det_cfg.get("telechargement_auto", True)),
-                model_url=det_cfg.get("model_url") or None, dire=self._dire)
+            self._cache["det"] = detection.BubbleDetector.depuis_config(
+                self.mcfg["detection"], dire=self._dire)
         return self._cache["det"]
 
     def detecteur_texte(self):
         """Détecteur du texte posé sur le dessin (second modèle ONNX)."""
         if "txt" not in self._cache:
             from . import text_detection
-            sfx_cfg = self.mcfg.get("onomatopees") or {}
-            det_cfg = self.mcfg.get("detection") or {}
-            self._cache["txt"] = text_detection.TextDetector(
-                sfx_cfg.get("model_path", "manga_models/text_detector.onnx"),
-                providers=det_cfg.get("providers"),
-                telechargement_auto=bool(sfx_cfg.get("telechargement_auto", True)),
-                model_url=sfx_cfg.get("model_url") or None, dire=self._dire)
+            self._cache["txt"] = text_detection.TextDetector.depuis_config(
+                self.mcfg.get("onomatopees") or {}, self.mcfg.get("detection") or {},
+                dire=self._dire)
         return self._cache["txt"]
 
     def lecteur(self):
-        """`MangaOCR` — ViT+BERT, ~424 Mo. Le plus cher à monter, et celui qu'on relance le
-        plus souvent depuis l'éditeur."""
+        """Moteur d'OCR adapté à la langue du tome. Le plus cher à monter, et celui qu'on
+        relance le plus souvent depuis l'éditeur.
+
+        ⚠ Routé par `ocr_routeur` et non câblé sur `MangaOCR` : relire une bulle anglaise avec
+        le modèle japonais ne rend pas un texte approximatif, il rend une chaîne collée et
+        parsemée de kanji inventés."""
         if "ocr" not in self._cache:
-            from . import ocr as ocr_mod
-            self._cache["ocr"] = ocr_mod.MangaOCR(self.mcfg.get("ocr"), dire=self._dire)
+            from . import ocr_routeur
+            self._cache["ocr"] = ocr_routeur.lecteur_pour(
+                self.langue, self.mcfg.get("ocr"), dire=self._dire)
         return self._cache["ocr"]
 
     # ------------------------------------------------------------------ #
@@ -124,6 +125,19 @@ class Services:
 
     def traducteur(self):
         return self.agents().get("manga_traducteur")
+
+    def pack(self):
+        """Le pack de la langue CIBLE, résolu une fois par session.
+
+        ⚠ Il ne sert pas qu'aux prompts de `langues/<code>/prompts/` : `Pack.consigne` porte
+        les consignes que le code assemble lui-même, dont celle du prompt unitaire
+        (`traduction_unitaire.CLE_CONSIGNE`). Sans lui, le bouton « retraduire cette bulle »
+        réclame une traduction FRANÇAISE par une consigne codée en dur, quelle que soit la
+        cible du projet."""
+        if "pack" not in self._cache:
+            from core.langues import resoudre_pack
+            self._cache["pack"] = resoudre_pack(self.config)
+        return self._cache["pack"]
 
     # ------------------------------------------------------------------ #
     # Glossaire

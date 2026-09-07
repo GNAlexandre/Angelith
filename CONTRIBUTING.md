@@ -7,12 +7,18 @@ pull request will save you time.
 
 ```bash
 pip install -r requirements.txt
-pip install -r requirements-dev.txt          # pytest + psd-tools
-python -m pytest -q                          # 1 908 tests, no LLM call required
+pip install -r requirements-dev.txt          # pytest + psd-tools + pytest-cov
+python -m pytest -q                          # 5 025 tests (2026-09-06), no LLM call required
 ```
 
 No test needs a real model: the agents are simulated. If a test needs a network connection or
 a GPU, it is a bug in the test.
+
+**One system dependency: a Japanese font.** The manga test fixture draws a synthetic page with
+one, resolved by `tools/polices.py` — first `ANGELITH_POLICE_JP`, then a per-platform candidate
+list. Windows ships `msgothic.ttc`; on Linux, `sudo apt-get install -y fonts-noto-cjk`.
+Without one, `tests/test_fixture_police.py` **fails** rather than skipping, on purpose: the old
+skip silently removed the entire detection/OCR/orchestrator coverage and left the suite green.
 
 Run the suite after **any** change to pipeline code or to a prompt, and before opening a pull
 request. A full run on a real volume takes hours; the suite takes seconds and catches most of
@@ -21,6 +27,15 @@ what that run would have found.
 ```bash
 python run.py --check                        # diagnose an installation
 ```
+
+Coverage, if you need the figure SonarQube Cloud publishes — the exact command the CI runs is
+in [docs/COMMANDES.fr.md](docs/COMMANDES.fr.md), and the targets live in `.coveragerc`.
+
+⚠ **If you add a top-level package**, add it to `sonar.sources` in
+`sonar-project.properties` as well. That list is enumerated rather than written
+`sonar.sources=.` on purpose: this repository has a `sources/` directory holding the works
+being translated, which has nothing to do with `sonar.sources` and must stay excluded. The
+price of avoiding that collision is one line to maintain by hand.
 
 ## Adding a target language
 
@@ -67,6 +82,24 @@ When the prompt is too long for a commit message, record the session in
 Undisclosed AI authorship is treated as a defect. Purely AI-generated contributions that
 nobody has read and tested are not accepted — the line that matters is not "was a model
 involved" but "did a human review this and can they defend it".
+
+**A commit written by hand is legitimate, and says so**: `Assisté par : aucun`. An absent line
+is not a declaration — it does not distinguish "hand-written" from "forgotten".
+
+`Revu et testé manuellement : non` is an honest answer, not a violation. It passes the
+disclosure check and **blocks the merge**, which is exactly the intent of the paragraph above.
+
+Check your branch before pushing:
+
+```bash
+python tools/verifier_disclosure.py --base origin/main
+```
+
+⚠ The CI job runs this on every pull request but is **not blocking yet**, and the date is
+written down. Measured over the whole history on 2026-08-28, only **7 of 105 commits** carry
+the disclosure — a guard rail that broke every build the day it landed would be disarmed the
+day after. It becomes blocking on **2026-10-01**; until then each PR publishes its own rate.
+See [docs/mesures/atelier-github-2026-08-28.md](docs/mesures/atelier-github-2026-08-28.md).
 
 ## Style
 

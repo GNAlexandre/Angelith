@@ -33,6 +33,7 @@ exactement quelle bulle de quelle page.
 """
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
@@ -41,19 +42,84 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .clean import BubbleStyle, analyze_bubble
+from core import installation
+
 from .detection import BubbleRegion
 from .geometry import width_profile
 
-# Ordre de préférence. Avant ce lot, `templates/fonts/` n'existait pas et la chaîne tombait
-# SYSTÉMATIQUEMENT sur Arial — une police de traitement de texte, qui trahit une planche au
-# premier coup d'œil. Voir `templates/fonts/README.md` pour les licences.
-DEFAULT_FONT_CANDIDATES = [
-    "templates/fonts/manga_typeset.ttf",      # ta police, sans toucher à la config
-    "templates/fonts/ComicNeue-Bold.ttf",     # défaut livré (SIL OFL 1.1)
-    "C:/Windows/Fonts/l_10646.ttf",           # Lucida Sans Unicode — cohérent avec le LN
-    "comic.ttf",
-    "arial.ttf",
-]
+# Polices LIVRÉES avec le dépôt. Avant ce lot, `templates/fonts/` n'existait pas et la chaîne
+# tombait SYSTÉMATIQUEMENT sur Arial — une police de traitement de texte, qui trahit une
+# planche au premier coup d'œil. Voir `templates/fonts/README.md` pour les licences.
+#
+# ⚠ Chemins ABSOLUS, ancrés sur la racine du dépôt. Ils étaient relatifs, donc résolus
+# contre le RÉPERTOIRE COURANT du processus : lancé d'ailleurs que de la racine,
+# `Path.exists()` échouait sur les deux et la chaîne sautait directement aux polices
+# système — un tome en Arial, sans un mot. Même idiome que `tools/banc.py`.
+# ⚠ `installation.racine_livree()` et non `Path(__file__)` depuis la 2.31.0 : gelées, ces
+# polices sont dépaquetées sous `sys._MEIPASS`, où `parents[1]` ne mène pas. La fonction rend
+# la racine du dépôt hors gel, donc ces deux chemins sont inchangés dans le dépôt.
+_RACINE = installation.racine_livree()
+POLICES_LIVREES = (
+    str(_RACINE / "templates" / "fonts" / "manga_typeset.ttf"),   # ta police, sans
+                                                                  # toucher à la config
+    str(_RACINE / "templates" / "fonts" / "ComicNeue-Bold.ttf"),  # défaut livré (OFL 1.1)
+)
+
+#: Polices SYSTÈME du repli à symboles, par plateforme — cf. `font_pour_texte`.
+#:
+#: ⚠ Cette liste était `["C:/Windows/Fonts/l_10646.ttf", "comic.ttf", "arial.ttf"]`, sans
+#: distinction de plateforme, et c'était un défaut de PRODUIT autant que de CI : hors Windows,
+#: aucun de ces chemins n'existe, la chaîne se réduisait à Comic Neue — une police latine — et
+#: le `♪` de « Moi, je préfère les filles ♪ » repartait dans la branche « supprimé ». La
+#: planche sortait donc amputée d'un signe que le traducteur avait bel et bien produit, en ne
+#: laissant qu'une ligne de rapport. Même symptôme que le skip silencieux du lot 20 : ce qui
+#: manque ne se voit qu'en lisant le compte-rendu.
+#:
+#: ⚠ Et surtout AUCUNE police CJK ici, si tentante soit-elle (Noto Sans CJK couvre tout).
+#: `font_pour_texte` bascule **toute la bulle** d'un coup : un seul `・` ferait alors changer
+#: de dessin un paragraphe entier de français, et court-circuiterait la substitution
+#: (`_SUBSTITUTIONS`) qui est le bon traitement pour ces signes-là. Les candidats ci-dessous
+#: sont des polices à large répertoire SYMBOLE mais sans kana ni kanji, exprès.
+#:
+#: · Windows — Lucida Sans Unicode est livrée avec le système et couvre ♪ ♫ ♥ → ♂ ♀.
+#: · Linux — DejaVu (`fonts-dejavu-core`, installé par `.github/workflows/ci.yml`) est
+#:   l'équivalent le plus répandu ; les deux graisses sont listées, la grasse d'abord pour
+#:   rester cohérente avec le lettrage.
+#: · macOS — présent pour un contributeur, PAS pour la CI : `docs/roadmap.md` classe macOS
+#:   hors périmètre faute de machine pour le tester.
+POLICES_SYMBOLES: dict[str, tuple[str, ...]] = {
+    "win32": (
+        "C:/Windows/Fonts/l_10646.ttf",       # Lucida Sans Unicode — cohérent avec le LN
+        # ⚠ Ces deux-là étaient écrits « comic.ttf » et « arial.ttf », sans dossier. Or
+        # les deux points d'usage filtrent par `Path(c).exists()`, résolu contre le
+        # répertoire COURANT : ils n'ont donc jamais été trouvés. Le commentaire ci-dessus
+        # promettait trois candidats sous Windows, il n'y en avait qu'un.
+        "C:/Windows/Fonts/comic.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ),
+    "linux": (
+        # Debian/Ubuntu, puis Fedora, puis Arch : le même fichier, trois emplacements.
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ),
+    "darwin": (
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+    ),
+}
+
+
+def polices_symboles(plateforme: str | None = None) -> tuple[str, ...]:
+    """Les polices système du repli sur `plateforme` (défaut : celle qui tourne)."""
+    return POLICES_SYMBOLES.get(plateforme or sys.platform, ())
+
+
+# Ordre de préférence complet : ce que le dépôt livre, puis ce que le système offre.
+DEFAULT_FONT_CANDIDATES = [*POLICES_LIVREES, *polices_symboles()]
 
 # Jusqu'où accepter de réduire la police pour éviter des lignes d'un seul mot. 0,72 laisse
 # 2 à 4 points de marge aux tailles usuelles (28 → 20), assez pour faire entrer un second mot
@@ -91,6 +157,30 @@ _DEFAUTS = {
     "harmonisation_ratio_max": 1.25,
     "debordement": "signaler",
     "glissement_vertical": 0.5,
+    # --- Lettrage d'une zone HORS BULLE (lot 22, L22.3) ------------------------------
+    #
+    # ⚠ Ces trois clés ne servent QUE `style_pour_zone` / `fit_zone`, c'est-à-dire un chemin
+    # qu'aucun mode par défaut n'emprunte. Le lettrage des bulles ne les lit jamais.
+
+    # Épaisseur du contour d'un lettrage hors bulle, en fraction du corps.
+    # 0,125 n'est pas choisi : c'est **la valeur que le dépôt emploie déjà** pour du texte
+    # posé sur du dessin — `gloss.dessiner` écrit `max(1, taille // 8)` depuis le lot 13, et
+    # c'est le seul endroit du code qui ait vu de vraies planches sur ce point. La reprendre
+    # évite d'inventer un second chiffre pour le même problème.
+    "contour_epaisseur_sfx": 0.125,
+    # Plancher d'aire d'une zone hors bulle, en px². **Désarmé (0), et c'est une mesure** :
+    # `manga.onomatopees.aire_min` borne déjà la détection à 1 200 px², donc toute zone qui
+    # arrive ici est au-dessus de `aire_min_bulle` (900) par construction. Un second plancher
+    # ne pourrait que rejeter ; il existe pour un corpus dont la détection serait réglée plus
+    # bas.
+    "aire_min_sfx": 0,
+    # Fait pivoter le lettrage d'une zone mesurée « verticale » (cf.
+    # `clean.StyleHorsBulle.orientation`). **Désarmé**, et le dire est plus honnête que
+    # l'armer : le lot 22 n'a pu lettrer AUCUNE zone réelle (taux de `lecture_sure` de 0 %),
+    # donc personne n'a vu à quoi ressemble une onomatopée française inclinée sur ce corpus.
+    # Armer un réglage qu'aucune image ne soutient est exactement ce que la règle de mesure
+    # honnête du dépôt interdit.
+    "sfx_rotation": False,
 }
 
 
@@ -122,6 +212,13 @@ class Fit:
     # planche ne doit pas y toucher : elle ramène les bulles trop grandes vers la médiane, ce
     # qui est un bon réflexe automatique et une trahison quand quelqu'un a choisi une taille.
     impose: bool = False
+    # ROTATION du calque, en degrés trigonométriques (lot 22, L22.3 capacité 2). `0.0` — le
+    # cas de toutes les bulles — ne fait rigoureusement rien : `calque_fit` ne touche à sa
+    # couche que si l'angle est non nul, et le rendu d'une bulle est donc inchangé au bit
+    # près. Elle n'existe que pour le texte hors bulle, où une colonne de katakana mesurée
+    # « verticale » (`clean.StyleHorsBulle.orientation`) demande un mot français incliné
+    # plutôt qu'un mot français horizontal posé dans une boîte étroite.
+    angle: float = 0.0
 
 
 # `resolve_font` faisait un `Path.exists()` PAR BULLE et `ImageFont.truetype` était rouvert
@@ -182,8 +279,9 @@ def font_pour_texte(texte: str, font_path: str | None = None) -> tuple[str, str]
     Sans ce repli, la planche sortait avec un carré tofu. Mesuré sur la chaîne :
 
         ComicNeue-Bold      manque ♪ ♫ ♥ ★ ☆ → ← ↑ ↓ ※ 〜 ♂ ♀
-        Lucida Sans Unicode manque         ★ ☆ 〜
-        arial.ttf           manque         ★ ☆ ※ 〜
+        Lucida Sans Unicode manque         ★ ☆ 〜          (Windows)
+        arial.ttf           manque         ★ ☆ ※ 〜        (Windows)
+        DejaVuSans-Bold     manque               〜        (Linux, `fonts-dejavu-core`)
 
     Le repli est décidé **par bulle** : la quasi-totalité garde donc Comic Neue, et seules
     celles qui contiennent un symbole exotique basculent. Renvoie
@@ -200,6 +298,154 @@ def font_pour_texte(texte: str, font_path: str | None = None) -> tuple[str, str]
             return candidat, ""
     # Aucune police complète : on garde la principale (le meilleur dessin) et on signale.
     return principal, manquants
+
+
+def explication_absence_symboles(plateforme: str | None = None) -> str:
+    """Le message d'échec quand aucune police à symboles n'est installée.
+
+    ⚠ Il existe pour la même raison que `tools.polices.explication_absence` : sans police de
+    repli, `♪ ♥ →` ne lèvent RIEN — ils partent en « supprimé » et la planche sort amputée,
+    la perte n'apparaissant que dans une ligne de rapport que personne ne relit. Le message
+    nomme donc la commande, plutôt que de laisser chercher."""
+    plat = plateforme or sys.platform
+    essais = ("\n".join(f"    · {c}" for c in polices_symboles(plat))
+              or "    · (aucun candidat connu pour cette plateforme)")
+    paquet = {"linux": "sudo apt-get install -y fonts-dejavu-core",
+              "win32": "Lucida Sans Unicode est livrée avec Windows",
+              "darwin": "installer Arial Unicode, ou pointer une police à symboles"}
+    return (
+        f"Aucune police à symboles trouvée sur cette plateforme ({plat}).\n"
+        f"  Candidats essayés :\n{essais}\n"
+        f"  Pour installer : {paquet.get(plat, 'installer une police à large répertoire')}\n"
+        f"  Ou pointer la vôtre : config.yaml > manga.typeset.font_path\n"
+        f"\n"
+        f"  ⚠ Sans elle, la chaîne se réduit aux polices LATINES livrées : ♪ ♫ ♥ ★ → ♂ ♀ ne "
+        f"sont plus dessinés du tout, ils sont SUPPRIMÉS du texte de la bulle. La planche "
+        f"part amputée d'un signe que le traducteur avait produit, sans rien de rouge nulle "
+        f"part — seulement une ligne « glyphes_manquants » dans le rapport.")
+
+
+#: Ce qu'une police de lettrage français doit savoir dessiner.
+#:
+#: Ce n'est pas une liste d'école. Chaque signe y est parce qu'il est SORTI du traducteur sur
+#: un vrai tome, ou parce qu'il appartient au jeu minimal d'une édition française. Mesuré sur
+#: manga A / Vol.1 après un changement de police : « ×17, œ ×16, » ×14,
+#: Ç ×11, — ×8, À ×5, ♪ ×2 — soit 63 bulles sur 818, réparties sur 45 planches sur 150,
+#: sorties dans une AUTRE police que celle demandée, sans une ligne de rapport.
+ALPHABET_FRANCAIS = (
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789"
+    "àâäçéèêëîïôöùûüÿœæ"
+    "ÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŒÆ"
+    ".,;:!?…«»“”‘’'\"()[]-–—/&%$#@*+=<>~|"
+)
+
+#: Police de référence pour la mesure de LARGEUR. C'est le défaut livré du dépôt : annoncer
+#: « 1,28× » ne veut rien dire sans dire 1,28 fois quoi.
+POLICE_ETALON = str(_RACINE / "templates" / "fonts" / "ComicNeue-Bold.ttf")
+
+
+@dataclass
+class Couverture:
+    """Ce qu'une police sait dessiner du français, et ce qu'elle coûte en largeur."""
+    demandee: str            #: ce que `config.yaml` demande, tel quel
+    existe: bool             #: le fichier existe-t-il ? ⚠ `resolve_font` AVALE le cas contraire
+    retenue: str             #: ce que `resolve_font` rendra vraiment
+    manquants_alphabet: str  #: signes du français courant qu'elle ne sait pas dessiner
+    manquants_textes: str    #: idem, mais vus dans les traductions réellement en cache
+    bulles_touchees: int     #: bulles qui basculeront sur une autre police
+    bulles_vues: int
+    pages_touchees: list[int]
+    largeur_relative: float  #: largeur à corps égal, rapportée à `POLICE_ETALON`
+
+
+def couverture(font_path: str | None,
+               textes_par_page: dict[int, list[str]] | None = None) -> Couverture:
+    """Mesure une police AVANT de lettrer quoi que ce soit.
+
+    Ce contrôle existe parce que le défaut qu'il détecte est entièrement silencieux : le
+    lettrage choisit sa police BULLE PAR BULLE (`font_pour_texte`), et un basculement propre
+    — la chaîne a trouvé une police couvrante — ne produit aucune entrée de rapport. Le tome
+    sort donc en trois polices sans qu'une ligne le dise, et cela ne se découvre qu'après dix
+    minutes de rendu, en relisant `RAPPORT.md`.
+
+    `textes_par_page` — les traductions en cache. Absentes (premier run), la mesure ne porte
+    que sur `ALPHABET_FRANCAIS`, et `message_couverture` le DIT plutôt que de laisser croire
+    à un contrôle complet.
+    """
+    demandee = font_path or ""
+    existe = bool(demandee) and Path(demandee).exists()
+    retenue = resolve_font(font_path)
+
+    manquants_alphabet = glyphes_manquants(retenue, ALPHABET_FRANCAIS)
+    manquants: dict[str, None] = {}
+    bulles_touchees = bulles_vues = 0
+    pages: list[int] = []
+    for page, textes in sorted((textes_par_page or {}).items()):
+        touchee = False
+        for texte in textes:
+            if not (texte or "").strip():
+                continue
+            bulles_vues += 1
+            # On mesure sur le texte tel qu'il sera DESSINÉ : les substitutions latines
+            # (『 → «) changent les glyphes demandés, et compter avant elles décrirait une
+            # bulle qui n'existe pas.
+            contenu, _police, _subs, _supp = texte_dessinable(texte, font_path)
+            absents = glyphes_manquants(retenue, contenu)
+            if absents:
+                bulles_touchees += 1
+                touchee = True
+                manquants.update(dict.fromkeys(absents))
+        if touchee:
+            pages.append(int(page))
+
+    try:
+        etalon = load_font(resolve_font(POLICE_ETALON), 24).getlength(ALPHABET_FRANCAIS)
+        largeur = load_font(retenue, 24).getlength(ALPHABET_FRANCAIS) / etalon if etalon else 1.0
+    except (OSError, SystemExit):
+        largeur = 1.0
+
+    return Couverture(demandee=demandee, existe=existe, retenue=retenue,
+                      manquants_alphabet=manquants_alphabet,
+                      manquants_textes="".join(manquants),
+                      bulles_touchees=bulles_touchees, bulles_vues=bulles_vues,
+                      pages_touchees=pages, largeur_relative=largeur)
+
+
+def message_couverture(c: Couverture) -> list[str]:
+    """Les lignes du pré-vol. Vide quand il n'y a rien à dire.
+
+    Suit `explication_absence_symboles` : nommer le problème, les glyphes, et la commande."""
+    if c.demandee and not c.existe:
+        # ⚠ Le cas le plus traître : `resolve_font` retombe EN SILENCE sur la chaîne par
+        # défaut quand le fichier n'existe pas. Les polices non livrées avec le dépôt étant
+        # absentes de toute autre machine, un tome entier peut sortir en Comic Neue sans
+        # qu'une ligne le dise.
+        return [f"[police] manga.typeset.font_path pointe un fichier ABSENT : {c.demandee}",
+                f"  → le tome sortirait en {c.retenue}, sans un mot de plus."]
+
+    lignes: list[str] = []
+    absents = c.manquants_textes or c.manquants_alphabet
+    if absents:
+        quoi = ("des traductions en cache" if c.manquants_textes else
+                "du français courant (aucune traduction en cache : la mesure ne porte que "
+                "sur l'alphabet)")
+        lignes.append(f"[police] {Path(c.retenue).name} ne couvre pas {len(absents)} "
+                      f"signe(s) {quoi} : {' '.join(absents)}")
+        if c.bulles_vues:
+            lignes.append(f"  → {c.bulles_touchees} bulle(s) sur {c.bulles_vues} "
+                          f"({len(c.pages_touchees)} planche(s)) seront dessinées dans une "
+                          f"AUTRE police, silencieusement — le repli se décide par bulle.")
+        lignes.append(f"  → pour compléter la police : "
+                      f"python tools/completer_police.py {c.retenue}")
+    if c.largeur_relative >= 1.15:
+        # Pas un défaut, une prévision : une police large fait tomber les corps et pousse les
+        # bulles étroites en débordement. Le savoir avant évite d'accuser la détection.
+        lignes.append(f"[police] {Path(c.retenue).name} est {c.largeur_relative:.2f}× plus "
+                      f"large que ComicNeue-Bold à corps égal : corps plus petits, et des "
+                      f"bulles étroites passeront en débordement (cause `police_trop_large`).")
+    return lignes
 
 
 # Équivalents latins des signes que le japonais laisse passer dans la traduction. Aucune
@@ -505,12 +751,25 @@ def _orphelines(lignes: list[str]) -> int:
 
 
 def _stroke_width(style_mode: str, size: int, cfg: dict) -> int:
-    """Épaisseur du contour du texte. **0 en mode de nettoyage « masque »** : la bulle est
-    uniformément repeinte, un contour n'apporterait rien et épaissirait le dessin des
-    lettres. Il ne sert qu'en mode « texte », où le fond de bulle a survécu et où le texte
-    doit rester lisible sur un fond non uni."""
+    """Épaisseur du contour du texte.
+
+    Trois réglages, et `contour` les nomme tous les trois (lot 22, L22.3 capacité 3) :
+
+    · `"auto"` (défaut) — **0 en mode de nettoyage « masque »** : la bulle est uniformément
+      repeinte, un contour n'apporterait rien et épaissirait le dessin des lettres. Il ne sert
+      qu'en mode « texte », où le fond de bulle a survécu et où le texte doit rester lisible
+      sur un fond non uni ;
+    · `"toujours"` (ou tout autre valeur vraie) — contour systématique. C'est ce dont une
+      onomatopée relettrée a besoin : elle est posée SUR le dessin, jamais sur un fond
+      nettoyé, et sans contour elle disparaît dans les hachures ;
+    · `"aucun"` / `"jamais"` / `False` — jamais de contour.
+
+    L'épaisseur vient de `contour_epaisseur`, en fraction du corps. Elle était jusqu'ici
+    dérivée du seul mode de nettoyage ; elle est désormais réglable indépendamment, ce qui est
+    la seule façon d'obtenir le trait épais qu'un lettrage hors bulle demande sans épaissir
+    celui des bulles."""
     reglage = cfg.get("contour", "auto")
-    if reglage is False or reglage == "aucun":
+    if reglage is False or reglage in ("aucun", "jamais"):
         return 0
     if reglage == "auto" and style_mode != "texte":
         return 0
@@ -644,8 +903,44 @@ def best_fit(text: str, style: BubbleStyle, cfg: dict, font_path: str) -> Fit:
     font_plancher = load_font(font_path, plancher)
     line_h_plancher = _line_height(font_plancher, c["interligne_min"],
                                    _stroke_width(style.mode, plancher, c))
-    if (aire < aire_min or int(lignes_utiles.size) < line_h_plancher
-            or font_plancher.getlength(plus_long) > dispo):
+    # ⚠ Ces trois critères ne se valent PAS, et les confondre a coûté deux répliques.
+    #
+    # Les deux premiers sont GÉOMÉTRIQUES : ils décrivent la région, et aucune police ne
+    # les changera. Le troisième dépend de la POLICE — il mesure un mot avec
+    # `font_plancher`.
+    #
+    # Mesuré : au passage de ComicNeue-Bold à Wildjess (~1,3× plus large à corps égal), le
+    # seul troisième critère a fait basculer page 22 bulle 2 (51×106 px, remplissage 0,874,
+    # « J'aimerais bien tirer. ») et page 68 bulle 5 (« Katch ») du côté « dégénéré ». Or le
+    # nettoyage a DÉJÀ effacé le japonais : la planche est sortie avec deux bulles
+    # BLANCHES, et le message conseillait « corriger la détection » alors que la détection
+    # n'avait pas bougé d'un pixel. `J'aimerais` à 8 px : 34 unités en Comic Neue, 45 en
+    # Wildjess.
+    #
+    # Donc : la géométrie fait toujours renoncer, la police JAMAIS. Un texte rogné se voit
+    # et se corrige ; une bulle blanche ne se voit pas.
+    #
+    # ⚠ Le critère de LARGEUR se dédouble, et l'oublier a mal classé la page 80 du Vol.1.
+    # « Un mot ne tient pas » et « pas même un caractère ne tient » ne se corrigent pas au
+    # même endroit : le premier se règle en changeant de police ou en raccourcissant, le
+    # second ne se règle pas du tout. Mesuré page 80 bulle 4 : 4 px de largeur maximale,
+    # donc `dispo = 1 px` pour 258 px de haut — l'aire utile (1 032 px²) passe le seuil et
+    # la hauteur aussi, mais aucune police n'écrira jamais dans un couloir d'un pixel.
+    # Conseiller « choisir une police moins large » y enverrait chercher un défaut qui
+    # n'existe pas : c'est la détection qui a produit ce ruban.
+    #
+    # On mesure la plus étroite LETTRE du texte : si elle ne passe pas, rien de lisible
+    # ne passera. ⚠ Pas le caractère le plus étroit tout court — le point de ComicNeue-Bold
+    # mesure 1,0 px à 8 px et « tenait » donc dans le couloir d'un pixel de la page 80,
+    # ce qui reclassait la région en défaut de police. Un texte sans aucune lettre
+    # (« … ») retombe sur le caractère le plus étroit, faute de mieux.
+    caracteres = [ch for ch in text if not ch.isspace()]
+    lettres = [ch for ch in caracteres if ch.isalnum()] or caracteres or ["i"]
+    aucun_glyphe = font_plancher.getlength(min(lettres, key=font_plancher.getlength)) > dispo
+    trop_petite = (aire < aire_min or int(lignes_utiles.size) < line_h_plancher
+                   or aucun_glyphe)
+    mot_trop_large = font_plancher.getlength(plus_long) > dispo
+    if trop_petite:
         # La région ne peut pas porter UN SEUL MOT, même au plus petit corps : ce n'est plus
         # une bulle. Le lettrage n'y peindrait que des fragments de lettres découpés par le
         # masque — on s'abstient, et le rapport pointe la DÉTECTION, pas le traducteur.
@@ -658,7 +953,16 @@ def best_fit(text: str, style: BubbleStyle, cfg: dict, font_path: str) -> Fit:
 
     # La bulle PEUT porter du texte. Reste à dire ce qui manque — la largeur ou la place :
     # c'est toute la différence entre « corriger la détection » et « raccourcir la réplique ».
-    cause = ("bulle_etroite" if font.getlength(plus_long) > dispo else "texte_trop_long")
+    #
+    # `police_trop_large` est le troisième cas : même le mot le plus long ne tient pas au
+    # plancher, mais la région, elle, est saine. Ni la détection ni la traduction ne sont
+    # en cause — c'est la POLICE. On le nomme pour que le conseil affiché cesse d'accuser
+    # la détection (cf. `orchestrator_manga`).
+    if mot_trop_large:
+        cause = "police_trop_large"
+    else:
+        cause = ("bulle_etroite" if font.getlength(plus_long) > dispo
+                 else "texte_trop_long")
 
     # Descendre sous `taille_min`, jusqu'au plancher absolu, plutôt que de déborder. Un
     # débordement fait DÉCOUPER les lettres par le masque ; un corps plus petit reste entier.
@@ -688,23 +992,29 @@ def best_fit(text: str, style: BubbleStyle, cfg: dict, font_path: str) -> Fit:
                stroke=stroke, overflow=True, repli="debordement", cause=cause)
 
 
-def harmonize(fits: list[Fit | None], cfg: dict) -> list[Fit | None]:
-    """Ramène les bulles trop grandes vers la médiane de la planche.
+def harmonize(fits: list[Fit | None], cfg: dict) -> None:
+    """Ramène les bulles trop grandes vers la médiane de la planche. **Modifie `fits` sur
+    place.**
 
     Plafond = médiane × `harmonisation_ratio_max`. **On n'agrandit JAMAIS** une petite
     bulle : elle est petite parce qu'elle est étroite, l'agrandir la ferait déborder.
     Mesuré page 60 : médiane 25, plafond 31 → 2 bulles redescendent, l'écart maximal passe
     de 2,4× à 1,9×. Une bulle dont le recalcul échoue est **gardée telle quelle** plutôt que
-    dégradée."""
+    dégradée.
+
+    ⚠ Rendait `fits` — c'est-à-dire son propre argument, par les deux chemins de sortie. Une
+    valeur de retour qui ne peut pas varier suggère un résultat là où il n'y en a pas : elle
+    invitait à écrire `fits = harmonize(fits, cfg)`, comme si la liste d'origine restait
+    intacte. Aucun des cinq appelants ne s'en servait ; la signature dit maintenant ce que la
+    fonction fait."""
     reels = [f for f in fits if f is not None and f.lines and not f.impose]
     if not cfg["harmonisation"] or len(reels) < 2:
-        return fits
+        return
     tailles = sorted(f.size for f in reels)
     mediane = tailles[len(tailles) // 2]
     plafond = int(mediane * cfg["harmonisation_ratio_max"])
     for f in reels:
         f.harmonise_vers = plafond if f.size > plafond else None
-    return fits
 
 
 def typeset_bubble(image: Image.Image, region: BubbleRegion, text: str,
@@ -763,20 +1073,39 @@ def _draw_fit(image: Image.Image, fit: Fit, style: BubbleStyle, font_path: str) 
 
 def calque_fit(fit: Fit, style: BubbleStyle,
                font_path: str) -> tuple[Image.Image, int, int] | None:
-    """Calque **RGBA** du texte d'une seule bulle, déjà découpé à l'intérieur du masque, avec
-    son décalage `(x0, y0)` dans la page. `None` si l'intérieur est vide.
+    """Calque **RGBA** du texte d'une seule bulle, déjà découpé au masque, avec son décalage
+    `(x0, y0)` dans la page. `None` si le masque est vide.
 
     Extrait de `_draw_fit` au lot 4.4 : c'est exactement l'artefact qu'un calque PSD demande
     (des pixels, un rectangle, une transparence), et il était construit puis aplati puis jeté.
     L'export PSD s'en sert tel quel pour son repli rasterisé — donc un calque rasterisé d'un
-    PSD est **pixel pour pixel** ce que la planche aplatie contient."""
-    ys, xs = np.nonzero(style.interior)
+    PSD est **pixel pour pixel** ce que la planche aplatie contient.
+
+    ## Deux capacités du lot 22, et toutes deux neutres par défaut
+
+    · **Le masque de découpe est `style.decoupe` quand il existe, `style.interior` sinon.**
+      Pour une bulle, `decoupe` est `None` et rien ne change au bit près. Pour une zone hors
+      bulle, les deux diffèrent : `interior` dit où le texte se replie, `decoupe` où il a le
+      droit d'apparaître. Sans cette dissociation, une traduction d'onomatopée serait découpée
+      à l'emprise du glyphe japonais qu'elle remplace — c'est-à-dire perdue, puisqu'elle n'a ni
+      sa forme ni sa taille.
+    · **`fit.angle` fait pivoter le calque**, autour du centre du bloc de texte, avant le
+      découpage. À `0.0` — toutes les bulles — aucune opération n'est faite. La rotation est
+      un geste sur du RGBA, avant composition : elle ne touche ni l'habillage, ni la découpe,
+      ni le masque.
+
+    ⚠ L'invariant n'est pas relâché, il est **nommé** : l'alpha est toujours multiplié par un
+    masque, et ce qui tombe hors du masque est toujours perdu. C'est le miroir exact du
+    `paint &= region.mask` de `clean.py`, et il reste indispensable dans un cas que l'échelle
+    de replis ne peut pas résoudre — un mot insécable plus large que la bulle."""
+    masque = style.decoupe if style.decoupe is not None else style.interior
+    ys, xs = np.nonzero(masque)
     if ys.size == 0:
         return None
     y0, y1 = int(ys.min()), int(ys.max()) + 1
     x0, x1 = int(xs.min()), int(xs.max()) + 1
 
-    # Calque transparent aux dimensions du seul intérieur : tout ce qui tomberait à côté est
+    # Calque transparent aux dimensions du seul masque : tout ce qui tomberait à côté est
     # écrit hors du calque, donc simplement perdu.
     calque = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
     draw = ImageDraw.Draw(calque)
@@ -788,13 +1117,32 @@ def calque_fit(fit: Fit, style: BubbleStyle,
                   stroke_fill=(*style.background, 255) if fit.stroke else None)
         y += fit.line_h
 
+    if fit.angle:
+        calque = _pivoter(calque, fit, x0, y0)
+
     # Découpage : miroir exact du `paint &= region.mask` de `clean.py`. L'invariant « aucun
     # pixel hors masque n'est modifié » ne doit pas dépendre d'un raisonnement sur la mise en
     # page — il est indispensable pour un mot insécable plus large que la bulle.
     couche = np.asarray(calque).copy()
     couche[:, :, 3] = (couche[:, :, 3].astype(np.float32)
-                       * style.interior[y0:y1, x0:x1]).astype(np.uint8)
+                       * masque[y0:y1, x0:x1]).astype(np.uint8)
     return Image.fromarray(couche, mode="RGBA"), x0, y0
+
+
+def _pivoter(calque: Image.Image, fit: Fit, x0: int, y0: int) -> Image.Image:
+    """Fait pivoter le calque de `fit.angle` degrés autour du centre du bloc de texte.
+
+    `expand=False` et un centre explicite, pour que le rectangle du calque — et donc le
+    `(x0, y0)` que l'appelant a déjà — reste exactement le même. Ce qui sort du rectangle est
+    perdu, comme tout ce qui sort du masque : c'est la même règle, appliquée au même endroit,
+    et c'est à l'appelant d'avoir donné un `decoupe` assez large s'il veut de la place.
+
+    ⚠ `BICUBIC` et non `NEAREST` : une rotation au plus proche voisin sur du texte à contour
+    produit un crénelage en escalier que le contour rend deux fois plus visible."""
+    cx = float(fit.center_x - x0)
+    cy = float(fit.top - y0) + fit.line_h * max(1, len(fit.lines)) / 2.0
+    return calque.rotate(fit.angle, resample=Image.BICUBIC, expand=False,
+                         center=(cx, cy))
 
 
 def preparer_contenu(texte: str, cfg: dict, font_path: str | None) -> tuple:
@@ -856,6 +1204,89 @@ def style_depuis_masque(style: BubbleStyle, masque) -> BubbleStyle:
     bbox = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
     return replace(style, interior=interieur, bbox=bbox,
                    center_x=_centre_x(interieur, bbox), text_mask=None)
+
+
+def angle_pour_zone(orientation: str, cfg: dict | None = None) -> float:
+    """Angle de lettrage d'une zone hors bulle, en degrés. `0.0` tant que `sfx_rotation` est
+    désarmé — c'est-à-dire toujours, par défaut.
+
+    Une seule valeur non nulle, et c'est délibéré : `clean.StyleHorsBulle.orientation` ne rend
+    pas un angle mais une classe (`verticale` / `horizontale` / `carree`), parce que c'est tout
+    ce qu'un rapport de côtés peut dire. Interpoler un angle continu à partir d'un booléen
+    serait inventer une précision que la mesure n'a pas."""
+    c = _cfg(cfg)
+    if not c.get("sfx_rotation"):
+        return 0.0
+    return 90.0 if orientation == "verticale" else 0.0
+
+
+def style_pour_zone(style_hb, bbox, forme: tuple[int, int], *,
+                    marge_decoupe: float = 0.5) -> BubbleStyle:
+    """Un `BubbleStyle` pour lettrer une zone HORS BULLE, à partir de sa mesure du lot 21.
+
+    C'est la capacité 1 de L22.3, et c'est ici qu'elle prend son sens : la zone d'habillage
+    (`interior`) est la boîte de la zone source, tandis que le masque de découpe (`decoupe`)
+    est cette même boîte **dilatée de `marge_decoupe`**. Les deux ne peuvent pas coïncider —
+    la traduction française d'un `ゴォォォ` n'a ni sa forme ni son emprise — et `style_impose`
+    ne peut pas rendre ce service : il fait du rectangle enregistré à la fois l'habillage et la
+    découpe, « et les deux ne peuvent plus diverger ».
+
+    Les couleurs viennent de la mesure : `background` est le fond local (c'est la couleur du
+    CONTOUR, cf. `calque_fit`), `text_color` le pôle contrasté. `mode="texte"` n'est pas un
+    détail — c'est lui qui fait rendre un contour à `_stroke_width` en réglage `"auto"`, et un
+    lettrage posé sur du dessin sans contour disparaît dans les hachures.
+
+    `style_hb` accepte un `clean.StyleHorsBulle` ou le dict persisté dans `sfx.json`, pour la
+    même raison que `effacement._valeur` : les deux existent, et convertir l'un vers l'autre
+    demanderait de reconstruire des champs que le cache ne porte pas."""
+    from .effacement import _valeur
+
+    h, w = forme
+    x0, y0, x1, y1 = (int(v) for v in bbox)
+    x0, y0 = max(0, min(x0, w)), max(0, min(y0, h))
+    x1, y1 = max(0, min(x1, w)), max(0, min(y1, h))
+    interieur = np.zeros((h, w), dtype=bool)
+    interieur[y0:y1, x0:x1] = True
+
+    marge_x = int(round((x1 - x0) * float(marge_decoupe)))
+    marge_y = int(round((y1 - y0) * float(marge_decoupe)))
+    decoupe = np.zeros((h, w), dtype=bool)
+    decoupe[max(0, y0 - marge_y):min(h, y1 + marge_y),
+            max(0, x0 - marge_x):min(w, x1 + marge_x)] = True
+
+    fond = tuple(int(v) for v in _valeur(style_hb, "fond", (255, 255, 255)))
+    fond_luma = float(_valeur(style_hb, "fond_luma", 255.0))
+    # Le texte prend le pôle CONTRASTÉ du fond mesuré, le contour prend le fond. C'est la
+    # règle de `gloss.dessiner`, et elle a été mesurée là-bas : deux pôles purs découpent un
+    # halo sur une trame, le fond mesuré ne le fait pas.
+    encre = (255, 255, 255) if fond_luma < 128.0 else (0, 0, 0)
+    return BubbleStyle(
+        bbox=(x0, y0, x1, y1), interior=interieur, background=fond,
+        background_luma=fond_luma, text_color=encre,
+        inverted=bool(fond_luma < 128.0), uniformity=float(
+            _valeur(style_hb, "uniformite_fond", 0.0)),
+        erode_radius=0, mode="texte", center_x=(x0 + x1) // 2,
+        ok=bool(_valeur(style_hb, "ok", False)), decoupe=decoupe)
+
+
+def fit_zone(contenu: str, style: BubbleStyle, cfg: dict, police: str, *,
+             angle: float = 0.0) -> Fit:
+    """`best_fit` pour une zone hors bulle : contour systématique, épaisseur propre, plancher
+    d'aire propre, et rotation optionnelle.
+
+    Les trois garde-fous de `best_fit` sont **paramétrés, pas contournés** — c'est ce que
+    L22.3 demande explicitement. `aire_min_bulle` et `contour_epaisseur` sont calibrés pour des
+    bulles ; les remplacer par leurs jumeaux hors bulle laisse le diagnostic géométrique
+    (`bulle_degeneree`, `bulle_etroite`, `texte_trop_long`) intact et utile, alors que le
+    désarmer perdrait ce que le lot 5 avait gagné — « le rapport a conseillé de raccourcir la
+    traduction neuf fois et n'avait raison qu'une seule »."""
+    c = dict(_cfg(cfg))
+    c["contour"] = "toujours"
+    c["contour_epaisseur"] = c["contour_epaisseur_sfx"]
+    c["aire_min_bulle"] = c["aire_min_sfx"]
+    fit = best_fit(contenu, style, c, police)
+    fit.angle = float(angle)
+    return fit
 
 
 def fit_impose(contenu: str, style: BubbleStyle, cfg: dict, police: str,
@@ -961,6 +1392,13 @@ def typeset_page(image: Image.Image, regions: list[BubbleRegion], texts: list[st
         st = style if style is not None else analyze_bubble(image, region, None)
         styles_effectifs[idx] = st
         if not st.ok or st.mode == "aucun":
+            if texte.strip() and report_out is not None:
+                # Le nettoyage a renoncé (uniformité sous `seuil_abandon`), donc le
+                # japonais est CONSERVé et la planche n'est pas trahie — mais la
+                # traduction, elle, n'est nulle part. Seule la section « Bulles NON
+                # nettoyées » en portait la trace, sans dire quel texte tombait.
+                report_out.append({"type": "replique_non_dessinee", "index": idx,
+                                   "cause": "bulle_non_nettoyee", "texte": texte})
             fits.append(None)
             continue
         contenu, police, substitues, supprimes = preparer_contenu(texte, c, font_path)
@@ -1030,6 +1468,15 @@ def typeset_page(image: Image.Image, regions: list[BubbleRegion], texts: list[st
                 fit = recalc
                 fits[idx] = fit
         _draw_fit(image, fit, st, police)
+        if not fit.lines and contenus[idx].strip() and report_out is not None:
+            # `_draw_fit` sur un `Fit` sans ligne ne peint RIEN : le calque reste
+            # transparent. Or le nettoyage a déjà effacé la source, donc la bulle sort
+            # BLANCHE et la réplique est perdue. Jusqu'ici elle n'était rapportée que
+            # comme une bulle ordinaire en débordement, sans son texte : impossible de
+            # savoir CE QUI avait disparu sans rouvrir le checkpoint.
+            report_out.append({"type": "replique_non_dessinee", "index": idx,
+                               "cause": fit.cause or "bulle_degeneree",
+                               "texte": contenus[idx]})
         if report_out is not None:
             report_out.append({
                 "type": "bulle", "index": idx, "taille": fit.size,

@@ -62,13 +62,24 @@ def _empreinte_page(ckpt_dir: Path) -> str:
 
 
 def construire(build_dir: Path, *, projet: str, tome: str, pages: list,
-               version: str, page_ckpt) -> dict:
-    """Assemble l'état du tome. `page_ckpt(build_dir, i)` rend le dossier de la planche `i`."""
+               version: str, page_ckpt,
+               format_planche: str = "manga", langue_source: str = "jp",
+               sens: str = "droite_gauche") -> dict:
+    """Assemble l'état du tome. `page_ckpt(build_dir, i)` rend le dossier de la planche `i`.
+
+    `format_planche`, `langue_source` et `sens` décrivent COMMENT le tome a été traité. Ils
+    sont écrits ici plutôt que redéduits, parce que les deux consommateurs de cet index —
+    l'interface graphique et `--assembler` — ne rescannent pas les sources : sans eux, un
+    webtoon rassemblé seul repartait en `ComicInfo.xml` avec le drapeau de lecture manga.
+
+    ⚠ Ils ne comptent PAS dans la révision (cf. `ecrire`, qui ne compare que `pages`) : ce
+    sont des métadonnées de traitement, pas du contenu de planche."""
     entrees = []
     for i, chemin in enumerate(pages, 1):
         entrees.append({"index": i, "fichier": Path(chemin).name,
                         "empreinte": _empreinte_page(page_ckpt(build_dir, i))})
     return {"format": FORMAT_PROJET, "outil": version, "projet": projet, "tome": tome,
+            "format_planche": format_planche, "langue_source": langue_source, "sens": sens,
             "revision": 1, "pages": entrees}
 
 

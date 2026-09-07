@@ -55,6 +55,11 @@ Lister les projets disponibles (ou les tomes d'UN projet) sans rien traiter :
 Importer un glossaire existant (.docx/.txt) dans l'œuvre :
   python run.py "Mon LN" --import-glossary chemin/vers/glossaire_survival.docx
 
+Réintégrer un glossaire YAML antérieur (.bak, export, ancienne installation, œuvre sœur),
+converti au passage au format multi-cibles de la 2.0.0 :
+  python run.py "Mon LN" --migrate-glossary sources/Mon LN/glossaire.bak.yaml
+  python run.py "Mon LN" --migrate-glossary ancien.yaml autre.yaml --remplacer
+
 Interface console interactive :
   python app.py
 """
@@ -65,9 +70,13 @@ from core import cli
 
 cli.configurer_stdout()
 
-from core.reporter import Reporter
-from core.version import __version__
-from pipeline import doctor
+# ⚠ Les imports qui suivent sont VOLONTAIREMENT après l'appel ci-dessus : `configurer_stdout()`
+# réencode la sortie console, et tout module qui touche à stdout en l'important — `rich` au
+# premier chef — figerait l'ancien encodage. D'où les suppressions E402 de ce bloc.
+
+from core.reporter import Reporter  # noqa: E402
+from core.version import __version__  # noqa: E402
+from pipeline import doctor  # noqa: E402
 
 # ⚠ `pipeline.orchestrator` n'est PAS importé ici, et c'est délibéré. Il tire
 # `core.agents` → `core.llm` → **`openai`**, dont l'import seul coûte **5,18 s** (mesuré au
@@ -148,6 +157,15 @@ def main() -> None:
                     help="teste la connexion au serveur LLM puis quitte")
     ap.add_argument("--import-glossary", metavar="FICHIER",
                     help="importe un glossaire .docx/.txt dans sources/<projet>/glossaire.yaml puis quitte")
+    ap.add_argument("--migrate-glossary", metavar="FICHIER", nargs="+",
+                    help="réintègre un ou plusieurs glossaires YAML ANTÉRIEURS (.bak, export, copie d'une "
+                         "ancienne installation, œuvre sœur) dans sources/<projet>/glossaire.yaml, en les "
+                         "convertissant au format multi-cibles si besoin. Les fichiers donnés font autorité "
+                         "(le premier sert de base) ; les sources ne sont jamais modifiées")
+    ap.add_argument("--remplacer", action="store_true",
+                    help="avec --migrate-glossary : ignore le glossaire actuel du projet au lieu de le "
+                         "fusionner (cas de récupération, quand c'est lui qui est abîmé). Il est sauvegardé "
+                         "en glossaire.yaml.avant-reintegration.bak avant d'être écrasé")
     ap.add_argument("--from", dest="from_stage", metavar="ÉTAPE",
                     choices=["terminologie", "traduction", "correction", "mise_en_page", "rendu"],
                     help="relance à partir de cette étape en réutilisant le cache des étapes précédentes "
@@ -158,8 +176,26 @@ def main() -> None:
                     help="reconstruit/enrichit le glossaire à partir d'un TOME DÉJÀ TRADUIT (le FR sert de pivot) "
                          "— ne retraduit ni ne réécrit rien ; nécessite projet ET tome")
     cli.ajouter_flags_veille(ap)
+    cli.ajouter_flag_sans_llm(ap)
     args = ap.parse_args()
 
+    if args.sans_llm:
+        # ⚠ **Le light novel refuse ce mode, et le motif est écrit plutôt que sous-entendu.**
+        # Il n'existe aucune surface de saisie manuelle pour de la prose : la Retouche est un
+        # éditeur de PLANCHES, et un roman rendu sans traduction sortirait avec son texte
+        # source dans un `.docx` français — une sortie fausse, pas une sortie partielle.
+        # `pipeline/orchestrator.py` le dit déjà d'un traducteur désactivé : « sans traduction,
+        # le pipeline n'a rien à produire ».
+        #
+        # ⚠ Le drapeau EXISTE quand même sur cette CLI, et c'est délibéré : l'omettre ferait
+        # croire à un oubli et renverrait un « unrecognized arguments » qui n'explique rien.
+        raise SystemExit(
+            "--sans-llm n'est pas disponible pour le light novel.\n"
+            "  La brique manga peut sortir des planches aux bulles VIDES, qu'on remplit "
+            "ensuite dans la Retouche ; il n'existe pas d'équivalent pour de la prose, et un "
+            "roman rendu sans traduction porterait son texte source dans un .docx français.\n"
+            "  → pour relire ou corriger sans serveur : run_manga.py --sans-llm, ou "
+            "config.yaml > manga.llm.actif: false")
     config = cli.charger_config(args.config)
 
     if args.verbose:
@@ -177,6 +213,7 @@ def main() -> None:
     # 0aa) Diagnostic complet de l'environnement (config, chemins, outils externes, Ollama)
     if args.check:
         cli.avertir_config(config)
+        cli.bloc_langue(config)
         sys.exit(0 if _run_doctor(config) else 1)
 
     # 0ab) Valeur ajoutée par agent, sur les checkpoints d'un tome déjà traité
@@ -207,7 +244,7 @@ def main() -> None:
                 for j, part in enumerate(ch.parts[:60], 1):
                     print(f"        {i:2d}.{j:<2d} {part.title[:64]}")
             if len(getattr(ls, "files", []) or []) > 1:
-                print(f"   fichiers concaténés (ordre de lecture) :")
+                print("   fichiers concaténés (ordre de lecture) :")
                 for f in ls.files:
                     print(f"      → {f.name}")
         # Appariement des références sur le pivot — ce que le run fera VRAIMENT.
@@ -291,6 +328,32 @@ def main() -> None:
         print(f"  Ajouts : {added['ajouts']} · fusions : {added['fusions']} · conflits : {added['conflits']}")
         if tot == 0:
             print("  ⚠ Aucune paire détectée — vérifie le format (séparateur =, :, →, tab, ou tableau).")
+        sys.exit(0)
+
+    # 2ante) Réintégration d'un glossaire antérieur (récupération / passage à la 2.0.0)
+    if args.migrate_glossary:
+        if not args.projet:
+            ap.error("précise le projet : python run.py \"Mon LN\" --migrate-glossary fichier.yaml")
+        from core import glossary
+        from core.glossary_import import reintegrer_dans_projet
+        gpath, total, rapport = reintegrer_dans_projet(
+            args.projet, args.migrate_glossary, config,
+            remplacer=args.remplacer, dry_run=args.dry_run)
+        print(f"Réintégration dans : {gpath}" + ("  [dry-run — rien n'est écrit]" if args.dry_run else ""))
+        largeur = max((len(r["fichier"].name) for r in rapport), default=0)
+        for r in rapport:
+            etat = (f"ancien format → migré sous « {glossary.cible_du_run()} » ({r['migrees']} entrée(s))"
+                    if r["ancien"] else "déjà au format multi-cibles")
+            role = " (actuel)" if r["fichier"] == gpath else ""
+            print(f"  {r['fichier'].name:<{largeur}}{role} : {r['lues']:>4} entrées lues · {etat}")
+            print(f"  {'':<{largeur}}{'':<{len(role)}}   ajouts {r['ajouts']} · fusions {r['fusions']} "
+                  f"· conflits {r['conflits']}")
+        if args.remplacer:
+            print("  glossaire actuel du projet : ignoré (--remplacer)")
+        print(f"  → {total['entrees']} entrées au total "
+              f"(ajouts {total['ajouts']} · fusions {total['fusions']} · conflits {total['conflits']})")
+        if total["sauvegarde"]:
+            print(f"  Sauvegarde : {total['sauvegarde'].name}")
         sys.exit(0)
 
     # 2bis) Optimisation autonome du glossaire de l'œuvre

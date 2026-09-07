@@ -1,0 +1,190 @@
+{
+  "_commentaire": [
+    "Workflow ComfyUI au FORMAT API — CANDIDAT du PLAN-30 L30.1, canal « image de controle ».",
+    "",
+    "⚠ CE GRAPHE N'A JAMAIS ETE EXECUTE. Etat au 2026-09-03 : la session qui l'a ecrit a",
+    "tourne sur le PC SECONDAIRE, sans ComfyUI, sans carte, et sans le poids qu'il nomme. Il",
+    "est livre comme INSTRUMENT DE MESURE, pas comme canal livre — voir le bloc _candidat",
+    "ci-dessous, et docs/mesures/canaux-2026-09-03.md.",
+    "",
+    "Il derive de qwen-image-edit-2511.api.json, qui LUI a tourne (233,7 s par image,",
+    "docs/mesures/identite-2026-08-29.md §8.8). Trois ajouts, et rien d'autre :",
+    "  · noeud 6  ModelPatchLoader             — charge le MODEL_PATCH depuis models/model_patches/",
+    "  · noeud 13 LoadImage                    — l'image de controle, marqueur %image_controle%",
+    "  · noeud 7  QwenImageDiffsynthControlnet — applique le patch AU MODELE, en serie",
+    "Le KSampler prend donc son modele du noeud 7, et non plus du noeud 3.",
+    "",
+    "⚠ CONSEQUENCE, et c'est la raison d'etre de CanalExige : ce graphe NE DEGRADE PAS. Sans",
+    "%image_controle%, l'elagage supprime les noeuds 13 et 7, et le KSampler perd son modele.",
+    "Le graphe declare donc `exige: [image_controle]`, et le moteur refuse AVANT le GPU en",
+    "nommant le champ a remplir.",
+    "",
+    "Pourquoi CANNY et pas DEPTH, alors que le PLAN-30 §2 parle de « pose » : une carte de",
+    "profondeur demande un estimateur de profondeur, c'est-a-dire un modele de plus que le",
+    "depot n'a pas et refuserait (interdit n° 4, « pas d'OpenCV pour ~60 Mo »). Une carte de",
+    "contours se derive d'un trait, et une planche de manga EST du trait. L'image de controle",
+    "reste fournie par l'utilisateur : le depot n'en fabrique aucune.",
+    "",
+    "Pourquoi l'image de CONTROLE et pas les entites+masques (EliGen) : c'est le choix de",
+    "l'etape 0.2 du plan, et il se fait sur la DETTE, pas sur l'apport — qui n'est mesure ni",
+    "pour l'un ni pour l'autre. QwenImageDiffsynthControlnet et ModelPatchLoader sont des",
+    "noeuds INTEGRES a ComfyUI (docs.comfy.org/built-in-nodes/, verifie le 2026-09-03) ;",
+    "EliGen exige un noeud TIERS (ComfyUI-QwenImageWanBridge, ou ComfyUI_Qwen-Image). Le plan",
+    "ecrit qu'« un canal qui depend d'un noeud abandonne est une dette » : a apport egal et",
+    "inconnu des deux cotes, on instrumente celui qui n'en cree aucune.",
+    "",
+    "⚠ LA RESERVE QU'IL FAUT LIRE AVANT DE LANCER : le MODEL_PATCH est publie pour Qwen-Image",
+    "(texte vers image). Ce graphe l'empile sur Qwen-Image-Edit-2511 quantifie en Q4_1. RIEN,",
+    "au 2026-09-03, n'etablit que les deux sont compatibles. C'est la PREMIERE chose que la",
+    "session du PC principal doit constater — et si le patch ne s'applique pas, le repli est",
+    "qwen-image-2512-lightning.api.json, qui perd les references, donc l'identite."
+  ],
+  "_candidat": {
+    "plan": "PLAN-30 L30.1",
+    "canal": "image_controle",
+    "motif": "graphe jamais execute au 2026-09-03 ; le poids n'est pas installe, et l'apport du canal n'est pas mesure",
+    "exige": ["image_controle"],
+    "poids": [
+      {
+        "fichier": "qwen_image_canny_diffsynth_controlnet.safetensors",
+        "dossier": "ComfyUI/models/model_patches/",
+        "source": "https://huggingface.co/Comfy-Org/Qwen-Image-DiffSynth-ControlNets",
+        "amont": "https://huggingface.co/DiffSynth-Studio/Qwen-Image-Blockwise-ControlNet-Canny",
+        "licence": "Apache-2.0",
+        "licence_verifiee_le": "2026-09-03",
+        "sha256": "NON RELEVE — le fichier n'a pas ete telecharge. Le critere 2 du PLAN-30 exige l'empreinte du fichier RECUPERE, le jour de l'installation."
+      }
+    ],
+    "noeuds_tiers": [],
+    "mesure": [
+      "python tools/comfy.py --valider illustration/workflows/qwen-image-edit-2511-controle.api.json",
+      "python tools/banc_identite.py <Projet> <Tome> --personnage <nom> --balayage --controle <image.png> --markdown",
+      "relever dans le journal du serveur : loaded completely ou partially, lowvram patches, pic VRAM, et les s/image contre les 233,7 s de l'edition a une reference"
+    ],
+    "abandon": "un « lowvram patches » qui apparait apres l'installation du patch ANNULE la livraison du canal (PLAN-30 critere 3) : le transformeur a ete rogne, et le lot 24 a chiffre ce que cela coute — facteur 9,6 sur le pas de debruitage"
+  },
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "_meta": { "title": "Transformeur Qwen-Image-Edit-2511 Q4_1 (GGUF)" },
+    "inputs": { "unet_name": "qwen-image-edit-2511-Q4_1.gguf" }
+  },
+  "2": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "LoRA Edit Lightning 4 pas" },
+    "inputs": {
+      "model": ["1", 0],
+      "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "3": {
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": { "title": "Décalage de bruit — 3.1, valeur du template officiel" },
+    "inputs": { "model": ["2", 0], "shift": 3.1 }
+  },
+  "4": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "Encodeur de texte Qwen2.5-VL-7B — sur GPU (cf. le graphe d'édition)" },
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "5": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "VAE" },
+    "inputs": { "vae_name": "qwen_image_vae.safetensors" }
+  },
+  "6": {
+    "class_type": "ModelPatchLoader",
+    "_meta": { "title": "MODEL_PATCH — ControlNet DiffSynth canny — À INSTALLER" },
+    "inputs": { "name": "qwen_image_canny_diffsynth_controlnet.safetensors" }
+  },
+  "13": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Image de contrôle (téléversée par Angelith) — ÉLAGUÉE si absente" },
+    "inputs": { "image": "%image_controle%" }
+  },
+  "7": {
+    "class_type": "QwenImageDiffsynthControlnet",
+    "_meta": { "title": "Applique le patch AU MODÈLE — en série, d'où `exige`" },
+    "inputs": {
+      "model": ["3", 0],
+      "model_patch": ["6", 0],
+      "vae": ["5", 0],
+      "image": ["13", 0],
+      "strength": 1.0
+    }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Référence 1 (téléversée par Angelith)" },
+    "inputs": { "image": "%reference_1%" }
+  },
+  "11": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Référence 2 — élaguée si la requête n'en porte qu'une" },
+    "inputs": { "image": "%reference_2%" }
+  },
+  "12": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Référence 3 — élaguée si la requête n'en porte pas trois" },
+    "inputs": { "image": "%reference_3%" }
+  },
+  "20": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": { "title": "Prompt + références" },
+    "inputs": {
+      "clip": ["4", 0],
+      "vae": ["5", 0],
+      "prompt": "%prompt%",
+      "image1": ["10", 0],
+      "image2": ["11", 0],
+      "image3": ["12", 0]
+    }
+  },
+  "21": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": { "title": "Prompt négatif + références" },
+    "inputs": {
+      "clip": ["4", 0],
+      "vae": ["5", 0],
+      "prompt": "%prompt_negatif%",
+      "image1": ["10", 0],
+      "image2": ["11", 0],
+      "image3": ["12", 0]
+    }
+  },
+  "30": {
+    "class_type": "EmptySD3LatentImage",
+    "_meta": { "title": "Toile — la dimension est choisie, pas héritée de la référence" },
+    "inputs": { "width": "%largeur%", "height": "%hauteur%", "batch_size": 1 }
+  },
+  "31": {
+    "class_type": "KSampler",
+    "_meta": { "title": "Échantillonnage — le modèle vient du nœud 7, pas du 3" },
+    "inputs": {
+      "model": ["7", 0],
+      "positive": ["20", 0],
+      "negative": ["21", 0],
+      "latent_image": ["30", 0],
+      "seed": "%graine%",
+      "steps": "%pas%",
+      "cfg": "%guidage%",
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "40": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "Décodage" },
+    "inputs": { "samples": ["31", 0], "vae": ["5", 0] }
+  },
+  "41": {
+    "class_type": "SaveImage",
+    "_meta": { "title": "Sortie (récupérée puis MARQUÉE par Angelith)" },
+    "inputs": { "images": ["40", 0], "filename_prefix": "angelith-controle" }
+  }
+}

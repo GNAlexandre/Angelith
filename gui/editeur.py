@@ -36,36 +36,56 @@ sort de l'interface est, au bit près, ce que produirait `run_manga.py --page N 
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 from PySide6.QtCore import QElapsedTimer, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPixmap, QTransform
+from PySide6.QtGui import QBrush, QColor, QIcon, QPixmap, QTransform
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QFormLayout,
                                QGroupBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
                                QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QSplitter,
-                               QLineEdit, QToolButton, QVBoxLayout, QWidget)
+                               QLineEdit, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from manga import (checkpoints, document as doc_mod, edition, etat_planches, geometry,
-                   recherche as rech_mod, recuperation)
-from . import apercu as apercu_mod
+from manga import (checkpoints, document as doc_mod, etat_planches, recherche as rech_mod, recuperation)
+from . import icones as ico
 from . import scene_planche as sp
 from . import pellicule as pel
-from .cache_apercu import CacheApercu, signature
+from . import theme
+from .editeur_apercus import MixinApercus
+from .editeur_zones import MixinZones
+from .cache_apercu import CacheApercu
 from .modele_tome import Tome
-from .travailleur import (GENRE_APERCU, GENRE_EDITION, GENRE_OCR, GENRE_REPRISE,
-                          GENRE_TRADUCTION, GENRE_VIGNETTE, FilDeTravail, Tache)
+from .travailleur import (FilDeTravail)
 
 
 # Séparateur de paragraphe des boîtes de dialogue.
 SAUT_LIGNE = chr(10) * 2
 
+#: `touche → (dx, dy)`. Le sens du déplacement d'une flèche, en pixels de planche.
+#: Déclaré au module et non dans la classe : `Qt.Key_Left` n'est pas hachable comme clé de
+#: dictionnaire de classe sans que Qt soit importé, ce qui est déjà le cas ici.
+_FLECHES = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0),
+            Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
 
-class PanneauEditeur(QWidget):
+
+class PanneauEditeur(MixinApercus, MixinZones, QWidget):
     """Colonne planches · canevas · inspecteur de bulle."""
 
     journal = Signal(str, str)                  # (niveau, message) → onglet Journal
     demande_relettrage = Signal(int, str)       # (planche, étape de reprise)
     etat_document = Signal(bool)                # reste-t-il des modifications non écrites ?
+    # L18.1 — l'état vide. Le panneau ne sait pas créer un projet : il DEMANDE, la fenêtre
+    # fait. C'est la même séparation que `demande_relettrage`, et elle vaut ici pour la même
+    # raison — la copie d'une archive appartient au fil de travail, que seule la fenêtre tient.
+    demande_creation = Signal()
+    demande_sources = Signal()
+    #: L19.7 — le SECOND état vide (« tome jamais traité ») appelait un geste que rien ne
+    #: proposait : il fallait lire la phrase, comprendre « onglet Runs », et aller le
+    #: chercher. Une place ET une forme, c'est un bouton.
+    demande_runs = Signal()
+    #: « Arrêter proprement », depuis le bandeau de l'éditeur VERROUILLÉ — `PLAN-35` L35.5.
+    #: ⚠ Le même geste que le bouton du bandeau de run et que celui du lanceur, donc le même
+    #: libellé et la même infobulle : trois formulations pour une seule garantie feraient
+    #: douter de la garantie. La fenêtre le relaie vers `_arreter_run`.
+    demande_arret = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -79,6 +99,10 @@ class PanneauEditeur(QWidget):
         # Un run global est en cours : aucune commande d'écriture ne doit se rouvrir,
         # même quand on navigue (`_afficher_bulle` réactive `bouton_rendre`).
         self._run_global = False
+        # Le motif détaillé du verrou (tome, étape, avancement) et le geste qu'il autorise.
+        # Posés par la fenêtre, jamais devinés ici : l'éditeur ne connaît pas les phases.
+        self._motif_verrou = ""
+        self._arret_possible = False
         # Filet contre un plantage. La 1.5.0 permet d'accumuler trente planches en
         # mémoire pendant une heure : une coupure de courant les perdait toutes.
         # 30 s, et seulement les planches modifiées — 13 à 41 ms par planche (mesuré).
@@ -111,6 +135,12 @@ class PanneauEditeur(QWidget):
         # Planches dont on veut l'aperçu COMPOSÉ (les autres n'auront que leur vignette).
         self._fenetre_apercu: set[int] = set()
         self.fenetre_prechargement = 10
+        # ⚠ Ce que la fenêtre a DEMANDÉ, et ce que le plafond du cache lui laisse — lot 35.
+        # Les deux sont gardés parce que l'écart est ce qu'il y a à dire à l'utilisateur :
+        # « 21 planches voulues, 12 tenables » explique un préchargement qui paraît lent
+        # bien mieux qu'une barre qui n'avance pas. Cf. `gui/vue_retouche.ligne_de_cache`.
+        self._fenetre_demandee = 0
+        self._fenetre_tenable = 0
         self._index_affiche = -1
         self._planches_verrouillees: set = set()
         # ── Le direct ──────────────────────────────────────────────────────────────────
@@ -134,6 +164,10 @@ class PanneauEditeur(QWidget):
         self._minuteur_corps.setInterval(600)
         self._minuteur_corps.timeout.connect(self._deposer_corps)
         self._corps_en_attente: tuple[int, int] | None = None
+        # Dépôt d'un déplacement ou d'un retaillage fait aux FLÈCHES (cf. `_flecher`).
+        self._minuteur_flecher = QTimer(self)
+        self._minuteur_flecher.setSingleShot(True)
+        self._minuteur_flecher.timeout.connect(self._deposer_flechage)
         # Étranglement ADAPTATIF du relettrage pendant un glisser (cf.
         # `_rafraichir_bulle_rapide`).
         self._chrono_rapide = QElapsedTimer()
@@ -143,6 +177,9 @@ class PanneauEditeur(QWidget):
         # La zone à resélectionner après une édition : `reading_order` peut avoir permuté les
         # index, donc on la retrouve par sa GÉOMÉTRIE (cf. `_resuivre_zone`).
         self._zone_a_resuivre: tuple[int, tuple] | None = None
+        # Brouillons en attente de re-clé après une édition qui a bougé les index :
+        # `(planche, [(bbox, texte), …])`. Même mécanique que `_zone_a_resuivre`.
+        self._brouillons_a_resuivre: tuple[int, list] | None = None
         self._construire()
 
     # ------------------------------------------------------------------ #
@@ -185,9 +222,16 @@ class PanneauEditeur(QWidget):
         # Cohérent une fois les tailles fixes, et loin d'être gratuit : poser les 150 vignettes
         # passe de 78 ms à 3 ms, parce que Qt cesse d'interroger le delegate item par item.
         self.liste_planches.setUniformItemSizes(True)
+        # ⚠ Aucune de ces trois listes n'a de `QLabel` associé : leur seul « libellé » est ce
+        # qu'elles contiennent. Un lecteur d'écran annonce donc « liste » et rien d'autre
+        # (L19.6.1).
+        self.liste_planches.setAccessibleName("Pellicule des planches")
+        self.liste_planches.setAccessibleDescription(
+            "Vignettes du tome. Page précédente / Page suivante changent de planche.")
         self.liste_planches.currentRowChanged.connect(self._sur_changement_planche)
 
         self.choix_filtre = QComboBox()
+        self.choix_filtre.setAccessibleName("Filtre de la pellicule")
         self.choix_filtre.addItems(list(pel.FILTRES))
         self.choix_filtre.setToolTip(
             "Ne montrer que les planches qui demandent une attention — les mêmes que celles "
@@ -200,21 +244,56 @@ class PanneauEditeur(QWidget):
         self.champ_recherche = QLineEdit()
         self.champ_recherche.setPlaceholderText("Chercher dans le tome (Entrée)…")
         self.champ_recherche.setClearButtonEnabled(True)
+        self.champ_recherche.setAccessibleName("Chercher dans le tome")
         self.champ_recherche.setToolTip(
             "Cherche dans les répliques, les corrections manuelles et l'OCR japonais.\n"
             "Insensible à la casse et aux accents ; un clic sur un résultat ouvre la bulle.")
         self.champ_recherche.returnPressed.connect(self._chercher)
 
+        # Remplacement. Le champ reste VIDE et sans effet tant qu'on ne l'utilise pas : la
+        # recherche seule est le geste courant, le remplacement l'exception.
+        self.champ_remplacement = QLineEdit()
+        self.champ_remplacement.setPlaceholderText("Remplacer par…")
+        self.champ_remplacement.setClearButtonEnabled(True)
+        self.champ_remplacement.setAccessibleName("Remplacer par")
+        # ⚠ L18.8.3 — l'infobulle disait « Remplace dans la RÉPLIQUE affichée » et contredisait
+        # son propre code : `_remplacer` applique sur toutes les occurrences cochées, dans TOUT
+        # le tome, et sa boîte de confirmation nomme d'ailleurs les planches concernées. Une
+        # infobulle qui minimise la portée d'un geste irréversible est pire qu'aucune infobulle.
+        self.champ_remplacement.setToolTip(
+            "Remplace dans TOUTES les répliques cochées ci-dessous, sur l'ensemble du tome —\n"
+            "pas seulement sur la planche affichée. La confirmation nomme les planches.\n"
+            "Jamais dans l'OCR japonais (c'est du texte source) ni dans la traduction du\n"
+            "modèle (un « --from traduction » la réécrirait). Le remplacement va dans\n"
+            "traduction_manuelle.json, comme une saisie au clavier : il survit à toute relance.\n"
+            "⚠ Ce geste ne s'annule pas d'un Ctrl+Z, qui ne couvre que la planche affichée.")
+        self.champ_remplacement.returnPressed.connect(self._remplacer)
+
+        self.bouton_remplacer = QPushButton("Remplacer")
+        self.bouton_remplacer.setEnabled(False)
+        self.bouton_remplacer.clicked.connect(self._remplacer)
+
+        ligne_remplacement = QWidget()
+        hremplacement = QHBoxLayout(ligne_remplacement)
+        hremplacement.setContentsMargins(0, 0, 0, 0)
+        hremplacement.addWidget(self.champ_remplacement, 1)
+        hremplacement.addWidget(self.bouton_remplacer)
+
         self.liste_resultats = QListWidget()
+        self.liste_resultats.setAccessibleName("Résultats de la recherche")
         self.liste_resultats.setMaximumHeight(150)
         self.liste_resultats.hide()
         self.liste_resultats.itemActivated.connect(self._aller_au_resultat)
         self.liste_resultats.itemClicked.connect(self._aller_au_resultat)
+        # ⚠ `itemChanged` couvre la COCHE comme le texte ; on ne s'en sert que pour rafraîchir
+        # le compte du bouton, jamais pour écrire.
+        self.liste_resultats.itemChanged.connect(lambda _i: self._maj_bouton_remplacer())
 
         colonne = QWidget()
         vcolonne = QVBoxLayout(colonne)
         vcolonne.setContentsMargins(0, 0, 0, 0)
         vcolonne.addWidget(self.champ_recherche)
+        vcolonne.addWidget(ligne_remplacement)
         vcolonne.addWidget(self.liste_resultats)
         vcolonne.addWidget(self.choix_filtre)
         vcolonne.addWidget(self.liste_planches, 1)
@@ -238,56 +317,251 @@ class PanneauEditeur(QWidget):
         vlayout = QVBoxLayout(centre)
         vlayout.setContentsMargins(0, 0, 0, 0)
         vlayout.addLayout(self._barre_outils())
+        # ⚠ Le TROISIÈME état vide (L19.7) : la planche existe, elle est à l'écran, et elle
+        # n'a aucune bulle. La différence avec les deux autres est qu'ici **il ne faut surtout
+        # pas cacher le canevas** — c'est la planche qu'on est venu regarder. D'où un bandeau
+        # au-dessus d'elle plutôt qu'une page à la place d'elle.
+        #
+        # Jusqu'ici, ce cas se lisait dans une ligne de journal replié à zéro. Le bouton dit ce
+        # qu'on peut faire, et il fait exactement ce qu'un tracé à la souris ferait : rien de
+        # nouveau, une place et une forme.
+        self.bandeau_vide = QWidget()
+        hvide = QHBoxLayout(self.bandeau_vide)
+        hvide.setContentsMargins(theme.Espacement.S, theme.Espacement.XS,
+                                 theme.Espacement.S, theme.Espacement.XS)
+        self.texte_vide = QLabel("")
+        self.texte_vide.setWordWrap(True)
+        self.bouton_tracer = QPushButton("Tracer une bulle à la main")
+        self.bouton_tracer.setIcon(ico.icone("rectangle"))
+        self.bouton_tracer.setToolTip(
+            "Passe en mode « + Rectangle ». Une zone tracée à la main est une bulle comme une "
+            "autre : elle se lit, se traduit et se lettre.")
+        self.bouton_tracer.clicked.connect(
+            lambda: self._changer_mode(sp.MODE_RECTANGLE))
+        hvide.addWidget(self.texte_vide, 1)
+        hvide.addWidget(self.bouton_tracer)
+        self.bandeau_vide.hide()
+        vlayout.addWidget(self.bandeau_vide)
         vlayout.addWidget(self.vue, 1)
         # Ce que le bouton grisé laissait sans réponse : où en est cette planche, et
         # reste-t-il du travail en attente ailleurs dans le tome.
         self.ligne_etat = QLabel("")
-        self.ligne_etat.setStyleSheet("color: #9aa; font-size: 11px;")
+        # ⚠ Un RÔLE, pas un `setStyleSheet` inline. Le gris `#9aa` était une valeur de thème
+        # sombre posée sur un widget que le style natif peint en blanc : 2,3:1, sous la cible
+        # de 4,5:1. Et `11px` ne suit ni le réglage système ni le facteur DPI.
+        theme.poser_role(self.ligne_etat, "faible")
+        self.ligne_etat.setAccessibleName("État de la planche affichée")
         vlayout.addWidget(self.ligne_etat)
+        # L35.5 — le bandeau d'état du panneau, et **le seul geste utile quand il verrouille**.
+        # Le verrou de run global grisait tout ce qui écrit en disant « … — affichage seul » :
+        # vrai, mais muet sur le tome, l'étape et l'avancement, donc muet sur *combien de
+        # temps*. Le bandeau du `PLAN-32` porte déjà ces chiffres ; ils descendent ici, et
+        # « Arrêter proprement » avec eux.
+        ligne_verrou = QHBoxLayout()
+        ligne_verrou.setContentsMargins(0, 0, 0, 0)
         self.etat_planche = QLabel("")
-        self.etat_planche.setStyleSheet("color: #d09030;")
-        vlayout.addWidget(self.etat_planche)
+        self.etat_planche.setWordWrap(True)
+        theme.poser_role(self.etat_planche, "modifie")
+        self.etat_planche.setAccessibleName("Bandeau d'état du panneau")
+        self.bouton_arret_verrou = QPushButton("Arrêter proprement")
+        self.bouton_arret_verrou.setToolTip(
+            "Le run s'arrête à la prochaine frontière propre — une planche, ou un lot entier "
+            "si le lot > 1 — et tout ce qui est fait est conservé.\n"
+            "Même mécanisme que `--stop` : un fichier STOP dans le dossier de build.")
+        self.bouton_arret_verrou.clicked.connect(self.demande_arret.emit)
+        self.bouton_arret_verrou.setVisible(False)
+        ligne_verrou.addWidget(self.etat_planche, 1)
+        ligne_verrou.addWidget(self.bouton_arret_verrou)
+        vlayout.addLayout(ligne_verrou)
 
-        splitter = QSplitter(Qt.Horizontal)
+        self.splitter = splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.colonne_planches)
         splitter.addWidget(centre)
         splitter.addWidget(self._inspecteur())
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([240, 860, 380])
 
+        # ⚠ Deux pages, et pas un panneau qu'on grise. Un éditeur complet mais inerte
+        # n'apprend rien à qui vient de lancer l'application sur un `sources/` vide : il
+        # montre douze boutons dont aucun ne marche. L'accueil montre DEUX boutons, dont les
+        # deux marchent — c'est tout ce qu'il y a à faire à ce moment-là.
+        self.pages = QStackedWidget()
+        self.pages.addWidget(splitter)
+        self.pages.addWidget(self._accueil())
+
         principal = QHBoxLayout(self)
-        principal.setContentsMargins(4, 4, 4, 4)
-        principal.addWidget(splitter)
+        principal.setContentsMargins(theme.Espacement.XS, theme.Espacement.XS,
+                                     theme.Espacement.XS, theme.Espacement.XS)
+        principal.addWidget(self.pages)
+        self._poser_parcours()
+
+    #: L'ordre de tabulation du panneau, dans l'ordre du TRAVAIL et non de la construction.
+    #:
+    #: ⚠ L'ordre implicite — celui de la construction, jamais vérifié — traversait recherche →
+    #: remplacement → bouton → résultats → filtre → pellicule → **les quatorze boutons de la
+    #: barre du canevas** → vue → liste de bulles → inspecteur. Passer du champ de réplique au
+    #: bouton « Retraduire » demandait une dizaine de tabulations, sur un logiciel dont c'est
+    #: le geste le plus répété (L19.6.2).
+    #:
+    #: Le parcours livré va de gauche à droite, colonne par colonne, et saute la barre du
+    #: canevas : ses quatorze boutons ont tous soit un raccourci, soit une entrée de menu.
+    PARCOURS: tuple[str, ...] = (
+        "champ_recherche", "champ_remplacement", "bouton_remplacer", "liste_resultats",
+        "choix_filtre", "liste_planches",
+        "vue",
+        "liste_bulles", "champ_trad", "champ_corps", "bouton_corps_auto",
+        "bouton_rendre", "bouton_relire", "bouton_retraduire", "bouton_reprendre",
+        "choix_etape", "bouton_appliquer",
+        "bouton_supprimer", "bouton_annuler", "bouton_refaire", "bouton_enregistrer_doc",
+        "bouton_finale",
+    )
+
+    def _poser_parcours(self) -> None:
+        """Chaîne les widgets de `PARCOURS` deux à deux — c'est tout ce que `setTabOrder` sait
+        faire, et c'est pour cela qu'un ordre explicite tient dans une table plutôt que dans
+        vingt appels dispersés."""
+        widgets = [getattr(self, nom) for nom in self.PARCOURS if hasattr(self, nom)]
+        for avant, apres in zip(widgets, widgets[1:]):
+            QWidget.setTabOrder(avant, apres)
+
+    def _accueil(self) -> QWidget:
+        """L'état vide — L18.1.
+
+        Ce que remplaçait jusqu'ici un aplat gris `QColor(40, 40, 44)` et une ligne de journal
+        décrivant un geste à faire **dans un autre logiciel** : créer une arborescence à la
+        main dans l'explorateur de fichiers."""
+        page = QWidget()
+        vertical = QVBoxLayout(page)
+        vertical.addStretch(1)
+        self.accueil_titre = QLabel("Aucun projet manga")
+        self.accueil_titre.setAlignment(Qt.AlignCenter)
+        theme.poser_role(self.accueil_titre, "titre")
+        self.accueil_texte = QLabel("")
+        self.accueil_texte.setAlignment(Qt.AlignCenter)
+        self.accueil_texte.setWordWrap(True)
+        self.accueil_texte.setMaximumWidth(640)
+        vertical.addWidget(self.accueil_titre)
+        vertical.addSpacing(8)
+        centre_texte = QHBoxLayout()
+        centre_texte.addStretch(1)
+        centre_texte.addWidget(self.accueil_texte)
+        centre_texte.addStretch(1)
+        vertical.addLayout(centre_texte)
+        vertical.addSpacing(18)
+        boutons = QHBoxLayout()
+        boutons.addStretch(1)
+        self.bouton_creer = QPushButton("Créer un projet…")
+        self.bouton_creer.setToolTip(
+            "Choisis des images ou une archive : Angelith crée "
+            "sources/<Projet>/<Tome>/<format>/ et y COPIE les fichiers.")
+        self.bouton_creer.clicked.connect(self.demande_creation.emit)
+        self.bouton_sources = QPushButton("Ouvrir le dossier de sources")
+        self.bouton_sources.setToolTip(
+            "Ouvre sources/ dans l'explorateur de fichiers, pour y déposer un tome à la main.")
+        self.bouton_sources.clicked.connect(self.demande_sources.emit)
+        self.bouton_runs = QPushButton("Aller à l'onglet « Runs »")
+        self.bouton_runs.setToolTip(
+            "Ouvre l'onglet qui lance le traitement. La première passe d'un tome — la "
+            "détection des bulles — compte en heures.")
+        self.bouton_runs.clicked.connect(self.demande_runs.emit)
+        boutons.addWidget(self.bouton_creer)
+        boutons.addWidget(self.bouton_sources)
+        boutons.addWidget(self.bouton_runs)
+        boutons.addStretch(1)
+        vertical.addLayout(boutons)
+        vertical.addSpacing(10)
+        astuce = QLabel("… ou fais glisser un dossier de planches, un .cbz ou un .cbr "
+                        "n'importe où sur cette fenêtre.")
+        astuce.setAlignment(Qt.AlignCenter)
+        theme.poser_role(astuce, "faible")
+        vertical.addWidget(astuce)
+        vertical.addStretch(2)
+        return page
+
+    #: `nom d'état vide → boutons montrés`. Deux états, deux gestes attendus — et rien
+    #: d'autre à l'écran : un éditeur complet mais inerte n'apprend rien à qui vient d'ouvrir
+    #: l'application sur un `sources/` vide.
+    BOUTONS_ACCUEIL = {
+        "aucun_projet": ("bouton_creer", "bouton_sources"),
+        "jamais_traite": ("bouton_runs",),
+    }
+
+    def montrer_accueil(self, titre: str, texte: str, cas: str = "aucun_projet") -> None:
+        """Bascule sur l'état vide, avec ce qu'il faut dire **et le bouton qui va avec**.
+
+        ⚠ Les deux cas n'appellent pas les mêmes gestes, et c'est tout l'intérêt de les
+        distinguer. « Aucun projet » veut un projet ; « jamais traité » veut un run, et
+        proposer « Créer un projet… » à quelqu'un qui vient d'en créer un serait lui rendre le
+        geste qu'il vient de faire."""
+        self.accueil_titre.setText(titre)
+        self.accueil_texte.setText(texte)
+        montres = self.BOUTONS_ACCUEIL.get(cas, self.BOUTONS_ACCUEIL["aucun_projet"])
+        for nom in ("bouton_creer", "bouton_sources", "bouton_runs"):
+            getattr(self, nom).setVisible(nom in montres)
+        self.pages.setCurrentIndex(1)
+
+    def montrer_editeur(self) -> None:
+        self.pages.setCurrentIndex(0)
 
     def _barre_outils(self) -> QHBoxLayout:
         barre = QHBoxLayout()
         self._groupe_modes = QButtonGroup(self)
         self._groupe_modes.setExclusive(True)
         outils = [
-            (sp.MODE_CHOISIR, "Choisir", "Sélectionner une bulle (aucune modification)"),
-            (sp.MODE_RECTANGLE, "+ Rectangle", "Tracer une bulle manquée, masque rectangulaire"),
-            (sp.MODE_ELLIPSE, "+ Ellipse", "Tracer une bulle manquée, masque elliptique — la "
+            (sp.MODE_CHOISIR, "choisir", "Choisir",
+             "Sélectionner une bulle (aucune modification)"),
+            (sp.MODE_RECTANGLE, "rectangle", "+ Rectangle",
+             "Tracer une bulle manquée, masque rectangulaire"),
+            (sp.MODE_ELLIPSE, "ellipse", "+ Ellipse", "Tracer une bulle manquée, masque "
+                                           "elliptique — la "
                                            "forme d'un ballon, et pas de coins repeints"),
-            (sp.MODE_MODIFIER, "Redessiner",
+            (sp.MODE_MODIFIER, "redessiner", "Redessiner",
              "Repart d'une forme NEUVE (rectangle ou ellipse) pour la bulle sélectionnée, et "
              "remet son OCR et sa traduction à zéro — les pixels lus ne sont plus les mêmes.\n"
              "Pour simplement agrandir, rétrécir ou déplacer une bulle EN GARDANT son texte, "
              "tire ses poignées en mode Choisir."),
-            (sp.MODE_SCINDER, "Scinder", "Tracer un trait au travers de la bulle sélectionnée "
-                                         "pour la couper en deux"),
+            (sp.MODE_SCINDER, "scinder", "Scinder",
+             "Tracer un trait au travers de la bulle sélectionnée pour la couper en deux"),
         ]
-        for mode, libelle, aide in outils:
+        # ⚠ `_boutons_modes` est un DICTIONNAIRE mode → bouton, et ce n'est pas du confort.
+        #
+        # `keyPressEvent` retrouvait le bouton « Choisir » en comparant son LIBELLÉ AFFICHÉ :
+        #
+        #     if bouton.text() == "Choisir":
+        #
+        # Renommer ce bouton, le traduire, ou seulement lui ajouter un raccourci entre
+        # parenthèses cassait la touche Échap — en silence, et sans qu'aucun test ne le voie.
+        # Le mode est l'identité de l'outil ; le libellé est ce qu'on en montre.
+        self._boutons_modes: dict[str, QToolButton] = {}
+        # ⚠ `1`–`5` sont des raccourcis MONO-TOUCHE dans un panneau qui porte quatre champs de
+        # saisie. Ils ne sont donc PAS déclarés en `setShortcut` — un raccourci de portée
+        # fenêtre volerait le « 1 » qu'on tape dans une réplique. Ils passent par
+        # `keyPressEvent`, qui ne les voit que si aucun champ n'a consommé la touche : la même
+        # mécanique que `PagePrec`/`PageSuiv`, et pour la même raison.
+        self._modes_par_rang: dict[int, str] = {}
+        #: `mode → nom d'icône`. Gardé pour la bascule de thème, qui repeint les cinq.
+        self._icones_modes: dict[str, str] = {m: n for m, n, _l, _a in outils}
+        for rang, (mode, nom_icone, libelle, aide) in enumerate(outils, 1):
             bouton = QToolButton()
             bouton.setText(libelle)
-            bouton.setToolTip(aide)
+            # ⚠ Icône **et** libellé, jamais l'icône seule (L19.4.3). Ces cinq outils font des
+            # choses irréversibles hors annulation — « Redessiner » remet l'OCR et la
+            # traduction de la bulle à zéro — et aucun pictogramme ne dira jamais cela.
+            bouton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            bouton.setIcon(ico.icone(nom_icone))
+            bouton.setToolTip(f"{aide}\n(touche {rang})")
+            bouton.setAccessibleName(libelle)
             bouton.setCheckable(True)
             bouton.clicked.connect(lambda _c, m=mode: self._changer_mode(m))
             self._groupe_modes.addButton(bouton)
+            self._boutons_modes[mode] = bouton
+            self._modes_par_rang[rang] = mode
             barre.addWidget(bouton)
             if mode == sp.MODE_CHOISIR:
                 bouton.setChecked(True)
 
         self.bouton_supprimer = QPushButton("Supprimer la zone")
+        self.bouton_supprimer.setIcon(ico.icone("supprimer"))
         self.bouton_supprimer.setToolTip("Retire une fausse détection. Les autres bulles "
                                          "gardent leur texte, et le dessin d'origine revient "
                                          "sous la zone retirée.")
@@ -296,27 +570,29 @@ class PanneauEditeur(QWidget):
         barre.addWidget(self.bouton_supprimer)
         barre.addStretch(1)
 
+        # ⚠ Plus aucun `setShortcut` sur ces trois boutons : ils se branchent sur les actions
+        # de menu (`brancher_actions`), qui portent la déclaration UNIQUE de leur séquence.
+        # C'est exactement le défaut du `Ctrl+Shift+S` déclaré deux fois — sur un bouton et
+        # sur une action de menu, tous deux enfants de la fenêtre — mais généralisé avant
+        # qu'il ne se reproduise.
         self.bouton_annuler = QPushButton("Annuler")
-        self.bouton_annuler.setShortcut("Ctrl+Z")
+        self.bouton_annuler.setIcon(ico.icone("annuler"))
         self.bouton_annuler.setToolTip("Annule le dernier geste. L'historique remonte "
                                        "jusqu'à l'ouverture de la planche.")
-        self.bouton_annuler.clicked.connect(self._annuler)
         self.bouton_refaire = QPushButton("Refaire")
-        self.bouton_refaire.setShortcut("Ctrl+Y")
-        self.bouton_refaire.clicked.connect(self._refaire)
-        # ⚠ « Enregistrer la planche », pas « Enregistrer » : l'inspecteur porte déjà
-        # « Garder ma version », et deux boutons dont le nom promet une écriture, dont l'un
-        # est presque toujours grisé, ne se distinguent pas. Le grisé n'était d'ailleurs pas
-        # un défaut mais l'absence de modification — que rien n'annonçait, d'où la ligne
-        # d'état sous la barre.
-        self.bouton_enregistrer_doc = QPushButton("Enregistrer la planche")
-        self.bouton_enregistrer_doc.setShortcut("Ctrl+S")
+        self.bouton_refaire.setIcon(ico.icone("refaire"))
+        # ⚠ L18.5 — « Enregistrer CETTE planche », face à « Enregistrer TOUT LE TOME » dans la
+        # barre haute. Les deux libellés promettaient la même écriture, la distinction ne
+        # vivait que dans une infobulle, et les deux boutons sont aux deux extrémités de
+        # l'écran. Le verbe est le même — c'est le bon verbe — mais chacun porte désormais sa
+        # PORTÉE dans son libellé, et celui du tome porte en plus son compteur.
+        self.bouton_enregistrer_doc = QPushButton("Enregistrer cette planche")
+        self.bouton_enregistrer_doc.setIcon(ico.icone("enregistrer"))
         self.bouton_enregistrer_doc.setToolTip(
-            "Écrit sur le disque ce qui a été modifié sur CETTE planche (Ctrl+S). Rien n'est "
-            "écrit avant — c'est ce qui permet d'essayer, puis de revenir en arrière.\n"
+            "Écrit sur le disque ce qui a été modifié sur CETTE planche. Rien n'est écrit "
+            "avant — c'est ce qui permet d'essayer, puis de revenir en arrière.\n"
             "Grisé = cette planche n'a aucune modification en attente.\n"
-            "Pour tout écrire et réassembler : « Enregistrer les modifications du projet ».")
-        self.bouton_enregistrer_doc.clicked.connect(self.enregistrer_document)
+            "Pour tout écrire et réassembler : « Enregistrer tout le tome ».")
         barre.addWidget(self.bouton_annuler)
         barre.addWidget(self.bouton_refaire)
         barre.addWidget(self.bouton_enregistrer_doc)
@@ -324,13 +600,14 @@ class PanneauEditeur(QWidget):
 
         self.bouton_finale = QToolButton()
         self.bouton_finale.setText("Comparer au rendu du pipeline")
+        self.bouton_finale.setAccessibleName("Comparer au rendu du pipeline")
         self.bouton_finale.setCheckable(True)
         self.bouton_finale.setToolTip(
             "Bascule entre la planche NETTOYÉE — celle qui porte les calques de texte "
             "déplaçables — et la page telle que le pipeline l'a écrite. Comparer reste "
             "utile, mais on ne peut rien déplacer sur une image aplatie.\n"
             "Le retour est instantané : l'aperçu reste en cache.")
-        self.bouton_finale.clicked.connect(self._basculer_fond)
+        self.bouton_finale.clicked.connect(self.basculer_fond)
         barre.addWidget(self.bouton_finale)
 
         # Groupe de zoom. « Ajuster » fonctionnait déjà, mais `_charger_planche` ajuste à
@@ -339,21 +616,35 @@ class PanneauEditeur(QWidget):
         barre.addSpacing(12)
         self.bouton_zoom_moins = QToolButton()
         self.bouton_zoom_moins.setText("−")
+        self.bouton_zoom_moins.setIcon(ico.icone("zoom_moins"))
         self.bouton_zoom_moins.setToolTip("Dézoomer")
-        self.bouton_zoom_moins.clicked.connect(lambda: self._zoomer(1 / 1.25))
+        self.bouton_zoom_moins.setAccessibleName("Dézoomer")
         self.etiquette_zoom = QLabel("—")
         self.etiquette_zoom.setMinimumWidth(52)
         self.etiquette_zoom.setAlignment(Qt.AlignCenter)
+        self.etiquette_zoom.setAccessibleName("Grossissement")
         self.bouton_zoom_plus = QToolButton()
         self.bouton_zoom_plus.setText("+")
+        self.bouton_zoom_plus.setIcon(ico.icone("zoom_plus"))
         self.bouton_zoom_plus.setToolTip("Zoomer")
-        self.bouton_zoom_plus.clicked.connect(lambda: self._zoomer(1.25))
-        self.bouton_ajuster = QPushButton("Ajuster (F)")
-        self.bouton_ajuster.setShortcut("F")
+        self.bouton_zoom_plus.setAccessibleName("Zoomer")
+        # ⚠ `F` était un raccourci MONO-TOUCHE dans un panneau qui porte quatre champs de
+        # saisie. Il n'était sauvé que par le fait que `keyPressEvent` est neutralisé pendant
+        # une saisie — un filet, pas une conception. `Ctrl+0` (la convention) le remplace, et
+        # `F` reste un alias : le retirer casserait la main de qui l'utilise depuis six mois.
+        # Le libellé ne cite plus la touche : le menu Affichage la montre, et deux endroits qui
+        # annoncent un raccourci finissent par en annoncer deux différents.
+        self.bouton_ajuster = QPushButton("Ajuster")
+        self.bouton_ajuster.setIcon(ico.icone("ajuster"))
         self.bouton_ajuster.setToolTip("Ramène la planche entière dans la fenêtre.")
-        self.bouton_ajuster.clicked.connect(self._ajuster)
         self.bouton_garder_zoom = QToolButton()
         self.bouton_garder_zoom.setText("🔒")
+        # ⚠ Un lecteur d'écran annonce « 🔒 » comme « cadenas fermé », ou comme rien du tout.
+        # Les quatre libellés de cette barre qui ne sont pas des mots — `🔒`, `−`, `+`, `%` —
+        # sont les seuls widgets de l'interface dont le nom accessible n'est PAS déductible de
+        # ce qui est écrit dessus. C'est une heure de travail et c'est ce qui décide qu'un
+        # lecteur d'écran est utilisable ou pas (L19.6.1).
+        self.bouton_garder_zoom.setAccessibleName("Garder le cadrage d'une planche à l'autre")
         self.bouton_garder_zoom.setCheckable(True)
         self.bouton_garder_zoom.setToolTip(
             "Garder le cadrage d'une planche à l'autre.\n"
@@ -364,16 +655,135 @@ class PanneauEditeur(QWidget):
         for widget in (self.bouton_zoom_moins, self.etiquette_zoom, self.bouton_zoom_plus,
                        self.bouton_ajuster, self.bouton_garder_zoom):
             barre.addWidget(widget)
+        # ⚠ Hors du parcours de tabulation (L19.6.4) : les quatorze boutons de cette barre
+        # séparaient le champ de réplique du bouton « Retraduire » par une dizaine de
+        # tabulations. Les trois du zoom ont chacun un raccourci de menu (Ctrl+±, Ctrl+0) et
+        # n'ont donc rien à faire dans un parcours au clavier.
+        for widget in (self.bouton_zoom_moins, self.bouton_zoom_plus, self.bouton_ajuster):
+            widget.setFocusPolicy(Qt.NoFocus)
         self.vue.zoom_change.connect(self._maj_zoom)
         return barre
 
-    def _zoomer(self, facteur: float) -> None:
+    def zoomer(self, facteur: float) -> None:
         self.vue.scale(facteur, facteur)
         self._maj_zoom()
 
-    def _ajuster(self) -> None:
+    def ajuster(self) -> None:
         self.vue.ajuster()
         self._maj_zoom()
+
+    # ------------------------------------------------------------------ #
+    # Les actions de la fenêtre — L18.4
+    # ------------------------------------------------------------------ #
+
+    def brancher_actions(self, actions: dict, brancher) -> None:
+        """Relie les boutons de l'éditeur aux actions du menu.
+
+        ⚠ C'est ici que la règle « une action = une déclaration de raccourci » se referme :
+        les boutons perdent leur `setShortcut` et gagnent celui de l'action, avec son
+        infobulle. Un bouton qui déclarait son propre raccourci était la moitié du défaut
+        `Ctrl+Shift+S` ; l'autre moitié était l'action de menu qui déclarait le même."""
+        brancher(self.bouton_annuler, "annuler")
+        brancher(self.bouton_refaire, "refaire")
+        brancher(self.bouton_enregistrer_doc, "enregistrer_planche")
+        brancher(self.bouton_ajuster, "ajuster")
+        brancher(self.bouton_zoom_plus, "zoom_plus")
+        brancher(self.bouton_zoom_moins, "zoom_moins")
+        # Les deux bascules sont l'inverse : c'est le bouton qui commande, l'action de menu ne
+        # fait que le refléter. Les brancher dans les deux sens ferait une boucle.
+        self._actions_bascule = {
+            "garder_cadrage": actions.get("garder_cadrage"),
+            "comparer_rendu": actions.get("comparer_rendu"),
+        }
+        self.bouton_garder_zoom.toggled.connect(
+            lambda actif: self._refleter_bascule("garder_cadrage", actif))
+        self.bouton_finale.toggled.connect(
+            lambda actif: self._refleter_bascule("comparer_rendu", actif))
+
+    def _refleter_bascule(self, identifiant: str, actif: bool) -> None:
+        action = getattr(self, "_actions_bascule", {}).get(identifiant)
+        if action is not None and action.isChecked() != actif:
+            action.blockSignals(True)
+            action.setChecked(actif)
+            action.blockSignals(False)
+
+    def annuler(self) -> None:
+        self._annuler()
+
+    def refaire(self) -> None:
+        self._refaire()
+
+    # ------------------------------------------------------------------ #
+    # L18.7 — la disposition de l'éditeur survit au redémarrage
+    # ------------------------------------------------------------------ #
+
+    def reglages(self) -> dict:
+        return {"colonnes": list(self.splitter.sizes()),
+                "filtre": self.choix_filtre.currentText(),
+                "garder_cadrage": bool(self.bouton_garder_zoom.isChecked())}
+
+    def rafraichir_theme(self) -> None:
+        """Reprend les couleurs et les icônes du thème COURANT — appelé à la bascule.
+
+        ⚠ Ce que la feuille de style ne couvre pas, et qu'il faut donc reprendre à la main :
+
+        - les **icônes**, rendues en pixmap avec la couleur du token au moment du rendu ;
+        - la **scène**, faite de `QGraphicsItem` qu'aucune règle QSS n'atteint — fond, cadres
+          de zone, poignées, pastilles de numéro ;
+        - l'**aplat d'attente** de la pellicule, un `QPixmap` rempli une fois pour toutes ;
+        - la **teinte des légendes** de la pellicule, posée item par item.
+
+        Rien de tout cela n'est du style : ce sont des pixels déjà peints. Un thème qui ne les
+        reprendrait pas laisserait une bande de vignettes du thème précédent au milieu d'une
+        fenêtre basculée."""
+        for mode, bouton in getattr(self, "_boutons_modes", {}).items():
+            nom = self._icones_modes.get(mode)
+            if nom:
+                bouton.setIcon(ico.icone(nom))
+        for bouton, nom in ((self.bouton_supprimer, "supprimer"),
+                            (self.bouton_annuler, "annuler"),
+                            (self.bouton_refaire, "refaire"),
+                            (self.bouton_enregistrer_doc, "enregistrer"),
+                            (self.bouton_zoom_moins, "zoom_moins"),
+                            (self.bouton_zoom_plus, "zoom_plus"),
+                            (self.bouton_ajuster, "ajuster")):
+            bouton.setIcon(ico.icone(nom))
+        # L'aplat d'attente est mis en cache sur l'instance : sans cet oubli, la pellicule
+        # garderait le gris clair du thème précédent jusqu'au prochain lancement.
+        self._attente = None
+        self.vue.setBackgroundBrush(QBrush(theme.qcolor("canevas_fond")))
+        self.scene.rafraichir_theme()
+        if self.tome is not None:
+            self.rafraichir_pellicule()
+
+    def poser_disposition(self) -> None:
+        """Repose les colonnes une fois la fenêtre affichée. Appelée par `Fenetre.showEvent`."""
+        colonnes = getattr(self, "_colonnes_a_poser", None)
+        if colonnes:
+            self.splitter.setSizes(colonnes)
+            self._colonnes_a_poser = None
+
+    def appliquer_reglages(self, etat: dict) -> None:
+        """Repose les colonnes, le filtre et le verrou de cadrage.
+
+        ⚠ Une taille de colonne à zéro est REFUSÉE. Un état persisté corrompu — ou seulement
+        une fenêtre fermée alors qu'un panneau était replié à fond — rouvrirait sur une
+        pellicule invisible, et la sortie de secours serait d'aller éditer un JSON. « Réinitialiser
+        la disposition » existe pour les cas plus graves, mais celui-là est trop courant pour
+        lui être renvoyé."""
+        colonnes = [int(c) for c in (etat.get("colonnes") or []) if isinstance(c, (int, float))]
+        if len(colonnes) == self.splitter.count() and all(c >= 40 for c in colonnes):
+            self.splitter.setSizes(colonnes)
+            # ⚠ Et on les GARDE pour les reposer au premier affichage. `QSplitter.setSizes` sur
+            # un widget qui n'a pas encore de géométrie est sans effet : Qt répartit à parts
+            # égales à la première mise en page. Les réglages sont lus dans `__init__`, donc
+            # bien avant `show()` — sans ce second passage, la disposition persistée serait
+            # écrite fidèlement et jamais appliquée.
+            self._colonnes_a_poser = colonnes
+        filtre = etat.get("filtre")
+        if filtre and self.choix_filtre.findText(filtre) >= 0:
+            self.choix_filtre.setCurrentText(filtre)
+        self.bouton_garder_zoom.setChecked(bool(etat.get("garder_cadrage")))
 
     def _maj_zoom(self) -> None:
         self.etiquette_zoom.setText(f"{self.vue.transform().m11() * 100:.0f} %")
@@ -386,13 +796,20 @@ class PanneauEditeur(QWidget):
         return (rect.size(), QTransform(self.vue.transform()),
                 self.vue.mapToScene(self.vue.viewport().rect().center()))
 
-    def _reprendre_cadrage(self, avant) -> None:
+    def _reprendre_cadrage(self, avant, *, meme_planche: bool = False) -> None:
         """Restaure le cadrage précédent, ou ajuste.
 
         ⚠ On ne le restaure que si la planche fait la MÊME taille. À grossissement égal sur
         une planche plus petite, le point qu'on regardait tombe hors de l'image : on
-        découvrirait du vide, ce qui est pire que d'avoir reperdu son zoom."""
-        if avant is None or not self.bouton_garder_zoom.isChecked():
+        découvrirait du vide, ce qui est pire que d'avoir reperdu son zoom.
+
+        ⚠ `meme_planche` court-circuite le bouton 🔒, et c'est délibéré : celui-ci répond à la
+        question « garder le cadrage en CHANGEANT de planche ? », qui n'a rien à voir. Quand
+        on recharge la planche qu'on est déjà en train de regarder — après une édition de zone,
+        une relecture, une retraduction — reperdre son zoom n'est jamais ce qu'on veut. Sur un
+        webtoon de 9 551 px de haut, `fitInView` ramenait la planche à 3 % à chaque bulle
+        ajoutée, et faisait perdre l'endroit où l'on travaillait."""
+        if avant is None or not (meme_planche or self.bouton_garder_zoom.isChecked()):
             self.vue.ajuster()
             return
         taille, transfo, centre = avant
@@ -408,6 +825,7 @@ class PanneauEditeur(QWidget):
         layout = QVBoxLayout(panneau)
 
         self.liste_bulles = QListWidget()
+        self.liste_bulles.setAccessibleName("Bulles, dans l'ordre de lecture")
         self.liste_bulles.setSelectionMode(QAbstractItemView.SingleSelection)
         self.liste_bulles.currentRowChanged.connect(self._sur_choix_liste)
         layout.addWidget(QLabel("Bulles (ordre de lecture)"))
@@ -419,9 +837,11 @@ class PanneauEditeur(QWidget):
         self.champ_ocr.setReadOnly(True)
         self.champ_ocr.setMaximumHeight(70)
         self.champ_ocr.setPlaceholderText("japonais lu par l'OCR")
+        self.champ_ocr.setAccessibleName("Texte source lu par l'OCR")
         self.champ_trad = QPlainTextEdit()
         self.champ_trad.setMaximumHeight(90)
         self.champ_trad.setPlaceholderText("réplique française")
+        self.champ_trad.setAccessibleName("Réplique traduite")
         self.champ_trad.textChanged.connect(self._sur_saisie)
         forme.addRow("OCR", self.champ_ocr)
         forme.addRow("Réplique", self.champ_trad)
@@ -438,6 +858,8 @@ class PanneauEditeur(QWidget):
         self.champ_corps = QSpinBox()
         self.champ_corps.setRange(0, 200)
         self.champ_corps.setSpecialValueText("auto")
+        # ⚠ Le suffixe « px » est le libellé visible de ce champ, et ce n'est pas un mot.
+        self.champ_corps.setAccessibleName("Corps de la police de cette bulle, en pixels")
         self.champ_corps.setSuffix(" px")
         self.champ_corps.setToolTip(
             "Corps de la police pour CETTE bulle. « auto » rend la taille au moteur, qui "
@@ -489,6 +911,7 @@ class PanneauEditeur(QWidget):
         appliquer = QGroupBox("Appliquer à la planche")
         vappliquer = QVBoxLayout(appliquer)
         self.choix_etape = QComboBox()
+        self.choix_etape.setAccessibleName("Étape à relancer sur cette planche")
         self.choix_etape.addItem("Relettrer (aucun appel LLM)", "rendu")
         self.choix_etape.addItem("Renettoyer puis relettrer", "nettoyage")
         self.choix_etape.addItem("Retraduire toute la planche", "traduction")
@@ -537,10 +960,20 @@ class PanneauEditeur(QWidget):
         self.liste_planches.clear()
         index = tome.index_planches()
         if not index:
+            # Le SECOND état vide : le tome existe, il n'a simplement jamais été traité. Il
+            # ne se confond pas avec le premier (« aucun projet ») et n'appelle pas les mêmes
+            # boutons — ici, ce qu'il faut, c'est lancer un run.
             self.journal.emit("warn", f"{tome.projet} / {tome.tome} : aucune planche traitée "
                                       f"— lance un run d'abord.")
             self.scene.charger(None, [])
+            self.montrer_accueil(
+                f"{tome.projet} / {tome.tome} — jamais traité",
+                "Ce tome porte des sources mais aucun checkpoint : il n'y a rien à éditer "
+                "tant qu'un run n'a pas détecté ses bulles. "
+                "La toute première passe (détection) compte en heures.",
+                cas="jamais_traite")
             return
+        self.montrer_editeur()
         for numero, fichier in index:
             item = QListWidgetItem()
             # La grille suffit à supprimer les chevauchements ; le `sizeHint` supprime en plus
@@ -567,15 +1000,32 @@ class PanneauEditeur(QWidget):
         assert self.tome is not None
         return self.cache_etats.lire(self.tome.build_dir, numero)
 
+    def _brouillons_de(self, numero: int) -> int:
+        """Combien de modifications non écrites porte cette planche — L18.6.
+
+        Les saisies en attente ET le document modifié : une bulle déplacée n'est pas un
+        brouillon de texte mais reste du travail que rien n'a écrit, et c'est exactement l'un
+        des trois gestes qui ne produisaient aucun retour dans le panneau."""
+        saisies = len(self._brouillons_par_planche.get(numero) or {})
+        document = self.documents.get(numero)
+        if document is not None and document.modifie:
+            saisies = max(1, saisies)
+        return saisies
+
     def _parer_item(self, item: QListWidgetItem, numero: int) -> None:
         """Pose la vignette, la légende et la couleur d'une planche."""
         if self.tome is None:
             return
         etat = self._etat(numero)
-        item.setText(pel.legende(etat))
-        item.setToolTip(etat_planches.libelle_etat(etat))
-        teinte = pel.couleur(etat)
-        item.setForeground(QColor(teinte) if teinte else QColor())
+        brouillons = self._brouillons_de(numero)
+        item.setText(pel.legende(etat, brouillons))
+        detail = etat_planches.libelle_etat(etat)
+        if brouillons:
+            detail += f" · {brouillons} modification(s) NON enregistrée(s)"
+        item.setToolTip(detail)
+        # `pellicule` décide d'un RÔLE (elle est Qt-libre) ; le thème décide du pixel.
+        role = pel.role_couleur(etat, brouillons)
+        item.setForeground(theme.qcolor(role) if role else QColor())
         chemin = pel.chemin_vignette(self.tome.build_dir, numero)
         item.setIcon(QIcon(str(chemin)) if chemin.exists() else self._icone_attente())
 
@@ -583,16 +1033,21 @@ class PanneauEditeur(QWidget):
         """Aplat neutre à la taille d'une vignette, pour une planche pas encore miniaturisée.
 
         Une cellule vide serait à la bonne taille — la grille s'en charge — mais ne dirait pas
-        s'il reste du travail ou si la planche n'a simplement rien à montrer. Le cadre donne
+        s'il reste du travail ou si la planche n'a simplement rien à montrer. L'aplat donne
         cette lecture d'un coup d'œil, et l'image le remplace à sa place exacte, sans que rien
         ne bouge.
+
+        ⚠ Sa couleur était `#e9e9ec` : **1,1:1 sur le blanc d'une liste**, donc invisible.
+        Le rôle `vignette_attente` la porte maintenant à 3:1 sur le fond de la pellicule, dans
+        les deux thèmes — la docstring ci-dessus décrivait une lecture « d'un coup d'œil »
+        qu'aucun contraste ne rendait possible.
 
         Construit UNE fois et gardé : c'est un objet Qt, donc du fil d'affichage — ce que
         `_parer_item` est déjà, et ce que la voie de lecture n'est pas."""
         icone = getattr(self, "_attente", None)
         if icone is None:
             plaque = QPixmap(pel.LARGEUR, pel.HAUTEUR_ICONE)
-            plaque.fill(QColor("#e9e9ec"))
+            plaque.fill(theme.qcolor("vignette_attente"))
             icone = self._attente = QIcon(plaque)
         return icone
 
@@ -611,11 +1066,17 @@ class PanneauEditeur(QWidget):
         self._appliquer_filtre()
 
     def _chercher(self) -> None:
-        """Cherche dans tout le tome et liste les occurrences."""
+        """Cherche dans tout le tome et liste les occurrences.
+
+        Les résultats REMPLAÇABLES (ceux de la réplique affichée) portent une case, cochée par
+        défaut. Les autres — OCR japonais, traduction du modèle — restent de simples lignes de
+        navigation : un remplacement n'y a pas de sens, et leur donner une case laisserait
+        croire le contraire."""
         self.liste_resultats.clear()
-        motif = self.champ_recherche.text().strip()
+        self._motif_courant = motif = self.champ_recherche.text().strip()
         if self.tome is None or not motif:
             self.liste_resultats.hide()
+            self._maj_bouton_remplacer()
             return
         resultats = rech_mod.chercher(self.tome.build_dir, motif)
         for res in resultats:
@@ -623,12 +1084,76 @@ class PanneauEditeur(QWidget):
                 f"{res['planche']} · bulle {res['bulle'] + 1} [{res['champ']}] "
                 f"{res['extrait']}")
             item.setData(Qt.UserRole, (res["planche"], res["bulle"]))
+            if res["champ"] == rech_mod.CHAMP_AFFICHEE:
+                item.setData(Qt.UserRole + 1, True)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked)
             self.liste_resultats.addItem(item)
         if not resultats:
             # Une liste vide qui disparaît laisserait croire que la recherche n'a pas eu lieu.
             self.liste_resultats.addItem(QListWidgetItem(f"aucune occurrence de « {motif} »"))
         self.liste_resultats.show()
+        self._maj_bouton_remplacer()
         self.journal.emit("info", f"Recherche « {motif} » : {len(resultats)} occurrence(s).")
+
+    def _occurrences_cochees(self) -> list[dict]:
+        """Les occurrences remplaçables dont la case est cochée."""
+        cochees = []
+        for ligne in range(self.liste_resultats.count()):
+            item = self.liste_resultats.item(ligne)
+            if not item.data(Qt.UserRole + 1) or item.checkState() != Qt.Checked:
+                continue
+            planche, bulle = item.data(Qt.UserRole)
+            cochees.append({"planche": planche, "bulle": bulle,
+                            "champ": rech_mod.CHAMP_AFFICHEE})
+        return cochees
+
+    def _maj_bouton_remplacer(self) -> None:
+        n = len(self._occurrences_cochees())
+        self.bouton_remplacer.setEnabled(bool(n) and self.tome is not None)
+        self.bouton_remplacer.setText(f"Remplacer ({n})" if n else "Remplacer")
+
+    def _remplacer(self) -> None:
+        """Applique le remplacement aux occurrences cochées, après confirmation.
+
+        ⚠ La confirmation n'est pas une politesse. Un remplacement porte sur des dizaines de
+        planches d'un coup et ne se défait pas par `Ctrl+Z` : l'historique d'annulation vit
+        dans le document de la planche AFFICHÉE, il ne couvre pas les trente-neuf autres."""
+        occurrences = self._occurrences_cochees()
+        motif = getattr(self, "_motif_courant", "")
+        par = self.champ_remplacement.text()
+        if self.tome is None or not occurrences or not motif:
+            return
+
+        planches = sorted({o["planche"] for o in occurrences})
+        reponse = QMessageBox.question(
+            self, "Remplacer dans le tome",
+            f"Remplacer « {motif} » par « {par} » dans {len(occurrences)} réplique(s), "
+            f"sur {pel.nommer(planches)} ?\n\n"
+            f"Le texte est écrit comme une correction manuelle : il survivra aux relances, "
+            f"mais ce geste ne s'annule pas d'un Ctrl+Z — celui-ci ne couvre que la planche "
+            f"affichée.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reponse != QMessageBox.Yes:
+            return
+
+        try:
+            modifiees = rech_mod.remplacer(self.tome.build_dir, motif, par, occurrences)
+        except Exception as err:      # noqa: BLE001 — un échec ici ne doit pas tuer l'éditeur
+            self.journal.emit("warn", f"Remplacement impossible : {err}")
+            return
+
+        for numero in modifiees:
+            self.invalider_document(numero)
+        self.rafraichir_pellicule(modifiees)
+        if self.planche is not None and self.planche.index in modifiees:
+            self._charger_planche(self.planche.index)
+        self.journal.emit(
+            "info",
+            f"« {motif} » → « {par} » : {len(occurrences)} réplique(s) sur "
+            f"{len(modifiees)} planche(s). Elles sont à relettrer "
+            f"(« Enregistrer les modifications du projet »).")
+        self._chercher()      # la liste décrivait l'état d'avant
 
     def _aller_au_resultat(self, item) -> None:
         """Ouvre la planche du résultat et met le curseur dans sa bulle."""
@@ -700,11 +1225,51 @@ class PanneauEditeur(QWidget):
         # Le titre `[*]` parle du TOME, pas de la planche affichée : c'est ce qui a un sens
         # maintenant qu'on peut corriger dix planches avant d'enregistrer.
         self.etat_document.emit(bool(self.planches_modifiees()))
+        # L18.6 — la pastille de la vignette concernée suit. Le mécanisme existait déjà
+        # (`pellicule.pastilles`) ; il ne comptait simplement pas les brouillons, et rien dans
+        # la pellicule ne distinguait donc une planche corrigée-non-écrite d'une planche
+        # intacte. On ne repare QUE la planche affichée : `_parer_item` relit un état mémoïsé,
+        # mais repasser sur 150 items à chaque frappe reste du travail pour rien.
+        if self.planche is not None:
+            item = self._item_de(self.planche.index)
+            if item is not None:
+                self._parer_item(item, self.planche.index)
         self._maj_ligne_etat()
+
+    #: Ce que le bandeau du troisième état vide annonce, par cas.
+    TEXTES_VIDE = {
+        "jamais_detectee":
+            "Cette planche n'a jamais été analysée : aucune bulle n'a été détectée dessus. "
+            "Un run la traiterait avec les autres — ou trace la première zone toi-même.",
+        "aucune_bulle":
+            "La détection a tourné sur cette planche et n'y a trouvé aucune bulle. C'est "
+            "normal sur une illustration pleine page ; ça ne l'est pas sur une planche "
+            "dialoguée.",
+    }
+
+    def _maj_bandeau_vide(self) -> None:
+        """Le TROISIÈME état vide (L19.7) : une planche à l'écran, et rien à éditer dessus.
+
+        ⚠ Deux cas, et ils ne disent pas la même chose. « Jamais analysée » est un travail qui
+        reste à faire ; « analysée, zéro bulle » est un RÉSULTAT, qui peut être juste (une
+        illustration pleine page) ou faux (une planche dialoguée que le détecteur a manquée).
+        Les confondre ferait relancer un run là où il n'y a rien à trouver, ou renoncer là où
+        il y avait tout à reprendre."""
+        if self.planche is None or self.tome is None:
+            self.bandeau_vide.hide()
+            return
+        if self.planche.bulles:
+            self.bandeau_vide.hide()
+            return
+        detectee = bool(self._etat(self.planche.index).get("detectee"))
+        self.texte_vide.setText(
+            self.TEXTES_VIDE["aucune_bulle" if detectee else "jamais_detectee"])
+        self.bandeau_vide.show()
 
     def _maj_ligne_etat(self) -> None:
         """La ligne sous la barre d'outils. Elle répond à la question que le bouton grisé
         laissait sans réponse : « pourquoi ne puis-je pas enregistrer ? »."""
+        self._maj_bandeau_vide()
         if self.planche is None or self.tome is None:
             self.ligne_etat.setText("")
             return
@@ -989,7 +1554,14 @@ class PanneauEditeur(QWidget):
             # Griser les boutons ne suffit pas : déplacer un bloc ou tirer une poignée n'est
             # pas un clic sur un widget, c'est un geste sur la scène. Il faut le refuser là.
             self.scene.regler_interaction(not actif and not self.bouton_finale.isChecked())
-            self.etat_planche.setText(f"{libelle} — affichage seul" if actif else "")
+            self._libelle_verrou = f"{libelle} — affichage seul" if actif else ""
+            if not actif:
+                # ⚠ Le motif MEURT avec le verrou. Le laisser derrière ferait réapparaître
+                # « étape traduction, planche 84/131 » au premier bandeau suivant — un
+                # avancement figé sur un run terminé, c'est-à-dire un faux.
+                self._motif_verrou = ""
+                self._arret_possible = False
+            self._maj_bandeau()
             return
         if actif:
             self._planches_verrouillees.add(planche)
@@ -1000,8 +1572,61 @@ class PanneauEditeur(QWidget):
         for widget in self._widgets_mutants():
             widget.setEnabled(not occupee)
         self.vue.setEnabled(not occupee)
-        self.etat_planche.setText(
-            f"Planche {courante} — {libelle}…" if occupee else "")
+        self._libelle_verrou = f"Planche {courante} — {libelle}…" if occupee else ""
+        self._maj_bandeau()
+
+    #: Ce que le bandeau annonce quand la comparaison au rendu du pipeline est armée.
+    #:
+    #: ⚠ **Le cas le plus important de la liste des états** (`PLAN-19` L19.5). Cocher
+    #: « Comparer au rendu du pipeline » coupe TOUTE interaction du canevas — les poignées et
+    #: les calques disparaissent, `regler_interaction(False)` est appelé deux lignes plus
+    #: bas — et le seul indice était l'état enfoncé d'un bouton. Le cas voisin du run, lui,
+    #: affichait « — affichage seul » depuis toujours. Deux situations identiques pour
+    #: l'utilisateur, un seul bandeau : c'est celui qui manquait.
+    BANDEAU_COMPARAISON = "Rendu du pipeline — affichage seul, rien n'est déplaçable ici"
+
+    def poser_motif_de_verrou(self, motif: str, *, arret_possible: bool = True) -> None:
+        """Le motif détaillé du verrou de run global, et le bouton qui va avec — L35.5.
+
+        Appelée par `Fenetre._repeindre_bandeau`, donc à chaque battement de progression :
+        c'est ce qui fait que le tome, l'étape et le compte restent d'accord avec le bandeau
+        de run, quelle que soit la destination affichée.
+
+        ⚠ **Elle n'arme rien toute seule.** Si `_run_global` est faux — aucun run n'a
+        verrouillé ce panneau — le motif est ignoré : un relettrage de planche unique a son
+        propre retour, local, et lui superposer un bandeau de run ferait clignoter le panneau
+        à chaque geste (c'est la raison pour laquelle `_repeindre_bandeau` est muet hors run
+        global).
+
+        ⚠ `arret_possible=False` retire le bouton plutôt que de le griser. Toutes les tâches
+        globales n'ont pas de frontière propre — un import de glossaire, une copie de sources
+        s'arrêtent quand ils ont fini — et proposer « Arrêter proprement » là où rien ne
+        l'écoute serait promettre une garantie qu'on ne tient pas. Même arbitrage que
+        `BandeauDeRun.demarrer`."""
+        if not getattr(self, "_run_global", False):
+            return
+        self._motif_verrou = str(motif or "")
+        self._arret_possible = bool(arret_possible)
+        self._maj_bandeau()
+
+    def _maj_bandeau(self) -> None:
+        """Le bandeau d'état, composé d'une seule source.
+
+        Le verrou l'emporte : pendant un run, savoir que rien ne s'écrit prime sur savoir
+        pourquoi la planche est aplatie."""
+        verrou = getattr(self, "_libelle_verrou", "")
+        if verrou:
+            # ⚠ Le motif DÉTAILLÉ l'emporte sur le libellé de tâche quand la fenêtre en a
+            # posé un : il porte le tome, l'étape et l'avancement, là où le libellé seul ne
+            # dit que ce que la tâche s'appelle.
+            motif = getattr(self, "_motif_verrou", "")
+            self.etat_planche.setText(motif or verrou)
+            self.bouton_arret_verrou.setVisible(
+                bool(motif) and getattr(self, "_arret_possible", False))
+            return
+        self.bouton_arret_verrou.setVisible(False)
+        compare = self.bouton_finale.isChecked()
+        self.etat_planche.setText(self.BANDEAU_COMPARAISON if compare else "")
 
     # ------------------------------------------------------------------ #
     # Chargement
@@ -1017,8 +1642,26 @@ class PanneauEditeur(QWidget):
         """Affiche une planche. **Ne demande plus rien** : chaque planche garde son document
         et ses brouillons, donc changer de planche ne met plus rien en péril."""
         assert self.tome is not None
+        # Capturé AVANT la réaffectation : c'est ce qui distingue « je recharge ce que je
+        # regarde » de « je change de planche » (cf. `_reprendre_cadrage`).
+        meme_planche = self.planche is not None and self.planche.index == numero
         self.planche = self.tome.planche(numero)
         self.revision_ouverte = self.tome.revision()
+        # AVANT tout ce qui lit les brouillons (`_remplir_liste_bulles`, `_figer_plan_apercu`)
+        # et avant `_appliquer_document` : leurs index doivent déjà être les bons.
+        self._resuivre_brouillons()
+        # ⚠ FILET : un document dont le nombre de régions ne correspond plus au disque est
+        # périmé, et l'appliquer serait pire que de ne rien faire — `_appliquer_document`
+        # réaligne PAR POSITION, donc il recollerait les textes sur les mauvaises bulles.
+        # `invalider_document` couvre déjà les chemins d'édition connus ; cette garde-ci
+        # couvre ceux qu'on oublierait de brancher plus tard, et elle est bon marché.
+        perime = self.documents.get(numero)
+        if perime is not None and len(perime.etat.regions) != len(self.planche.bulles):
+            self.journal.emit(
+                "warn", f"Planche {numero} : le cache d'édition en mémoire ({len(perime.etat.regions)} "
+                        f"bulles) ne correspond plus au disque ({len(self.planche.bulles)}) — "
+                        f"il est relu.")
+            self.documents.pop(numero, None)
         if self.planche.detectee and numero not in self.documents:
             try:
                 self.documents[numero] = doc_mod.DocumentPlanche.ouvrir(
@@ -1040,8 +1683,9 @@ class PanneauEditeur(QWidget):
         # tirer. Une poignée qui répondrait sur une image cuite promettrait ce qu'elle ne peut
         # pas tenir.
         self.scene.regler_interaction(not montrer_finale and not self._run_global)
+        self._maj_bandeau()
         self.scene.charger(fond, self.planche.bulles)
-        self._reprendre_cadrage(avant)
+        self._reprendre_cadrage(avant, meme_planche=meme_planche)
         self._remplir_liste_bulles()
         self._resuivre_zone()
         self._maj_ligne_etat()
@@ -1197,7 +1841,7 @@ class PanneauEditeur(QWidget):
         appartient au champ, et le détourner ferait sauter de planche au milieu d'une
         réplique."""
         touche = event.key()
-        saisie = self.champ_trad.hasFocus() or self.champ_ocr.hasFocus()
+        saisie = self._en_saisie()
         if not saisie and touche == Qt.Key_PageUp:
             self.aller_a(-1)
             return
@@ -1205,15 +1849,81 @@ class PanneauEditeur(QWidget):
             self.aller_a(1)
             return
         if touche == Qt.Key_Escape:
-            for bouton in self._groupe_modes.buttons():
-                if bouton.text() == "Choisir":
-                    bouton.setChecked(True)
-                    break
             self._changer_mode(sp.MODE_CHOISIR)
+            return
+        if not saisie and Qt.Key_1 <= touche <= Qt.Key_9:
+            mode = self._modes_par_rang.get(touche - Qt.Key_1 + 1)
+            if mode is not None:
+                self._changer_mode(mode)
+                return
+        if not saisie and touche in _FLECHES and self._flecher(touche, event.modifiers()):
             return
         super().keyPressEvent(event)
 
+    # ------------------------------------------------------------------ #
+    # L'alternative clavier aux gestes de canevas — L19.6.6
+    # ------------------------------------------------------------------ #
+    #
+    # ⚠ **Ce qui n'est PAS couvert, et c'est écrit plutôt que prétendu : DESSINER une zone.**
+    # Tracer un rectangle au clavier demande une notion de curseur dans la scène — un point
+    # courant, visible, déplaçable, avec un geste d'ancrage puis un geste d'extension — c'est
+    # un autre chantier que celui-ci. Déplacer et retailler la zone SÉLECTIONNÉE couvrent
+    # l'essentiel du travail de retouche, et sont livrés.
+    #
+    # Le dépôt est TEMPORISÉ, et ce n'est pas un raffinement : `zone_retaillee` réécrit
+    # `regions.json`, `masks.png` **et repeint la planche nettoyée**, ouverture du scan
+    # d'origine comprise — de l'ordre de la seconde. Une écriture par flèche rendrait le geste
+    # inutilisable et empilerait vingt pas d'historique pour un déplacement de vingt pixels.
+    # C'est la même mécanique que le glisser à la souris : beaucoup de `zone_en_cours`, un
+    # seul dépôt au relâchement. Ici, le « relâchement » est une pause de la main.
+
+    #: Pas fin, en pixels de planche.
+    PAS_FIN = 1
+    #: Pas large — `Maj`. Dix pixels : ce qui se voit d'un coup d'œil sur une planche affichée
+    #: à 50 %, sans faire sortir la bulle du ballon en trois pressions.
+    PAS_LARGE = 10
+    #: Délai avant dépôt, en millisecondes. 500 ms : au-dessus de la répétition automatique du
+    #: clavier (~30 ms), donc une seule écriture pour une flèche tenue enfoncée ; assez court
+    #: pour que l'écriture parte pendant qu'on regarde encore le résultat.
+    DELAI_DEPOT_MS = 500
+
+    def _flecher(self, touche, modificateurs) -> bool:
+        """Une flèche : déplace (seule ou `Maj`) ou retaille (`Ctrl`) la zone sélectionnée."""
+        if self.planche is None or self.scene.index_courant < 0:
+            return False
+        dx, dy = _FLECHES[touche]
+        pas = self.PAS_LARGE if modificateurs & Qt.ShiftModifier else self.PAS_FIN
+        if modificateurs & Qt.ControlModifier:
+            bouge = self.scene.retailler_zone_courante(dx * pas, dy * pas)
+        else:
+            bouge = self.scene.deplacer_zone_courante(dx * pas, dy * pas)
+        if bouge:
+            self._minuteur_flecher.start(self.DELAI_DEPOT_MS)
+        return bouge
+
+    def _deposer_flechage(self) -> None:
+        """La main s'est arrêtée : on dépose, comme un relâchement de souris."""
+        self.scene.deposer_zone_courante()
+
+    def _en_saisie(self) -> bool:
+        """Un champ de texte a le focus — les raccourcis mono-touche lui appartiennent.
+
+        ⚠ La liste couvre les QUATRE champs, pas les deux d'origine. `champ_recherche` et
+        `champ_remplacement` sont arrivés après `keyPressEvent`, et taper « 1 » dans une
+        recherche aurait changé d'outil de dessin sous les doigts."""
+        return any(champ.hasFocus() for champ in
+                   (self.champ_trad, self.champ_ocr,
+                    self.champ_recherche, self.champ_remplacement))
+
     def _changer_mode(self, mode: str) -> None:
+        """Choisit l'outil, et met le bouton en accord.
+
+        ⚠ Le bouton se retrouve par son MODE, jamais par son libellé. `keyPressEvent`
+        comparait `bouton.text() == "Choisir"` : renommer ce bouton, le traduire ou lui
+        ajouter « (1) » cassait la touche Échap, en silence."""
+        bouton = getattr(self, "_boutons_modes", {}).get(mode)
+        if bouton is not None and not bouton.isChecked():
+            bouton.setChecked(True)
         self.scene.mode = mode
         if mode in (sp.MODE_RECTANGLE, sp.MODE_ELLIPSE, sp.MODE_MODIFIER):
             self.scene.forme_ajout = (sp.MODE_ELLIPSE if mode == sp.MODE_ELLIPSE
@@ -1241,308 +1951,18 @@ class PanneauEditeur(QWidget):
             return False
         return True
 
-    def _contexte(self) -> edition.ContextePlanche | None:
-        """Le contexte qui autorise la repeinte de `pages_clean/`.
-
-        `None` quand l'image source est introuvable : l'opération se fera alors en
-        métadonnées seules, et l'appelant le dit — mieux vaut une zone non vidée annoncée
-        qu'un échec opaque."""
-        if self.tome is None or self.planche is None:
-            return None
-        source = self.tome.chemin_source(self.planche.index)
-        if source is None:
-            return None
-        return edition.ContextePlanche(
-            image_source=source, chemin_clean=self.planche.chemin_clean,
-            cfg_nettoyage=(self.tome.config.get("manga") or {}).get("nettoyage"))
-
-    def _soumettre(self, genre: str, libelle: str, fonction, *,
-                   fusionnable: bool = False, discret: bool = False) -> None:
-        if self.fil is None or self.planche is None:
-            return
-        planche = self.planche.index
-        cle = (planche, genre) if fusionnable else None
-        accepte = self.fil.soumettre(Tache(genre=genre, fonction=fonction, planche=planche,
-                                           libelle=libelle, cle_fusion=cle))
-        # `discret` : la composition d'aperçu tourne à chaque changement de planche.
-        # La journaliser noierait les messages qui comptent sous un défilé de routine.
-        if not discret:
-            self.journal.emit("info", f"{libelle}…" if accepte
-                              else f"{libelle} : déjà en attente, demande fusionnée")
-
-    def _executer_edition(self, operation, description: str, *, suivre=None) -> None:
-        """Une édition de zone : vérification de fraîcheur ICI (sur le fil d'affichage, où la
-        boîte de dialogue est légale), exécution LÀ-BAS (dans la file).
-
-        `suivre` est la boîte de la zone manipulée. Après l'édition la planche est rechargée et
-        la sélection perdue ; on la retrouve par cette géométrie (cf. `_resuivre_zone`), parce
-        que `reading_order` a pu réordonner les index entre-temps."""
-        if not self._verifier_fraicheur():
-            return
-        if suivre is not None and self.planche is not None:
-            self._zone_a_resuivre = (self.planche.index, tuple(suivre))
-        self._soumettre(GENRE_EDITION, description, lambda: _resume_edition(operation()))
-
-    def _sur_zone_dessinee(self, boite, forme: str) -> None:
-        if self.planche is None:
-            return
-        bbox, ckpt, ctx = _bbox(boite), self.planche.ckpt_dir, self._contexte()
-        self._executer_edition(
-            lambda: edition.ajouter_zone(ckpt, bbox, forme=forme, ctx=ctx),
-            f"Planche {self.planche.index} : zone ajoutée")
-
-    def _sur_zone_modifiee(self, index: int, boite, forme: str) -> None:
-        if self.planche is None or index < 0:
-            return
-        bbox, ckpt, ctx = _bbox(boite), self.planche.ckpt_dir, self._contexte()
-        self._executer_edition(
-            lambda: edition.modifier_zone(ckpt, index, bbox, forme=forme, ctx=ctx),
-            f"Planche {self.planche.index} : bulle {index + 1} redessinée")
-
-    def _sur_coupe(self, index: int, ligne) -> None:
-        if self.planche is None or index < 0:
-            return
-        coupe = ((ligne.x1(), ligne.y1()), (ligne.x2(), ligne.y2()))
-        ckpt, ctx = self.planche.ckpt_dir, self._contexte()
-        self._executer_edition(
-            lambda: edition.scinder_zone(ckpt, index, coupe, ctx=ctx),
-            f"Planche {self.planche.index} : bulle {index + 1} scindée")
-
-    def _basculer_fond(self) -> None:
+    def basculer_fond(self) -> None:
         """Passe de la planche nettoyée (calques déplaçables) au rendu final aplati."""
         if self.planche is not None:
             self._charger_planche(self.planche.index, garder_brouillons=True)
 
+    #: Nom historique, gardé : plusieurs tests l'appellent, et le renommer ne changerait rien
+    #: pour l'utilisateur — ce qui est exactement le critère pour ne pas casser un appelant.
+    _basculer_fond = basculer_fond
+
     # ------------------------------------------------------------------ #
     # Aperçus — voie de LECTURE et cache
     # ------------------------------------------------------------------ #
-
-    def _figer_plan_apercu(self, numero: int) -> None:
-        """Fige, **sur le fil d'affichage**, tout ce qu'il faut pour composer une planche.
-
-        La voie de lecture ne doit jamais parcourir un état que l'utilisateur est en train de
-        modifier : une liste de répliques lue pendant qu'on tape produirait un aperçu qui ne
-        correspond à rien. On lui remet donc un instantané immuable, et la clé du cache est
-        calculée dessus — ce qui fait qu'une correction non enregistrée invalide l'entrée
-        toute seule, sans invalidation explicite à écrire donc à oublier."""
-        if self.tome is None:
-            return
-        courante = self.planche if (self.planche and self.planche.index == numero) else None
-        planche = courante or self.tome.planche(numero)
-        if not planche.detectee or not planche.chemin_clean.exists():
-            self._plans_apercu.pop(numero, None)
-            return
-        document = self.documents.get(numero)
-        if document is not None:
-            etat = document.etat
-            textes = [etat.manuelles.get(k, texte)
-                      for k, texte in enumerate(etat.traduction)]
-            layouts = dict(etat.mises_en_page)
-        else:
-            textes = [b.affichee for b in planche.bulles]
-            layouts = dict(planche.mises_en_page)
-        for k, texte in (self._brouillons_par_planche.get(numero) or {}).items():
-            if 0 <= k < len(textes):
-                textes[k] = texte
-        mcfg = (self.tome.config.get("manga") or {})
-        self._plans_apercu[numero] = (
-            planche.ckpt_dir, planche.chemin_clean, tuple(textes), layouts,
-            (mcfg.get("typeset") or {}).get("font_path") or None,
-            mcfg.get("typeset"), mcfg.get("nettoyage"))
-
-    def _cle_apercu(self, numero: int):
-        plan = self._plans_apercu.get(numero)
-        if plan is None:
-            return None
-        return signature(numero, plan[1], plan[2], plan[3])
-
-    def travail_restant(self, numero: int) -> str | None:
-        """Ce qu'il reste à faire pour cette planche. ⚠ Appelé depuis la VOIE DE LECTURE.
-
-        Deux travaux de nature différente, et c'est le fil de lecture qui en tire l'ordre : sa
-        **vignette** (toutes les planches en ont une, elle est sur disque et coûte quelques
-        dizaines de millisecondes) et son **aperçu** (seulement la fenêtre autour de la planche
-        courante, il coûte 1,4 s et pèse 1 Mo en mémoire). Une planche sans plan compte comme
-        réglée : il n'y a rien à en faire, et la redemander sans fin affamerait les autres.
-
-        La vignette d'abord dans la réponse comme dans le temps : tant qu'elle manque, c'est
-        elle qui manque à l'écran."""
-        if self.tome is not None and not pel.vignette_a_jour(self.tome.build_dir, numero):
-            return GENRE_VIGNETTE
-        if numero not in self._fenetre_apercu:
-            return None
-        cle = self._cle_apercu(numero)
-        return None if (cle is None or cle in self.cache) else GENRE_APERCU
-
-    def apercu_en_cache(self, numero: int) -> bool:
-        """La planche est-elle entièrement réglée ? Mince délégué de `travail_restant`,
-        conservé parce qu'il est nommé dans la docstring de la voie de lecture et lu comme la
-        question qu'on se pose depuis le fil d'affichage."""
-        return self.travail_restant(numero) is None
-
-    def fabriquer_vignette(self, numero: int) -> bool:
-        """Écrit la vignette d'une planche si elle manque ou a vieilli. ⚠ VOIE DE LECTURE.
-
-        Séparée de `composer_planche`, et ce n'est pas un rangement : les deux partageaient un
-        seul code de retour, si bien qu'une vignette fraîchement écrite était perdue dès que la
-        suite ne se passait pas bien — aperçu déjà en cache (`return False`), scan source
-        introuvable ou composition en échec (exception). Dans les deux derniers cas la planche
-        entrait dans la mémoire d'échec du fil et son icône ne revenait plus de la session.
-        Deux unités de travail distinctes, deux annonces distinctes."""
-        if self.tome is None or pel.vignette_a_jour(self.tome.build_dir, numero):
-            return False
-        return pel.fabriquer_vignette(self.tome.build_dir, numero) is not None
-
-    def composer_planche(self, numero: int) -> bool:
-        """Compose l'aperçu d'une planche et le range au cache.
-
-        ⚠ Appelé depuis la VOIE DE LECTURE : ne touche aucun widget, ne construit aucun
-        `QPixmap`, n'écrit aucun checkpoint. Composer exige le SCAN D'ORIGINE — les styles de
-        bulle (polarité, couleur de fond) ne se mesurent que là — et l'obtenir peut extraire
-        une archive CBZ entière. C'est exactement le genre d'appel que la 1.1.0 faisait sur le
-        fil d'affichage."""
-        if self.tome is None:
-            return False
-        plan = self._plans_apercu.get(numero)
-        if plan is None or numero not in self._fenetre_apercu:
-            return False
-        ckpt, chemin_clean, textes, layouts, police, cfg_typeset, cfg_nettoyage = plan
-        cle = signature(numero, chemin_clean, textes, layouts)
-        if cle in self.cache:
-            return False
-        from . import apercu as apercu_mod
-        source = self.tome.chemin_source(numero)
-        if source is None:
-            raise RuntimeError(
-                "image d'origine introuvable sous sources/ : les styles de bulle "
-                "(polarité, couleur de fond) ne se lisent que sur le scan.")
-        vue = apercu_mod.composer(
-            ckpt, chemin_clean, source, textes=list(textes), font_path=police,
-            cfg_typeset=cfg_typeset, cfg_nettoyage=cfg_nettoyage, layouts=layouts)
-        self.cache.poser(cle, vue)
-        return True
-
-    def _precharger(self) -> None:
-        """Demande à la voie de lecture la fenêtre de planches autour de la courante.
-
-        C'est tout le lot de fluidité : composer coûte 1,37 s en médiane, et l'utilisateur ne
-        doit jamais l'attendre pour une planche qu'il allait forcément atteindre."""
-        if self.fil_lecture is None or self.planche is None or self.tome is None:
-            return
-        numeros = [int(self.liste_planches.item(ligne).data(Qt.UserRole))
-                   for ligne in range(self.liste_planches.count())]
-        if not numeros:
-            return
-        courante = self.planche.index
-        rang = numeros.index(courante) if courante in numeros else 0
-        marge = self.fenetre_prechargement
-        # Deux portées, et c'est délibéré : les APERÇUS ne couvrent que la fenêtre (bornés en
-        # mémoire, 1 Mo pièce), les VIGNETTES couvrent tout le tome (sur disque, une fois).
-        self._fenetre_apercu = set(numeros[max(0, rang - marge): rang + marge + 1])
-        for numero in self._fenetre_apercu:
-            if numero not in self._plans_apercu:
-                self._figer_plan_apercu(numero)
-        self.fil_lecture.vouloir(numeros, courante)
-
-    def _poser_apercu_si_pret(self, numero: int) -> bool:
-        """Pose les calques déjà en cache. Sur le FIL D'AFFICHAGE — une scène Qt ne se touche
-        jamais depuis un autre fil, et un `QPixmap` ne se construit pas ailleurs."""
-        if self.planche is None or self.planche.index != numero:
-            return False
-        if self.bouton_finale.isChecked():
-            return False
-        cle = self._cle_apercu(numero)
-        if cle is None:
-            return False
-        vue = self.cache.lire(cle)
-        if vue is None:
-            return False
-        # ⚠ On garde la référence : c'est cet aperçu qui porte les `StyleCompact`, donc la
-        # possibilité de ré-habiller une bulle en quelques millisecondes au lieu de 1,37 s.
-        self._apercu_courant = vue
-        self.scene.poser_calques(vue.calques)
-        return True
-
-    def _recomposer_courante(self) -> None:
-        """Ce qui est affiché vient de changer : on refige le plan et on redemande.
-
-        La nouvelle signature ne correspond à aucune entrée du cache, donc la voie de lecture
-        recompose ; l'ancienne reste au cache et servira si l'on annule."""
-        if self.planche is None:
-            return
-        numero = self.planche.index
-        self._figer_plan_apercu(numero)
-        if not self._poser_apercu_si_pret(numero):
-            self._precharger()
-
-    def apercu_pret(self, numero: int) -> None:
-        """La voie de lecture vient de composer une planche (aperçu et/ou vignette)."""
-        item = self._item_de(numero)
-        if item is not None:
-            self._parer_item(item, numero)
-        self._poser_apercu_si_pret(numero)
-
-    def oublier_apercu(self, numero: int) -> None:
-        """Un run a réécrit cette planche : son aperçu ne vaut plus rien."""
-        self.cache.oublier_planche(numero)
-        self.cache_etats.oublier(numero)
-        self._plans_apercu.pop(numero, None)
-        if self.fil_lecture is not None:
-            self.fil_lecture.reessayer(numero)
-
-    def _sur_texte_deplace(self, index: int, rect) -> None:
-        """Un bloc de texte vient d'être déposé ailleurs.
-
-        Son rectangle part dans `mise_en_page.json` — que le pipeline ne réécrit jamais, comme
-        `traduction_manuelle.json` — puis l'aperçu est recomposé pour rejouer l'habillage sur
-        la nouvelle zone. Le déplacement lui-même était instantané ; seul le ré-habillage
-        coûte, et il n'arrive qu'au dépôt."""
-        if self.planche is None or self.tome is None:
-            return
-        if not self._verifier_fraicheur():
-            self.rafraichir()
-            return
-        if self.document is None:
-            return
-        # ⚠ La taille vient de l'ITEM, qui la porte depuis sa construction. L'ancien code la
-        # cherchait dans un `_calques_prets` qui n'a jamais été assigné nulle part : la branche
-        # était morte, `taille` ne partait donc pas dans `mise_en_page.json`, `fit_impose`
-        # prenait `taille_max` par défaut, échouait, et le corps se retrouvait RECALCULÉ après
-        # un simple déplacement — l'exact contraire de ce que la docstring promettait.
-        item = self.scene.calque(index)
-        entree = apercu_mod.entree_mise_en_page(item, rect=_bbox(rect))
-        self.document.poser_mise_en_page(index, entree)
-        self.planche.mises_en_page = dict(self.document.etat.mises_en_page)
-        self._maj_etat_document()
-        self.journal.emit("info", f"Planche {self.planche.index} bulle {index + 1} : "
-                                  f"position retenue — Ctrl+S pour l'écrire")
-        # ⚠ Un dernier passage FORCÉ : sans lui, l'étranglement aurait pu avaler le tout
-        # dernier mouvement et laisser à l'écran un texte décalé de la position déposée.
-        self._rafraichir_bulle_rapide(index, rect=_bbox(rect), force=True)
-        self._recomposer_courante()
-
-    def _rendre_au_moteur(self) -> None:
-        """Retire la mise en page imposée : la bulle retrouve le lettrage calculé.
-
-        ⚠ Cette méthode existait déjà, complète et documentée — mais n'était **branchée à
-        aucun bouton**. Le seul candidat plausible (`bouton_rendre`) pointe `_retirer_correction`,
-        qui est un tout autre geste : l'un rend le TEXTE au modèle, l'autre rend sa POSITION au
-        moteur. Il n'y avait donc aucun moyen d'annuler un déplacement hors Ctrl+Z."""
-        index = self.liste_bulles.currentRow()
-        if self.planche is None or index < 0 or not self._verifier_fraicheur():
-            return
-        if self.document is None:
-            return
-        self._minuteur_corps.stop()             # le dépôt en attente n'a plus d'objet
-        self._corps_en_attente = None
-        self.document.poser_mise_en_page(index, None)
-        self.planche.mises_en_page = dict(self.document.etat.mises_en_page)
-        self._maj_etat_document()
-        self._afficher_bulle(index)             # le réglage de corps repasse à « auto »
-        self.journal.emit("info", f"Planche {self.planche.index} bulle {index + 1} : "
-                                  f"mise en page rendue au moteur — Ctrl+S pour l'écrire")
-        self._rafraichir_bulle_rapide(index, force=True)
-        self._recomposer_courante()
 
     # ------------------------------------------------------------------ #
     # Le direct — ré-habiller UNE bulle pendant le geste
@@ -1560,283 +1980,15 @@ class PanneauEditeur(QWidget):
     # c'est une file ordonnée, et une composition complète (1,37 s) déjà en vol bloquerait un
     # relettrage de 20 ms derrière elle. On aggraverait la latence au lieu de la réduire.
 
-    def _corps_affiche(self, index: int) -> int:
-        """La valeur à montrer dans le réglage de corps. `0` (« auto ») si rien n'est imposé."""
-        mises = self.planche.mises_en_page if self.planche else {}
-        impose = (mises.get(index) or {}).get("taille")
-        return int(impose or 0)
-
-    def _rafraichir_bulle_rapide(self, index: int, *, rect=None, masque=None,
-                                 taille: int | None = None, force: bool = False) -> bool:
-        """Ré-habille la bulle `index` et remplace son calque **sans détruire l'item**.
-
-        `False` si le chemin rapide n'était pas disponible (aperçu pas encore composé, texte
-        vide, corps intenable) : l'appelant laisse alors le geste continuer sans texte plutôt
-        que d'échouer bruyamment. Un geste qui s'interrompt pour annoncer une erreur est pire
-        qu'un geste dont le texte arrive un peu plus tard.
-
-        ## L'étranglement, et pourquoi il est adaptatif
-
-        `force=True` (un relâchement, une fin de frappe) passe toujours. Sinon on espace les
-        appels d'au moins deux fois le coût du précédent, avec un plancher de 40 ms. Un
-        intervalle fixe à 25 Hz saturerait le fil d'affichage sur une planche lourde, et c'est
-        alors le RECTANGLE lui-même qui se met à saccader — on aurait échangé un texte en
-        retard contre un geste qui accroche. En mesurant, une planche lourde s'auto-régule.
-
-        ⚠ Le relâchement doit **toujours** repasser ici avec `force`. Le mode de panne
-        classique d'un étranglement est de perdre le dernier événement, donc de laisser à
-        l'écran un texte qui ne correspond pas à la position réellement déposée."""
-        vue = self._apercu_courant
-        if vue is None or self.planche is None or self.bouton_finale.isChecked():
-            return False
-        if not force:
-            attente = max(40.0, 2.0 * self._cout_rapide_ms)
-            if self._dernier_rapide.elapsed() < attente:
-                return False
-        bulle = self._bulle(index)
-        if bulle is None:
-            return False
-        texte = self._brouillons.get(index, bulle.affichee)
-        if taille is None:
-            taille = self._corps_affiche(index) or None
-
-        self._chrono_rapide.start()
-        try:
-            calque = apercu_mod.recomposer_bulle(vue, index, texte, rect=rect, taille=taille,
-                                                 masque=masque)
-        except Exception as err:                # noqa: BLE001
-            # Un ré-habillage est du CONFORT : il ne doit jamais faire tomber un geste en
-            # cours. Le journal garde la trace, la composition complète tranchera.
-            self.journal.emit("warn", f"Aperçu rapide indisponible : {err}")
-            return False
-        finally:
-            self._cout_rapide_ms = float(self._chrono_rapide.elapsed())
-            self._dernier_rapide.restart()
-        if calque is None:
-            return False
-        return self.scene.remplacer_calque(calque)
-
-    def _sur_texte_glisse(self, index: int, rect) -> None:
-        """Le bloc de texte suit la souris : on le ré-habille dans son rectangle visé."""
-        self._rafraichir_bulle_rapide(index, rect=_bbox(rect))
-
-    def _sur_zone_en_cours(self, index: int, boite) -> None:
-        """Une poignée (ou le cadre) bouge : le texte se ré-habille dans le masque étiré.
-
-        ⚠ Le masque est calculé ici, avant toute écriture. C'est ce qui permet de voir le
-        résultat exact pendant qu'on tire, et non un rectangle vide qu'on remplirait après
-        coup."""
-        masque = self._masque_etire(index, boite)
-        if masque is not None:
-            self._rafraichir_bulle_rapide(index, masque=masque)
-
-    def _masque_etire(self, index: int, boite):
-        """Le masque qu'aurait la zone `index` si elle était retaillée à `boite`. `None` si le
-        calcul échoue — une boîte dégénérée pendant un geste n'est pas une erreur."""
-        bulle = self._bulle(index)
-        if bulle is None or self.planche is None:
-            return None
-        regions = checkpoints.load_regions(self.planche.ckpt_dir)
-        if self.document is not None:
-            regions = self.document.etat.regions
-        if not regions or not (0 <= index < len(regions)):
-            return None
-        region = regions[index]
-        hauteur, largeur = region.mask.shape[:2]
-        try:
-            return edition.etirer_masque(region.mask, region.bbox, _bbox(boite),
-                                         (largeur, hauteur))
-        except edition.ErreurEdition:
-            return None
-
-    def _sur_zone_retaillee(self, index: int, boite) -> None:
-        """La zone détectée a été déposée à une nouvelle taille (ou à une nouvelle place).
-
-        ⚠ `retailler_zone`, pas `modifier_zone` : la bulle reste la même bulle, elle garde donc
-        son OCR et sa traduction. « Redessiner » reste le geste qui repart de zéro, et c'est à
-        lui qu'il revient de les jeter.
-
-        L'écriture part dans la file : elle réécrit `regions.json`, `masks.png`, et **repeint
-        la planche nettoyée** — ouverture du scan d'origine comprise. C'est de l'ordre de la
-        seconde, donc hors de question pendant le geste ; le direct s'est arrêté à l'aperçu."""
-        if self.planche is None or index < 0:
-            return
-        bbox, ckpt, ctx = _bbox(boite), self.planche.ckpt_dir, self._contexte()
-        self._executer_edition(
-            lambda: edition.retailler_zone(ckpt, index, bbox, ctx=ctx),
-            f"Planche {self.planche.index} : bulle {index + 1} retaillée", suivre=bbox)
-
-    def _resuivre_zone(self) -> None:
-        """Resélectionne, après une édition, la zone qu'on venait de manipuler.
-
-        ⚠ **L'index n'est pas une identité stable.** `poser_regions` recalcule l'ordre de
-        lecture : agrandir une bulle vers le haut peut la faire passer devant sa voisine, et
-        tout se décale. On la retrouve donc par sa géométrie, au même seuil que
-        `edition.SEUIL_REPORT` — c'est la même question (« est-ce la même bulle ? »), et deux
-        seuils pour une seule question finiraient par se contredire.
-
-        Sous le seuil, on ne sélectionne rien : mieux vaut aucune sélection qu'une sélection
-        fausse, qui ferait porter le geste suivant sur une autre bulle."""
-        vise, self._zone_a_resuivre = self._zone_a_resuivre, None
-        if vise is None or self.planche is None or self.planche.index != vise[0]:
-            return
-        candidates = [(geometry.iou_bbox(b.bbox, vise[1]), b.index)
-                      for b in self.planche.bulles]
-        if not candidates:
-            return
-        score, index = max(candidates)
-        if score >= edition.SEUIL_REPORT:
-            self.liste_bulles.setCurrentRow(index)
-
     # ------------------------------------------------------------------ #
     # Corps de la police
     # ------------------------------------------------------------------ #
 
-    def _sur_corps(self, valeur: int) -> None:
-        """Le réglage de corps a bougé : l'aperçu suit tout de suite, le document plus tard.
-
-        Les deux minuteurs ont des durées très différentes, et c'est le point : voir doit être
-        immédiat, s'engager ne doit pas l'être (cf. `_minuteur_corps`)."""
-        if self._index_affiche < 0:
-            return
-        self._corps_en_attente = (self._index_affiche, int(valeur))
-        self._rafraichir_bulle_rapide(self._index_affiche, taille=int(valeur) or None,
-                                      force=True)
-        self._minuteur_corps.start()
-
-    def _deposer_corps(self) -> None:
-        """Écrit le corps choisi dans le document (en mémoire, annulable).
-
-        ⚠ L'entrée n'a **pas** de `rect`. Fabriquer un rectangle depuis la bbox pour la seule
-        raison qu'on change la taille remplacerait l'intérieur du ballon par ses quatre coins
-        (`typeset.style_impose`), et le texte s'écrirait par-dessus le contour dessiné. Un
-        corps seul laisse le masque mesuré intact."""
-        attente, self._corps_en_attente = self._corps_en_attente, None
-        if attente is None or self.planche is None or self.document is None:
-            return
-        index, valeur = attente
-        if not self._verifier_fraicheur():
-            self.rafraichir()
-            return
-        ancienne = dict(self.planche.mises_en_page.get(index) or {})
-        if valeur:
-            ancienne["taille"] = int(valeur)
-            ancienne.setdefault("ancre", "libre")
-        else:
-            ancienne.pop("taille", None)        # « auto » : on rend la taille au moteur
-        entree = ancienne if (ancienne.get("rect") or ancienne.get("taille")) else None
-
-        self.document.poser_mise_en_page(index, entree)
-        self.planche.mises_en_page = dict(self.document.etat.mises_en_page)
-        self._maj_etat_document()
-        self.bouton_corps_auto.setEnabled(index in self.planche.mises_en_page)
-        corps = f"corps {valeur} px" if valeur else "corps rendu au moteur"
-        self.journal.emit("info", f"Planche {self.planche.index} bulle {index + 1} : "
-                                  f"{corps} — Ctrl+S pour l'écrire")
-        self._recomposer_courante()
-
-
-    def _supprimer_zone(self) -> None:
-        index = self.liste_bulles.currentRow()
-        if self.planche is None or index < 0:
-            return
-        ckpt, ctx = self.planche.ckpt_dir, self._contexte()
-        self._executer_edition(
-            lambda: edition.supprimer_zone(ckpt, index, ctx=ctx),
-            f"Planche {self.planche.index} : bulle {index + 1} supprimée")
-
     # ------------------------------------------------------------------ #
-
-    def _retirer_correction(self) -> None:
-        index = self.liste_bulles.currentRow()
-        if self.planche is None or index < 0 or not self._verifier_fraicheur():
-            return
-        if self.document is None:
-            return
-        self.document.poser_correction(index, None)
-        self._brouillons.pop(index, None)
-        self._appliquer_document()
-        self.journal.emit("info", f"Planche {self.planche.index} bulle {index + 1} : "
-                                  f"correction manuelle retirée — Ctrl+S pour l'écrire")
 
     # ------------------------------------------------------------------ #
     # Tâches modèles — OCR, LLM
     # ------------------------------------------------------------------ #
-
-    def _prerequis_bulle(self) -> tuple | None:
-        index = self.liste_bulles.currentRow()
-        if self.planche is None or index < 0 or self.tome is None or self.services is None:
-            return None
-        return index, self.planche.ckpt_dir, (self.tome.config.get("manga") or {})
-
-    def _relire_bulle(self) -> None:
-        prets = self._prerequis_bulle()
-        if prets is None:
-            return
-        index, ckpt, mcfg = prets
-        services, tome, numero = self.services, self.tome, self.planche.index
-
-        def _travail():
-            source = tome.chemin_source(numero)          # peut extraire un CBZ : dans la file
-            if source is None:
-                raise edition.ErreurEdition(
-                    "l'image d'origine de cette planche est introuvable sous sources/ — "
-                    "l'OCR ne peut pas relire la bulle.")
-            texte = edition.relire_zone(ckpt, source, index, cfg_manga=mcfg,
-                                        lecteur=services.lecteur())
-            return f"Bulle {index + 1} relue : « {texte[:60]} »"
-
-        self._soumettre(GENRE_OCR, f"Relecture OCR de la bulle {index + 1}", _travail,
-                        fusionnable=True)
-
-    def _retraduire_bulle(self) -> None:
-        prets = self._prerequis_bulle()
-        if prets is None:
-            return
-        index, ckpt, _mcfg = prets
-        services = self.services
-
-        def _travail():
-            texte, motif = edition.retraduire_zone(
-                ckpt, index, services.traducteur(), gloss_text=services.gloss_text())
-            if motif is not None:
-                from manga.quality_manga import LIBELLES_RATTRAPAGE
-                raise RuntimeError(
-                    f"réponse refusée — {LIBELLES_RATTRAPAGE.get(motif, motif)} ; "
-                    f"la réplique précédente est conservée")
-            return f"Bulle {index + 1} : « {texte[:60]} »"
-
-        self._soumettre(GENRE_TRADUCTION, f"Retraduction de la bulle {index + 1}", _travail,
-                        fusionnable=True)
-
-    def _reprendre_bulle(self) -> None:
-        """Le bouton unique : vide la zone, la lit, la traduit."""
-        prets = self._prerequis_bulle()
-        if prets is None:
-            return
-        index, ckpt, mcfg = prets
-        ctx = self._contexte()
-        if ctx is None:
-            QMessageBox.warning(self, "Image source introuvable",
-                                "L'image d'origine est nécessaire pour vider la zone et la "
-                                "relire. Elle n'a pas été retrouvée sous sources/.")
-            return
-        services = self.services
-
-        def _travail():
-            compte = edition.reprendre_zone(
-                ckpt, index, ctx=ctx, lecteur=services.lecteur(),
-                agent=services.traducteur(), gloss_text=services.gloss_text(),
-                cfg_manga=mcfg)
-            if compte["refus"] == "nettoyage_abandonne":
-                return (f"Bulle {index + 1} : intérieur trop peu uniforme pour être vidé "
-                        f"sans abîmer le dessin — le japonais reste visible.")
-            if compte["refus"]:
-                raise RuntimeError(f"traduction refusée ({compte['refus']}) ; la zone est "
-                                   f"vidée et lue, la réplique reste à faire")
-            return f"Bulle {index + 1} vidée, lue et traduite : « {compte['traduction']} »"
-
-        self._soumettre(GENRE_REPRISE, f"Reprise complète de la bulle {index + 1}", _travail)
 
     def _appliquer(self) -> None:
         if self.planche is None:
@@ -1848,24 +2000,3 @@ class PanneauEditeur(QWidget):
         self.demande_relettrage.emit(self.planche.index, self.choix_etape.currentData())
 
 
-def _resume_edition(res: dict) -> str:
-    """Ce qu'on affiche après une édition de zone — y compris ce que le nettoyage a refusé."""
-    bouts = [f"{res['regions']} bulle(s)", f"{res['textes_conserves']} texte(s) conservé(s)"]
-    if res.get("indices_a_relire"):
-        bouts.append("à relire : " + ", ".join(str(i + 1) for i in res["indices_a_relire"]))
-    net = res.get("nettoyage")
-    if net:
-        if net["videes"]:
-            bouts.append(f"{net['videes']} zone(s) vidée(s)")
-        if net["restaurees"]:
-            bouts.append(f"{net['restaurees']} zone(s) rendue(s) au dessin")
-        if net["abandons"]:
-            bouts.append("⚠ nettoyage abandonné (intérieur trop peu uniforme) : le japonais "
-                         "reste visible")
-    return " · ".join(bouts)
-
-
-def _bbox(boite) -> tuple[int, int, int, int]:
-    """`QRectF` de scène → bbox entière en pixels de planche."""
-    return (int(round(boite.left())), int(round(boite.top())),
-            int(round(boite.right())), int(round(boite.bottom())))

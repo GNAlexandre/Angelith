@@ -23,6 +23,25 @@ sources/
 *.cbz
 *.cbr
 
+# Poids du modele d'image (lot 24). *.onnx suffisait tant que les seuls poids du depot
+# etaient ceux du detecteur ; un GGUF Q4 de Qwen-Image pese 11,9 a 13,1 Go, et un
+# `git add -A` distrait sur un fichier de cette taille ne se rattrape pas d'un `git rm`.
+# Ces motifs sont ajoutes DANS LE MEME COMMIT que illustration/poids.py, jamais apres.
+*.gguf
+*.safetensors
+*.ckpt
+
+# Les fichiers partiels d'un telechargement repris (illustration/poids.py ecrit `<nom>.part`
+# et ne le renomme qu'apres verification de l'empreinte). `*.onnx` ne les couvrait pas :
+# `model.onnx.part` n'est pas `*.onnx`.
+*.part
+
+# Sorties de l'atelier d'illustration : elles vivent sous build/, deja exclu en bloc. Cette
+# ligne est la seconde barriere, pour le cas ou un utilisateur pointerait chemins.build
+# ailleurs. Une image generee ne doit jamais entrer dans l'arbre : elle porte un identifiant
+# local, mais son CONTENU vient de l'oeuvre.
+illustrations/
+
 # --- Python ---
 __pycache__/
 *.py[cod]
@@ -41,6 +60,83 @@ psd_test.psd
 # Il reste sur le disque et dans le dépôt privé d'archive.
 docs/purge-corpus.md
 
-# Police non documentee, licence inconnue : retiree du suivi tant que son droit de
-# redistribution n'est pas etabli (cf. NOTICE). Le fichier reste sur le disque.
-templates/fonts/wildjess normal.ttf
+# Polices non documentees, licence inconnue : retirees du suivi tant que leur droit de
+# redistribution n'est pas etabli (cf. NOTICE). Les fichiers restent sur le disque.
+#
+# La regle nommait l'ancien fichier « wildjess normal.ttf » (avec un espace) et ne couvrait
+# donc plus RIEN : les fichiers livres s'appellent Wildjess_normal.ttf, Wildjess_Italic.TTF
+# et Wildjess_BoldItalic.TTF, et ils apparaissaient en `??` dans `git status`. Le motif est
+# desormais large, et il couvre aussi les fichiers produits par tools/completer_police.py
+# (*_complet.ttf), qui sont des travaux DERIVES : ils heritent des droits de l'original et
+# ne doivent pas plus etre redistribues que lui.
+templates/fonts/Wildjess*
+templates/fonts/*_complet.ttf
+
+# --- Garde-fou de publication ---
+# `docs/PUBLICATION-ANGELITH.md` decrit le depot prive et la purge du corpus : il ne doit
+# jamais atteindre Angelith. Il reste SUIVI sur les branches de developpement — une regle
+# d'exclusion n'affecte pas un fichier deja suivi — et la procedure de publication le retire
+# explicitement de l'arbre public (etape 3).
+#
+# Cette ligne est la SECONDE barriere, pour le cas constate a l'usage : apres un passage sur
+# la branche `public`, ou le fichier n'est pas suivi, il subsiste sur le disque en « non
+# suivi ». Sans cette exclusion, un `git add -A` distrait l'enverrait sur Angelith.
+docs/PUBLICATION-ANGELITH.md
+
+# --- Rapports de couverture (regenerables : cf. docs/COMMANDES.fr.md) ---
+# Produits par pytest-cov, lus par le scanner Sonar, et telechargeables en artefact de CI.
+# Les commiter ferait entrer dans l'arbre un fichier qui change a chaque run et que personne
+# ne relit.
+.coverage
+coverage.xml
+coverage-banc.xml
+
+# --- Etat de travail de l'interface graphique (lot 18) ---
+# Geometrie de la fenetre, colonnes, filtre courant, dernier tome ouvert. Propre a UNE
+# installation : le commiter imposerait la disposition d'ecran de qui l'a pousse a tout le
+# monde, et le fichier changerait a chaque fermeture de la fenetre.
+# Il est volontairement LISIBLE et a la racine (cf. gui/reglages.py) : un etat persiste
+# corrompu doit pouvoir se regarder, et  Affichage > Reinitialiser la disposition  l'efface.
+.angelith/
+
+# --- Extraction Sonar (tools/sonar_issues.py) : regenerable, jamais versionne ---
+sonar-issues.md
+sonar-issues.json
+
+# --- Jeton utilisateur SonarQube Cloud (tools/sonar_issues.py) ---
+# Un JETON UTILISATEUR ouvre l'API de lecture sur tous les projets du compte : il ne doit
+# exister que sur le disque, jamais dans l'arbre. Il a vécu un temps en clair dans la
+# docstring de `tools/sonar_issues.py` — le fichier n'avait alors jamais été commité, mais
+# une ligne de code qui porte un secret finit par être poussée. D'où ce fichier dédié, lu
+# par le script en repli quand `SONAR_TOKEN` est absent de l'environnement.
+.sonar-token
+
+# Meme jeton, sous le nom de la VARIABLE d'environnement. Un fichier `SONAR_TOKEN` de 40
+# octets a reellement vecu a la racine, non ignore et non couvert par la liste noire de
+# `tools/verifier_arbre.py` : il ne tenait qu'a ce que personne ne fasse `git add -A`. Le
+# nom canonique reste `.sonar-token` (c'est celui que lit `tools/sonar_issues.py`) ; cette
+# ligne est la parce qu'on ecrit spontanement le nom de la variable, et qu'un secret ne doit
+# pas dependre du fichier sur lequel on est tombe.
+SONAR_TOKEN
+sonar-token.txt
+
+# --- Releves produits par les outils du lot 20 (regenerables) ---
+# `tools/compte_de_tests.py --sortie`, le tableau de banc de la CI et les notes de version
+# decoupees pour une release. Tous se refont par une commande, tous changent a chaque run.
+compte-*.json
+banc-ci.md
+notes.md
+
+# --- Empaquetage (lot 37) — tout se refait par une commande ---
+# `pip install -e .` depose un `angelith.egg-info/` a la racine ; `pyinstaller angelith.spec`
+# depose `dist/` et un cache d'analyse. `build/` est deja ignore plus haut, pour les SORTIES du
+# pipeline : PyInstaller y ecrirait aussi son intermediaire, et les deux se confondraient. D'ou
+# `workpath` pointe ailleurs dans le `.spec` — cf. son en-tete.
+*.egg-info/
+dist/
+.pyinstaller/
+
+# Relevés produits par `python tools/geler.py` sur le binaire gelé — regenerables,
+# et sans valeur hors du run qui les a produits.
+diagnostic-gel.json
+demarrage-gel.json

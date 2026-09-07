@@ -1,0 +1,162 @@
+# Publier une version (lot 20, L20.7) — le tag devient une release, et rien d'autre.
+#
+# ## Ce que ce fichier fait
+#
+# Sur un tag `vX.Y.Z` : vérifier que le tag correspond à `core/version.py`, découper la section
+# de CHANGELOG correspondante, en faire le corps de la release GitHub.
+#
+# `CHANGELOG.md` fait 380 Ko et ses entrées nomment les fichiers, citent les mesures et
+# expliquent les arbitrages : **ce sont déjà des notes de version**. En rédiger de secondes
+# créerait un texte parallèle à tenir à jour, qui divergerait — le défaut exact que
+# `docs/chiffres-de-reference.md` documente pour les chiffres.
+#
+# ## ⚠ Ce que ce fichier NE fait PAS, et ce n'est pas un oubli
+#
+# **Aucun empaquetage.** Les installeurs un-clic Windows/Linux sont un jalon distinct de
+# `docs/roadmap.md`, avec son propre périmètre (dépendances embarquées, Pandoc, WeasyPrint,
+# Ollama). Ce lot livre le SQUELETTE — un job de release qui sait publier — pas l'artefact.
+#
+# **Aucune publication sur PyPI.** Le projet n'est pas empaqueté et ne veut pas l'être ; c'est
+# écrit dans `core/version.py`, et c'est la raison de l'absence de `pyproject.toml`.
+#
+# ⚠ **MISE À JOUR 2026-09-06, lot 38 : les deux affirmations ci-dessus sont périmées**, et
+# elles l'étaient déjà depuis la 2.31.0 — le lot 37 les a rendues fausses sans venir les lever
+# ici (règle §5 bis du contexte agent).
+#
+#   · l'empaquetage Windows EXISTE : `angelith.spec`, `installeur/angelith.iss`, et le job
+#     `artefact` de `ci.yml` qui construit et TESTE le binaire. Ce fichier-ci n'y touche
+#     toujours pas, et c'est maintenant un choix de découpage, plus une absence de capacité ;
+#   · `pyproject.toml` EXISTE. Ce qui tient de la seconde phrase est sa conclusion — **aucune
+#     publication sur PyPI** —, et son motif a changé : ce n'est plus « le projet n'est pas
+#     empaqueté », c'est que `config.yaml`, `langues/` et `templates/` vivent à la racine et
+#     qu'une roue ne saurait pas les placer là où le code les retrouverait
+#     (`pyproject.toml`, en-tête).
+#
+# ⚠ **Ce que ce fichier ne fait TOUJOURS pas, et qui est un manque** : la release qu'il crée
+# ne porte **aucun fichier** (pas de `files:` plus bas). Le job `artefact` téléverse des
+# artefacts de WORKFLOW, qui ne sont pas des assets de release. Une mise à jour automatique
+# n'aurait donc rien à télécharger — c'est le prérequis nommé du lot 40.
+#
+# ⚠ **MISE À JOUR 2026-09-06, lot 40 : le manque ci-dessus est COMBLÉ, mais AILLEURS.** Ce
+# fichier-ci n'a toujours pas de `files:`, et c'est délibéré : il tourne sur `ubuntu-latest` et
+# n'a jamais construit d'installeur Windows. C'est le job `artefact` de `ci.yml` — qui, lui,
+# tourne sur `windows-latest` et vient de geler le binaire — qui attache `dist/*.exe` et
+# `dist/SHA256SUMS.txt` à la release, sur le même tag, avec `permissions: contents: write`.
+#
+# Les deux workflows publient donc sur la MÊME release : celui-ci en écrit le corps (les notes
+# découpées du CHANGELOG), celui-là y accroche les fichiers. ⚠ L'ordre n'est pas garanti, et
+# `softprops/action-gh-release` sait attacher des fichiers à une release existante comme en
+# créer une. Un `files:` ici, en plus, ferait chercher sur un runner Linux des fichiers qui
+# n'y ont jamais existé.
+#
+# ⚠ **Les deux écrivent le MÊME corps**, et c'est délibéré : `ci.yml` passe lui aussi le
+# `notes.md` produit par `tools/notes_de_version.py`. Le même script sur le même CHANGELOG rend
+# le même texte à l'octet près, donc l'ordre d'arrivée est sans conséquence — par construction,
+# et non par pari sur ce qu'une action tierce fait d'une release dont on ne lui donne pas le
+# corps.
+#
+# **Aucun push vers le miroir `Angelith`.** Le job `verification-publication` ci-dessous
+# exécute les contrôles de `docs/PUBLICATION-ANGELITH.md` de façon mécanique, mais la
+# transposition et le push restent MANUELS. Deux raisons, et la seconde est la vraie :
+#
+#   1. le push exige un jeton d'écriture sur un second dépôt, secret qui n'existe pas ;
+#   2. la procédure repose sur `git read-tree --reset -u`, qui écrase un arbre entier. La
+#      rendre automatique sur un tag transformerait une erreur de tag en publication d'un
+#      arbre faux vers un dépôt destiné à devenir public. Le garde-fou de fuite est ce qui
+#      devait être automatisé ; l'irréversible ne l'était pas.
+name: Publication
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à vérifier (ex. 2.11.0), sans publier de release"
+        required: true
+
+permissions:
+  contents: write   # créer la release. Rien d'autre.
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version demandée
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "valeur=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "valeur=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Le tag correspond-il à core/version.py ?
+        # Le complément symétrique de `tests/test_version.py`, qui vérifie que
+        # `core/version.py` correspond à la première entrée datée du CHANGELOG. À eux deux,
+        # tag ⇄ version ⇄ CHANGELOG ne peuvent plus diverger. Poser `v2.10.1` sur un arbre qui
+        # déclare `2.10.0` publierait une release dont le contenu n'est documenté nulle part.
+        run: >
+          python tools/notes_de_version.py "${{ steps.version.outputs.valeur }}"
+          --verifier --sortie notes.md
+
+      - name: Notes de version en résumé de job
+        shell: bash
+        run: cat notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Créer la release
+        # `workflow_dispatch` s'arrête AVANT : le mode manuel sert à vérifier qu'un tag serait
+        # publiable, pas à publier. Poser le tag reste le geste qui décide.
+        if: startsWith(github.ref, 'refs/tags/v')
+        # Épinglée au correctif, comme le scanner Sonar et pour la même raison : c'est une
+        # action TIERCE, à qui l'on confie un jeton d'écriture sur le dépôt. Une étiquette
+        # flottante changerait ce qu'elle fait de ce jeton sans qu'un commit l'indique.
+        # ⚠ Cette version n'a PAS été vérifiée contre le registre depuis cette session (pas
+        # d'accès réseau) : si elle n'existe pas, le job échouera à sa première exécution en le
+        # disant. Dependabot la tiendra à jour ensuite, groupée et mensuelle.
+        uses: softprops/action-gh-release@v2.0.8
+        with:
+          body_path: notes.md
+          name: ${{ github.ref_name }}
+          # Pas de `files:` — cf. l'en-tête. ⚠ Le motif a CHANGÉ au lot 40 : ce n'était
+          # « le squelette, pas l'artefact » ; c'est désormais que l'artefact existe et
+          # qu'il est attaché par `ci.yml`, seul workflow à tourner sur Windows et donc
+          # seul à l'avoir sous la main.
+          fail_on_unmatched_files: false
+
+  # ---------------------------------------------------------------------------
+  # Les contrôles de `docs/PUBLICATION-ANGELITH.md`, rendus mécaniques.
+  #
+  # Ils ne poussent rien. Ils répondent à une seule question, à laquelle personne ne peut
+  # répondre de tête sur 363 fichiers : « cet arbre est-il publiable vers le miroir ? »
+  verification-publication:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ce que l'arbre porterait vers le miroir
+        # `--non-bloquant` : cet arbre-ci est la branche de DÉVELOPPEMENT, où
+        # `docs/PUBLICATION-ANGELITH.md` est légitimement suivi et où 19 fichiers portent
+        # encore un titre hérité. Le rapport dit ce qu'il faudrait retirer ; il ne fait pas
+        # échouer une release pour une dette que la release ne crée pas.
+        #
+        # ⚠ La vérification BLOQUANTE est `python tools/verifier_arbre.py --index`, exécutée
+        # à la main entre les étapes 3 et 5 de la procédure — sur l'index de la branche
+        # `public`, c'est-à-dire sur ce qui part réellement.
+        shell: bash
+        run: |
+          python tools/verifier_arbre.py --markdown --suivi --non-bloquant \
+            >> "$GITHUB_STEP_SUMMARY"

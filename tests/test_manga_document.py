@@ -443,3 +443,146 @@ def test_relire_faux_perd_le_texte_d_une_zone_trop_deplacee(ckpt):
 
     neuf, _rapport = document.poser_regions(etat, nouvelles, {0}, relire=False)
     assert "Un" not in neuf.traduction
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sens de lecture — l'édition ne doit JAMAIS re-trier une planche à l'envers
+#
+# `poser_regions` appelait `reading_order()` sans le sens, donc toujours droite→gauche. Sur un
+# webtoon (`gauche_droite`), la moindre édition de zone re-triait toute la planche en ordre
+# manga : un mélange massif des répliques, et silencieux — le nombre de bulles restait juste et
+# `regions.json` continuait d'annoncer le bon sens.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _cote_a_cote() -> tuple[BubbleRegion, BubbleRegion]:
+    """Deux bulles COTE À COTE — le seul cas où le sens de lecture change le résultat."""
+    gauche = (20, 40, 180, 220)
+    droite = (220, 40, 380, 220)
+    return (BubbleRegion(bbox=gauche, mask=_masque(gauche), score=0.9, cls=0),
+            BubbleRegion(bbox=droite, mask=_masque(droite), score=0.9, cls=0))
+
+
+@pytest.mark.parametrize("sens, attendu", [
+    ("droite_gauche", ["Droite", "Gauche"]),
+    ("gauche_droite", ["Gauche", "Droite"]),
+])
+def test_poser_regions_trie_dans_le_sens_de_la_planche(sens, attendu):
+    gauche, droite = _cote_a_cote()
+    etat = document.EtatPlanche(
+        regions=[gauche, droite], ocr=["G", "D"], traduction=["Gauche", "Droite"],
+        taille=TAILLE, sens=sens)
+    neuf, _rapport = document.poser_regions(etat, [gauche, droite], set(), relire=False)
+    assert neuf.traduction == attendu
+    assert neuf.sens == sens, "le sens doit survivre à l'opération"
+
+
+def test_les_corrections_suivent_le_tri_dans_les_deux_sens():
+    """Les dicts creux (`manuelles`) sont indexés par bulle : ils doivent suivre le tri."""
+    gauche, droite = _cote_a_cote()
+    for sens, index_attendu in (("droite_gauche", 1), ("gauche_droite", 0)):
+        etat = document.EtatPlanche(
+            regions=[gauche, droite], ocr=["G", "D"], traduction=["Gauche", "Droite"],
+            manuelles={0: "ma correction sur la gauche"}, taille=TAILLE, sens=sens)
+        neuf, _r = document.poser_regions(etat, [gauche, droite], set(), relire=False)
+        assert neuf.manuelles == {index_attendu: "ma correction sur la gauche"}, sens
+
+
+def test_lire_etat_remonte_le_sens_du_cache(tmp_path):
+    d = tmp_path / "page_0001"
+    checkpoints.save_regions(d, [_region(0)], TAILLE, sens="gauche_droite")
+    assert document.lire_etat(d).sens == "gauche_droite"
+
+
+def test_le_sens_par_defaut_reste_le_manga(tmp_path):
+    """Un cache écrit avant que le champ n'existe : rien ne change pour lui."""
+    d = tmp_path / "page_0001"
+    checkpoints.save_regions(d, [_region(0)], TAILLE)
+    assert document.lire_etat(d).sens == checkpoints.SENS_HISTORIQUE == "droite_gauche"
+
+
+def test_ecrire_etat_conserve_le_sens(tmp_path):
+    d = tmp_path / "page_0001"
+    checkpoints.save_regions(d, [_region(0)], TAILLE, sens="gauche_droite")
+    etat = document.lire_etat(d)
+    document.ecrire_etat(d, etat)
+    assert checkpoints.sens_enregistre(d) == "gauche_droite"
+
+
+def test_ajouter_une_zone_ne_retourne_pas_un_webtoon(tmp_path):
+    """Bout en bout par le chemin réel de l'éditeur : `edition.ajouter_zone`."""
+    from manga import edition
+
+    d = tmp_path / "page_0001"
+    gauche, droite = _cote_a_cote()
+    checkpoints.save_regions(d, [gauche, droite], TAILLE, sens="gauche_droite")
+    checkpoints.save_ocr(d, ["G", "D"])
+    checkpoints.save_traduction(d, ["Gauche", "Droite"])
+
+    edition.ajouter_zone(d, (20, 500, 180, 660), forme="rectangle")
+
+    etat = document.lire_etat(d)
+    assert etat.sens == "gauche_droite"
+    # Les deux premières gardent leur ordre gauche→droite et leur texte ; la neuve est en bas.
+    assert etat.traduction[:2] == ["Gauche", "Droite"]
+    assert len(etat.regions) == 3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Masques disjoints — le correctif du « une bulle cache le texte de l'autre »
+#
+# `masks.png` est une image d'ÉTIQUETTES : un pixel partagé va à la dernière bulle écrite, et le
+# masque de l'autre revient amputé au rechargement, en silence et définitivement. Mesuré sur
+# *webtoon A* Chap.11 planche 3 : deux bulles se recouvraient sur 36 108 px.
+# `rendre_disjoints` existait, mais n'était câblée que sur l'éditeur.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _bloc(x0, y0, x1, y1, score=0.9) -> BubbleRegion:
+    m = np.zeros((TAILLE[1], TAILLE[0]), dtype=bool)
+    m[y0:y1, x0:x1] = True
+    return BubbleRegion(bbox=(x0, y0, x1, y1), mask=m, score=score, cls=0)
+
+
+def test_rendre_disjoints_attribue_le_recouvrement_au_premier():
+    a = _bloc(0, 0, 200, 200)
+    b = _bloc(100, 100, 300, 300)
+    sorties, origines = document.rendre_disjoints([a, b])
+    assert origines == [0, 1]
+    assert int(sorties[0].mask.sum()) == int(a.mask.sum()), "le premier garde tout"
+    chevauchement = 100 * 100
+    assert int(sorties[1].mask.sum()) == int(b.mask.sum()) - chevauchement
+
+
+def test_rendre_disjoints_recalcule_la_bbox_du_masque_rogne():
+    """Sans ce recalcul, bbox et masque divergent — et le rayon d'érosion du nettoyeur, qui se
+    calcule sur la bbox, serait surdimensionné pour la forme réelle."""
+    a = _bloc(0, 0, 300, 100)
+    b = _bloc(0, 0, 300, 300)          # entièrement recouverte sur sa partie haute
+    sorties, _o = document.rendre_disjoints([a, b])
+    assert sorties[1].bbox[1] == 100, "la bbox suit le masque rogné"
+
+
+def test_une_region_entierement_recouverte_disparait_et_les_index_suivent():
+    a = _bloc(0, 0, 300, 300)
+    dedans = _bloc(50, 50, 150, 150)
+    c = _bloc(0, 400, 100, 500)
+    sorties, origines = document.rendre_disjoints([a, dedans, c])
+    assert len(sorties) == 2
+    assert origines == [0, 2], "l'index d'origine dit QUI a disparu"
+
+
+def test_des_bulles_qui_ne_se_touchent_pas_sont_inchangees():
+    a, b = _bloc(0, 0, 100, 100), _bloc(200, 200, 300, 300)
+    sorties, origines = document.rendre_disjoints([a, b])
+    assert origines == [0, 1]
+    assert [int(r.mask.sum()) for r in sorties] == [int(a.mask.sum()), int(b.mask.sum())]
+
+
+def test_le_tri_par_score_decide_qui_garde_les_pixels():
+    """C'est l'arbitrage retenu dans le pipeline : la bulle la mieux notée garde son masque."""
+    faible = _bloc(0, 0, 200, 200, score=0.40)
+    forte = _bloc(100, 100, 300, 300, score=0.95)
+    tries = sorted([faible, forte], key=lambda r: -r.score)
+    sorties, origines = document.rendre_disjoints(tries)
+    gagnante = sorties[origines.index(0)]
+    assert gagnante.score == 0.95
+    assert int(gagnante.mask.sum()) == int(forte.mask.sum())

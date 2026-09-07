@@ -30,7 +30,97 @@ _VOWEL_START = re.compile(r"^[aàâäeéèêëiîïoôöuùûüyAÀÂÄEÉÈÊË
 _CONSONANT_START = re.compile(r"^[bcdfgjklmnpqrstvwxzBCDFGJKLMNPQRSTVWXZ]")
 
 
-def enforce_force(text: str, glo: dict, refus: list[str] | None = None) -> tuple[str, int]:
+class AccordFrancais:
+    """Les règles d'accord du FRANÇAIS — déplacées ici sans changer une ligne.
+
+    Elles décidaient jusqu'ici en dur dans `enforce_force`. Elles sont désormais une
+    **fonction du pack de langue cible** : le français accorde le déterminant et répare les
+    élisions, l'anglais n'a rien à accorder, l'allemand aurait besoin des cas.
+
+    ⚠ Le principe à préserver, quelle que soit l'implémentation : **le déterministe ne doit
+    JAMAIS introduire une faute que le modèle n'aurait pas faite.** Un remplacement dont le
+    genre est incertain est REFUSÉ, jamais rendu fautif."""
+
+    def pluriel_attendu(self, ctx: str) -> bool:
+        """Le contexte appelle-t-il la forme plurielle ? (« les », « des », « plusieurs »…)"""
+        prev_m = None if _ELISION_RE.search(ctx) else _PREV_WORD_RE.search(ctx)
+        prev_word = prev_m.group("w").lower() if prev_m else ""
+        return prev_word in _PLURAL_DET_SET
+
+    def examiner(self, ctx: str, cible: str, genre: str) -> tuple[str, int, str | None]:
+        """`(déterminant de remplacement, caractères à retirer, raison de refus)`.
+
+        Une `raison` non nulle veut dire « ne remplace pas » : c'est le garde-fou qui préfère
+        laisser la forme d'origine plutôt que d'écrire « L'médecin » ou « Une médecin »."""
+        el_m = _ELISION_RE.search(ctx)
+        prev_m = None if el_m else _PREV_WORD_RE.search(ctx)
+        prev_word = prev_m.group("w").lower() if prev_m else ""
+
+        ctx_genre = ("féminin" if prev_word in _DET_FEM else
+                     "masculin" if prev_word in _DET_MASC else "")
+
+        # Garde-fou 2 : le déterministe ne corrigerait que le nom, pas les accords autour.
+        if genre and ctx_genre and ctx_genre != genre:
+            return "", 0, f"le déterminant « {prev_word} » est {ctx_genre}, l'entrée est {genre}"
+
+        # Garde-fou 1 : élision à réécrire quand la cible change d'initiale.
+        new_det, trim = "", 0
+        if el_m and _CONSONANT_START.match(cible):
+            el = el_m.group("el").lower()
+            if el == "l":
+                if not genre:
+                    return "", 0, ("« l' » suivi d'une consonne et genre inconnu : impossible "
+                                   "de choisir entre « le » et « la » — précise `genre:` dans "
+                                   "le glossaire")
+                new_det = "la " if genre == "féminin" else "le "
+            elif el == "d":
+                new_det = "de "
+            if new_det:
+                if el_m.group(0)[0].isupper():
+                    new_det = new_det[0].upper() + new_det[1:]
+                trim = len(el_m.group(0))
+        elif prev_word in ("le", "la", "de") and _VOWEL_START.match(cible):
+            new_det = "l’" if prev_word in ("le", "la") else "d’"
+            if prev_m.group("w")[0].isupper():
+                new_det = new_det[0].upper() + new_det[1:]
+            trim = len(prev_m.group(0))
+        return new_det, trim, None
+
+
+class AccordNeutre:
+    """Aucun accord grammatical : la langue cible n'en demande pas.
+
+    L'anglais est le cas type — pas de genre, pas d'élision, pas de déterminant à réécrire.
+    Le remplacement forcé s'y réduit donc à la substitution, ce qui est exactement ce qu'il
+    doit être : **ne rien faire est la bonne réponse**, pas une implémentation en attente.
+
+    Le pluriel reste consulté : `pluriel:` existe dans toutes les langues à nombre, et
+    l'anglais en a un. Mais on ne le devine pas depuis le contexte — aucun déterminant
+    anglais ne le marque de façon fiable (« the » vaut pour les deux). On rend donc `False`,
+    et la forme plurielle ne s'emploie que si l'entrée n'a pas de singulier."""
+
+    def pluriel_attendu(self, ctx: str) -> bool:
+        return False
+
+    def examiner(self, ctx: str, cible: str, genre: str) -> tuple[str, int, str | None]:
+        return "", 0, None
+
+
+#: Implémentations disponibles, nommées dans `pack.yaml` sous `accord:`.
+ACCORDS = {"francais": AccordFrancais, "aucun": AccordNeutre}
+
+#: Défaut : le français. C'est le comportement d'avant, et il ne change pas sans pack.
+ACCORD_DEFAUT = AccordFrancais()
+
+
+def accord_pour(nom: str | None):
+    """Instance d'accord nommée dans un pack, ou le français."""
+    classe = ACCORDS.get(str(nom or "").strip().lower())
+    return classe() if classe else ACCORD_DEFAUT
+
+
+def enforce_force(text: str, glo: dict, refus: list[str] | None = None,
+                  accord=None) -> tuple[str, int]:
     """Remplacement déterministe des entrées `force: true` : toute forme listée en
     `variantes`/`interdits`/`termes_source` est remplacée par `nom` (ou par `pluriel`
     si un déterminant pluriel précède ET que l'entrée fournit ce champ), GARANTI —
@@ -66,6 +156,7 @@ def enforce_force(text: str, glo: dict, refus: list[str] | None = None) -> tuple
     - Le pluriel repose sur le déterminant qui précède ET sur le champ `pluriel:` ; les
       formes plurielles doivent en plus être listées explicitement dans `interdits`
       (`\\b…\\b` ne fait pas correspondre « infirmières » à « infirmière »)."""
+    accord = accord if accord is not None else ACCORD_DEFAUT
     # (forme source, nom singulier, pluriel ou "", genre ou "")
     rules: list[tuple[str, str, str, str]] = []
     for cat in glossary.ENTITY_CATS:
@@ -116,50 +207,17 @@ def enforce_force(text: str, glo: dict, refus: list[str] | None = None) -> tuple
         # quadratique (3,7 s pour 40 ko, et un tome fait des centaines de ko).
         ctx = text[max(0, m.start() - 48):m.start()]
 
-        el_m = _ELISION_RE.search(ctx)
-        prev_m = None if el_m else _PREV_WORD_RE.search(ctx)
-        prev_word = prev_m.group("w").lower() if prev_m else ""
-
-        ctx_genre = ("féminin" if prev_word in _DET_FEM else
-                     "masculin" if prev_word in _DET_MASC else "")
-        is_plural = prev_word in _PLURAL_DET_SET
-        cible = pluriel if (is_plural and pluriel) else nom
-
-        def _refuse(raison: str, _f=forme, _n=nom) -> None:
+        # Les règles d'accord viennent du PACK de langue cible : le français accorde le
+        # déterminant et répare les élisions, l'anglais n'a rien à accorder.
+        cible = pluriel if (accord.pluriel_attendu(ctx) and pluriel) else nom
+        new_det, trim, raison = accord.examiner(ctx, cible, genre)
+        if raison is not None:
             if refus is not None:
-                refus.append(f"« {_f} » → « {_n} » non forcé ({raison}) — laissé au correcteur")
-
-        # Garde-fou 2 : le déterministe ne corrigerait que le nom, pas les accords autour.
-        if genre and ctx_genre and ctx_genre != genre:
-            _refuse(f"le déterminant « {prev_word} » est {ctx_genre}, l'entrée est {genre}")
+                refus.append(f"« {forme} » → « {nom} » non forcé ({raison}) — "
+                             f"laissé au correcteur")
             out.append(segment + forme)
             pos = m.end()
             continue
-
-        # Garde-fou 1 : élision à réécrire quand la cible change d'initiale.
-        new_det = ""            # remplace l'élision/le déterminant (vide = on n'y touche pas)
-        trim = 0                # nb de caractères à retirer en fin de `segment`
-        if el_m and _CONSONANT_START.match(cible):
-            el = el_m.group("el").lower()
-            if el == "l":
-                if not genre:
-                    _refuse("« l' » suivi d'une consonne et genre inconnu : impossible de choisir "
-                            "entre « le » et « la » — précise `genre:` dans le glossaire")
-                    out.append(segment + forme)
-                    pos = m.end()
-                    continue
-                new_det = "la " if genre == "féminin" else "le "
-            elif el == "d":
-                new_det = "de "
-            if new_det:
-                if el_m.group(0)[0].isupper():
-                    new_det = new_det[0].upper() + new_det[1:]
-                trim = len(el_m.group(0))
-        elif prev_word in ("le", "la", "de") and _VOWEL_START.match(cible):
-            new_det = "l’" if prev_word in ("le", "la") else "d’"
-            if prev_m.group("w")[0].isupper():
-                new_det = new_det[0].upper() + new_det[1:]
-            trim = len(prev_m.group(0))
 
         remplacement = match_case(forme, cible)
         if remplacement == forme and not trim:

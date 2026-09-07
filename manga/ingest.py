@@ -67,7 +67,7 @@ def _extract_rar(archive_path: Path, out_dir: Path) -> list[str]:
     except ImportError:
         raise SystemExit(
             "Le paquet « rarfile » est requis pour lire les .cbr : "
-            "`pip install -r requirements-manga.txt`.")
+            "`pip install -r requirements-manga.txt`.") from None
     try:
         with rarfile.RarFile(archive_path) as rf:
             names: list[str] = []
@@ -87,7 +87,7 @@ def _extract_rar(archive_path: Path, out_dir: Path) -> list[str]:
             f"Impossible de lire {archive_path} : l'outil externe unrar/unar est "
             f"introuvable dans le PATH (requis par le paquet « rarfile » pour les .cbr).\n"
             f"  → installe « unrar » (https://www.rarlab.com/rar_add.htm) ou « unar », "
-            f"puis relance. Sinon, préfère le format .cbz.\n  détail : {err}")
+            f"puis relance. Sinon, préfère le format .cbz.\n  détail : {err}") from None
 
 
 def list_source_files(manga_dir: Path) -> tuple[list[Path], list[Path]]:

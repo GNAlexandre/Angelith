@@ -22,6 +22,8 @@ Structure sous build/<Projet>/<Tome>/manga/ :
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -190,18 +192,147 @@ def psd_page_path(build_dir: Path, page_index: int) -> Path:
 FORMAT_VERSION = 3
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LE PLAFOND DE L'IMAGE D'ÉTIQUETTES (lot 14, L6.3)
+#
+# `masks.png` et `sfx_masks.png` sont des images d'ÉTIQUETTES : 0 = fond, i+1 = région i.
+# Un seul PNG par planche plutôt qu'un masque par bulle — c'est ce qui rend le cache lisible
+# d'un coup d'œil et petit sur le disque.
+#
+# ⚠ Le format portait une limite que RIEN n'annonçait. Le tableau était en `uint8` : au-delà
+# de 255 régions, `label[r.mask] = i` **enroule** — la 256ᵉ bulle s'écrit avec l'étiquette 0,
+# donc en fond, et la 257ᵉ prend celle de la première. Deux bulles partagent alors un masque,
+# et rien, nulle part, ne le dit. La docstring de `save_regions` annonçait la limite de
+# *chevauchement* et pas celle du *nombre*.
+#
+# ## Ce que la mesure dit, et ce qu'elle ne dit pas
+#
+# Sur les **1 513 planches** des dix volumes de `build/`, le maximum est de **17 régions**
+# (manga A Vol.4 p61) et de **9 zones hors bulle** (manga C Family Vol.1 p102). Sur la seule bande
+# de webtoon du corpus — 1080×10 000 px, soit six planches paginées — le maximum est **16**.
+# Le plafond n'est donc jamais approché, pas même de loin, et l'idée reçue selon laquelle le
+# webtoon le ferait sauter est **fausse** : les plateformes découpent les chapitres en bandes
+# de 10 000 px, pas en une image unique.
+#
+# Ce n'est donc pas un blocage de format. C'est un défaut de ROBUSTESSE, et il vaut d'être
+# corrigé pour une seule raison : l'enroulement est **silencieux**, ce qui est le pire des
+# trois comportements possibles (refuser, avertir, mentir).
+#
+# ## Pourquoi PAS un passage inconditionnel en uint16
+#
+# Le plan du lot proposait `uint16` avec une migration de tous les caches. Mesure faite, ce
+# serait payer très cher un problème qui n'existe pas : réécrire 1 513 `masks.png` — et
+# risquer l'invalidation d'un cache de détection, donc des heures de GPU — pour une marge dont
+# quinze seizièmes ne servent à personne.
+#
+# La largeur est donc choisie **par planche, sur le nombre de régions** :
+#
+#   ≤ 255 régions   → `uint8`, mode "L"      — le format d'aujourd'hui, au bit près.
+#   ≤ 65 535        → `uint16`, mode "I;16"  — écrit UNIQUEMENT là où le premier déborderait.
+#   au-delà         → une erreur qui NOMME la planche et le nombre.
+#
+# La lecture n'a rien à apprendre : `label == i` se comporte de la même façon quelle que soit
+# la largeur du tableau. Aucun cache existant ne change, aucune migration n'est nécessaire, et
+# `FORMAT_VERSION` ne bouge pas — ce serait déclencher `downstream("detection")` sur tous les
+# projets pour un octet que personne n'écrit.
+PLAFOND_ETIQUETTES_8 = 255
+PLAFOND_ETIQUETTES = 65535
+
+
+class ErreurEtiquettes(ValueError):
+    """Trop de régions pour une image d'étiquettes. Message destiné à l'utilisateur."""
+
+
+def image_etiquettes(regions, largeur: int, hauteur: int, *, ou: str = "") -> Image.Image:
+    """Image d'étiquettes des masques de `regions` : 0 = fond, i+1 = région i.
+
+    ⚠ Suppose des régions NON chevauchantes — c'est le travail de
+    `document.rendre_disjoints`, et le contrat est le même qu'avant : un pixel partagé par
+    deux masques est attribué à la dernière région écrite.
+
+    `ou` nomme la planche dans le message d'erreur. Un « trop de régions » sans planche
+    n'aide personne à trouver laquelle."""
+    n = len(regions)
+    if n > PLAFOND_ETIQUETTES:
+        raise ErreurEtiquettes(
+            f"{n} régions{' sur ' + ou if ou else ''} : le format d'étiquettes de "
+            f"`masks.png` en supporte {PLAFOND_ETIQUETTES}. Au-delà, deux régions "
+            f"partageraient une étiquette — donc un masque.")
+    label = np.zeros((hauteur, largeur),
+                     dtype=np.uint8 if n <= PLAFOND_ETIQUETTES_8 else np.uint16)
+    for i, r in enumerate(regions, start=1):
+        label[r.mask] = i
+    return Image.fromarray(label)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ÉCRITURE ATOMIQUE
+#
+# ⚠ Tout ce qui écrit un fichier de cache passe par ici, et c'est la seule règle qui compte
+# dans ce module. Un `write_text` direct laisse un JSON TRONQUÉ si le processus meurt au
+# milieu — Ctrl+C, coupure, ou une collision de synchro OneDrive, le dépôt y vivant.
+#
+# Et un cache tronqué est INDÉTECTABLE : `stage_cache_present` ne teste que l'EXISTENCE du
+# fichier. Un `ocr.json` à moitié écrit n'est donc jamais replanifié par `stages_to_redo`,
+# jamais supprimé, et fait échouer la planche à CHAQUE run suivant — indéfiniment. Seul un
+# `--from ocr`, que rien ne suggère à l'utilisateur, la réparait.
+#
+# `os.replace` est atomique sur NTFS comme sur POSIX : le fichier de destination est soit
+# l'ancien intact, soit le nouveau complet, jamais un entre-deux. Le temporaire est écrit
+# DANS le dossier de destination — un `%TEMP%` sur un autre volume ferait retomber
+# `os.replace` sur une copie, qui n'est plus atomique.
+# Prévenu quand un fichier de cache se révèle illisible. Une fonction remplaçable plutôt
+# qu'un `print` en dur : ce module est appelé depuis le CLI, depuis la GUI et depuis les
+# tests, et chacun journalise autrement. Le défaut écrit sur stderr — jamais rien, ce serait
+# pire que l'exception qu'on vient de supprimer : un recalcul silencieux ne laisse aucune
+# trace de la corruption qui l'a causé.
+#
+# ⚠ On PRÉVIENT, on ne supprime pas. Un `OSError` peut être un verrou OneDrive passager sur
+# un fichier parfaitement sain ; l'effacer détruirait du travail déjà payé pour un incident
+# qui se résout tout seul. Le recalcul réécrit de toute façon le fichier fautif.
+def _prevenir_cache_abime(chemin: Path) -> None:
+    """Signale un fichier de cache illisible, dont l'étage va donc être recalculé."""
+    print(f"[cache] {chemin} est illisible — l'étage sera recalculé.", file=sys.stderr)
+
+
+def _ecrire_atomique(chemin: Path, contenu: str) -> None:
+    """Écrit du texte par temporaire + `os.replace`. Cf. le commentaire ci-dessus."""
+    chemin = Path(chemin)
+    tmp = chemin.with_name(chemin.name + ".tmp")
+    tmp.write_text(contenu, encoding="utf-8")
+    os.replace(tmp, chemin)
+
+
+def _ecrire_image_atomique(image: Image.Image, chemin: Path) -> None:
+    """Même garantie pour un PNG. `masks.png` est aussi indispensable que `regions.json` :
+    `_lire_regions_brut` exige les DEUX, et un PNG tronqué ferait lever `Image.open`."""
+    chemin = Path(chemin)
+    tmp = chemin.with_name(chemin.name + ".tmp.png")
+    image.save(tmp)
+    os.replace(tmp, chemin)
+
+
 def _lire_regions_brut(ckpt_dir: Path) -> tuple[list[BubbleRegion], int, tuple[int, int]] | None:
     """Lit `regions.json` + `masks.png` QUEL QUE SOIT le format, et renvoie
     `(regions, version, image_size)`. Sert à la lecture normale comme à la migration."""
     meta_path, mask_path = Path(ckpt_dir) / "regions.json", Path(ckpt_dir) / "masks.png"
     if not (meta_path.exists() and mask_path.exists()):
         return None
-    data = json.loads(meta_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        label = np.asarray(Image.open(mask_path))
+    except (json.JSONDecodeError, OSError, ValueError):
+        # Cache ABÎMÉ, pas absent. On répond comme pour un cache absent — `None` « fait
+        # naturellement recalculer la page », dit la docstring de `load_regions`, et c'est
+        # exactement la sémantique voulue ici. Lever, à l'inverse, condamnait la planche à
+        # vie : `stage_cache_present` ne voit qu'un fichier présent et ne replanifie donc
+        # jamais l'étage, et rien n'efface le fichier fautif.
+        _prevenir_cache_abime(meta_path)
+        return None
     if isinstance(data, list):          # lecture tolérante : liste nue = v1
         version, meta = 1, data
     else:
         version, meta = int(data.get("format", 0)), data.get("regions", [])
-    label = np.asarray(Image.open(mask_path))
     h, w = label.shape[:2]
     regions = [
         BubbleRegion(bbox=tuple(m["bbox"]), mask=(label == i), score=m["score"],
@@ -213,7 +344,7 @@ def _lire_regions_brut(ckpt_dir: Path) -> tuple[list[BubbleRegion], int, tuple[i
 
 
 def save_regions(ckpt_dir: Path, regions: list[BubbleRegion], image_size: tuple[int, int],
-                 *, detection: dict | None = None) -> None:
+                 *, detection: dict | None = None, sens: str | None = None) -> None:
     """Sauvegarde bbox/score/classe/genre (JSON) + une image d'ÉTIQUETTES combinant
     tous les masques (0=fond, i+1=bulle i) — un seul PNG plutôt qu'un masque par
     bulle. Suppose des bulles NON chevauchantes (quasi toujours vrai en pratique) :
@@ -223,26 +354,86 @@ def save_regions(ckpt_dir: Path, regions: list[BubbleRegion], image_size: tuple[
     `motif`) : sans lui, une planche relancée à d'autres seuils est indistinguable des 149
     autres, et le réglage qui a donné le bon résultat est perdu au run suivant.
 
-    > ⚠ **Ne PAS incrémenter `FORMAT_VERSION` pour ce champ.** `load_regions` renvoie `None`
-    > sur écart de version, ce qui déclencherait `downstream("detection")` — soit la
-    > retraduction des 150 planches. La version encode le contrat de *nombre et d'ordre*
-    > auquel `ocr.json`/`traduction.json` s'alignent par position ; un champ de provenance n'y
-    > touche pas, et un lecteur ancien l'ignore simplement."""
+    `sens` est le SENS DE LECTURE qui a produit cet ordre (`droite_gauche` /
+    `gauche_droite`). Il n'est pas décoratif : c'est ce qui permet à `sens_perime()` de
+    n'invalider que les pages réellement concernées quand le format d'un tome change.
+
+    ⚠ Omettre `sens` **préserve** celui déjà enregistré, il ne l'efface pas. Les appelants qui
+    réécrivent des régions sans connaître le format du tome — édition manuelle
+    (`manga/document.py`), migration de cache — passeraient sinon une page de webtoon pour
+    du manga, et la feraient re-détecter au run suivant pour rien.
+
+    > ⚠ **Ne PAS incrémenter `FORMAT_VERSION` pour ces champs.** `load_regions` renvoie
+    > `None` sur écart de version, ce qui déclencherait `downstream("detection")` — soit la
+    > retraduction des 150 planches, sur TOUS les projets existants. La version encode le
+    > contrat de *nombre et d'ordre* auquel `ocr.json`/`traduction.json` s'alignent par
+    > position ; un champ de provenance n'y touche pas, et un lecteur ancien l'ignore
+    > simplement."""
     ckpt_dir = Path(ckpt_dir)
+    # Lu AVANT l'écriture : le fichier qu'on s'apprête à remplacer porte la réponse.
+    sens_garde = sens or _sens_brut(ckpt_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     w, h = image_size
-    label = np.zeros((h, w), dtype=np.uint8)
-    meta = []
-    for i, r in enumerate(regions, start=1):
-        label[r.mask] = i
-        meta.append({"bbox": list(r.bbox), "score": r.score, "cls": r.cls, "kind": r.kind,
-                     "scindee": bool(r.scindee)})
-    Image.fromarray(label, mode="L").save(ckpt_dir / "masks.png")
+    meta = [{"bbox": list(r.bbox), "score": r.score, "cls": r.cls, "kind": r.kind,
+             "scindee": bool(r.scindee)} for r in regions]
+    # ⚠ Le PLAFOND est vérifié ICI, sur le chemin du pipeline. Il ne l'était que sur celui de
+    # l'édition manuelle (`document.poser_regions`) — c'est-à-dire sur le seul des trois
+    # chemins où l'utilisateur voit ce qui se passe. Cf. `image_etiquettes`.
+    _ecrire_image_atomique(image_etiquettes(regions, w, h, ou=str(ckpt_dir.name)),
+                           ckpt_dir / "masks.png")
     charge: dict = {"format": FORMAT_VERSION, "image_size": [w, h], "regions": meta}
     if detection:
         charge["detection"] = dict(detection)
-    (ckpt_dir / "regions.json").write_text(
-        json.dumps(charge, ensure_ascii=False, indent=1), encoding="utf-8")
+    if sens_garde:
+        charge["sens"] = str(sens_garde)
+    _ecrire_atomique(ckpt_dir / "regions.json",
+                     json.dumps(charge, ensure_ascii=False, indent=1))
+
+
+def _sens_brut(ckpt_dir: Path) -> str | None:
+    """Sens tel qu'il est ÉCRIT, ou `None` s'il ne l'est pas — sans le défaut historique.
+
+    Distinct de `sens_enregistre` : celui-ci répond « je ne sais pas », ce qu'il faut pour
+    ne pas inventer un champ qui n'existait pas."""
+    p = Path(ckpt_dir) / "regions.json"
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return str(data.get("sens")) if isinstance(data, dict) and data.get("sens") else None
+
+
+#: Sens supposé d'un cache écrit AVANT que le champ n'existe. Tout ce qui a été rendu
+#: jusqu'ici était du manga droite→gauche : c'est le seul défaut qui ne réinvalide rien.
+SENS_HISTORIQUE = "droite_gauche"
+
+
+def sens_enregistre(ckpt_dir: Path) -> str:
+    """Sens de lecture qui a produit l'ordre en cache."""
+    p = Path(ckpt_dir) / "regions.json"
+    if not p.exists():
+        return SENS_HISTORIQUE
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return SENS_HISTORIQUE
+    if not isinstance(data, dict):
+        return SENS_HISTORIQUE
+    return str(data.get("sens") or SENS_HISTORIQUE)
+
+
+def sens_perime(ckpt_dir: Path, sens: str) -> bool:
+    """L'ordre en cache a-t-il été calculé dans un AUTRE sens que celui demandé ?
+
+    Un tome basculé de `manga` à `webtoon` (ou l'inverse) doit re-numéroter ses bulles, sinon
+    les répliques traduites restent rattachées aux bulles de l'ancien ordre — un mélange
+    silencieux, exactement l'échec que `reading_order` décrit. Mais une page dont le sens n'a
+    PAS changé ne doit rien perdre : c'est ce que ce test cible, plutôt qu'un incrément de
+    `FORMAT_VERSION` qui invaliderait tous les projets."""
+    p = Path(ckpt_dir) / "regions.json"
+    return p.exists() and sens_enregistre(ckpt_dir) != str(sens)
 
 
 def load_detection_meta(ckpt_dir: Path) -> dict:
@@ -260,18 +451,24 @@ def load_detection_meta(ckpt_dir: Path) -> dict:
 
 
 def invalider_textes(ckpt_dir: Path) -> list[str]:
-    """Supprime `ocr.json`, `traduction.json` et `qa.json`. Renvoie les noms supprimés.
+    """Supprime `ocr.json`, `traduction.json`, `structure.json` et `qa.json`. Renvoie les noms
+    supprimés.
 
     À appeler dès qu'une opération **change le nombre de régions** d'une page : l'alignement
     par position est alors irrécupérable, et `stage_cache_present` teste la PRÉSENCE d'un
     fichier, pas sa longueur — une page relancée garderait donc un OCR de l'ancien découpage,
     silencieusement décalé.
 
+    ⚠ `structure.json` est dans la liste **parce qu'il est aligné par position lui aussi**
+    (lot 15). Une scission qui fait passer une bulle bi-lobée à deux lobes décalerait sinon
+    les types et les locuteurs d'un rang, et le décalage serait invisible : la structure n'est
+    jamais dessinée, elle est seulement lue par le prompt.
+
     `terminologie.txt` est délibérément épargné : c'est un cache NON BLOQUANT, du texte libre
     qui n'est aligné sur rien. C'est aussi ce qui garde le coût d'une relance de détection à
     un seul appel LLM au lieu de deux."""
     supprimes = []
-    for nom in (OCR_FILENAME, TRADUCTION_FILENAME, QA_FILENAME):
+    for nom in (OCR_FILENAME, TRADUCTION_FILENAME, STRUCTURE_FILENAME, QA_FILENAME):
         chemin = Path(ckpt_dir) / nom
         if chemin.exists():
             chemin.unlink()
@@ -387,14 +584,64 @@ QA_FILENAME = "qa.json"        # écrit par `report_manga.save_page_qa`, qui le 
 
 def _save_texts(ckpt_dir: Path, filename: str, texts: list[str]) -> None:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    (ckpt_dir / filename).write_text(json.dumps(texts, ensure_ascii=False, indent=1), encoding="utf-8")
+    _ecrire_atomique(ckpt_dir / filename, json.dumps(texts, ensure_ascii=False, indent=1))
 
 
 def _load_texts(ckpt_dir: Path, filename: str) -> list[str] | None:
+    """Textes en cache, ou `None` si le fichier est absent **ou illisible**.
+
+    ⚠ Le second cas n'est pas théorique et il n'est pas bénin. `stage_cache_present` ne teste
+    que l'EXISTENCE : un `ocr.json` tronqué n'est jamais replanifié par `stages_to_redo`, si
+    bien qu'une exception ici rendait la planche définitivement perdue — et, appelée depuis
+    `_passe_terminologie` / `_passe_contexte`, elle remonte HORS du filet par planche et tue
+    le tome entier (le chapitre entier, en `--all`). Rendre `None` fait simplement recalculer
+    l'étage, ce qui est le comportement voulu."""
     p = ckpt_dir / filename
     if not p.exists():
         return None
-    return json.loads(p.read_text(encoding="utf-8"))
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        _prevenir_cache_abime(p)
+        return None
+
+
+#: Structure de la planche (lot 15) : groupes de mise en page, types de bulle, étiquettes de
+#: locuteur. Trois listes alignées par position sur `regions.json`.
+#:
+#: ⚠ Fichier **additionnel et facultatif**, et c'est ce qui en fait un CORRECTIF de cache et
+#: non un MAJEUR. Il n'entre ni dans `STAGES` ni dans `FORMAT_VERSION` : un cache antérieur
+#: ne le porte pas, `load_structure` rend alors `None`, et le traducteur reçoit exactement
+#: l'énoncé qu'il recevait avant. Aucune planche n'est réinvalidée, aucun tome n'est
+#: retraduit.
+STRUCTURE_FILENAME = "structure.json"
+
+
+def save_structure(ckpt_dir: Path, charge: dict) -> None:
+    """Écrit la structure d'une planche. Sert au prompt du run en cours ET au banc.
+
+    ⚠ Persistée plutôt que recalculée à la demande, pour une raison qui n'est pas la
+    performance : `tools/banc.py` doit pouvoir publier le taux d'« indéterminé » du
+    classifieur **sans charger le moindre modèle ni rouvrir les masques**, comme il le fait
+    déjà pour tout le reste. Un classifieur dont personne ne peut mesurer la distribution est
+    un classifieur qu'on ne peut pas contredire."""
+    ckpt_dir = Path(ckpt_dir)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    _ecrire_atomique(ckpt_dir / STRUCTURE_FILENAME,
+                     json.dumps(charge, ensure_ascii=False, indent=1))
+
+
+def load_structure(ckpt_dir: Path) -> dict | None:
+    """Structure en cache, ou `None` — absente, illisible, ou antérieure au lot 15."""
+    p = Path(ckpt_dir) / STRUCTURE_FILENAME
+    if not p.exists():
+        return None
+    try:
+        charge = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        _prevenir_cache_abime(p)
+        return None
+    return charge if isinstance(charge, dict) else None
 
 
 def save_ocr(ckpt_dir: Path, texts: list[str]) -> None:
@@ -435,7 +682,7 @@ TERMINOLOGIE_FILENAME = "terminologie.txt"
 
 def save_terminologie(ckpt_dir: Path, notes: str) -> None:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    (ckpt_dir / TERMINOLOGIE_FILENAME).write_text(notes, encoding="utf-8")
+    _ecrire_atomique(ckpt_dir / TERMINOLOGIE_FILENAME, notes)
 
 
 def load_terminologie(ckpt_dir: Path) -> str | None:
@@ -505,7 +752,7 @@ def save_traduction_manuelle(ckpt_dir: Path, manuelles: dict[int, str]) -> None:
         return
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     charge = {str(k): ("" if v is None else str(v)) for k, v in sorted(manuelles.items())}
-    chemin.write_text(json.dumps(charge, ensure_ascii=False, indent=1), encoding="utf-8")
+    _ecrire_atomique(chemin, json.dumps(charge, ensure_ascii=False, indent=1))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -556,9 +803,8 @@ def save_origines(ckpt_dir: Path, origines: dict[int, str]) -> None:
         chemin.unlink(missing_ok=True)
         return
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    chemin.write_text(
-        json.dumps({str(k): v for k, v in sorted(origines.items())},
-                   ensure_ascii=False, indent=1), encoding="utf-8")
+    _ecrire_atomique(chemin, json.dumps({str(k): v for k, v in sorted(origines.items())},
+                                        ensure_ascii=False, indent=1))
 
 
 def marquer_origine(ckpt_dir: Path, index: int, origine: str) -> None:
@@ -592,12 +838,18 @@ MISE_EN_PAGE_FILENAME = "mise_en_page.json"
 
 # Clés reconnues d'une entrée. Une clé inconnue est ignorée plutôt que de faire échouer la
 # lecture : c'est un fichier qu'on édite parfois à la main.
-CHAMPS_MISE_EN_PAGE = ("rect", "taille", "police", "couleur", "interligne", "ancre")
+# ⚠ « police » a été RETIRÉE de ces deux listes. Elle y figurait, donc une entrée qui n'en
+# portait qu'elle était retenue à la lecture — mais `typeset.typeset_page` ne teste que
+# `rect` et `taille` avant d'appeler `fit_impose`, et `fit_impose` ne lit pas `police`.
+# Le réglage était donc accepté sans un mot et sans le moindre effet. Une clé inconnue est
+# ignorée (c'est la règle ci-dessus), ce qui est le même résultat en apparence — à ceci
+# près qu'elle ne PROMET plus rien. Pour changer de police, c'est `manga.typeset.font_path`.
+CHAMPS_MISE_EN_PAGE = ("rect", "taille", "couleur", "interligne", "ancre")
 
 
 # Clés qui décrivent le LETTRAGE sans rien dire de la géométrie. Une entrée qui n'en porte
 # aucune et n'a pas de `rect` ne décrit rien et sera écartée.
-CHAMPS_STYLE_MISE_EN_PAGE = ("taille", "interligne", "police", "couleur")
+CHAMPS_STYLE_MISE_EN_PAGE = ("taille", "interligne", "couleur")
 
 
 def load_mise_en_page(ckpt_dir: Path) -> dict[int, dict]:
@@ -655,7 +907,7 @@ def save_mise_en_page(ckpt_dir: Path, mises: dict[int, dict]) -> None:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     charge = {str(k): {c: v[c] for c in CHAMPS_MISE_EN_PAGE if c in v}
               for k, v in sorted(mises.items())}
-    chemin.write_text(json.dumps(charge, ensure_ascii=False, indent=1), encoding="utf-8")
+    _ecrire_atomique(chemin, json.dumps(charge, ensure_ascii=False, indent=1))
 
 
 
@@ -690,7 +942,7 @@ SFX_TRADUCTION_FILENAME = "sfx_traduction.json"
 
 def save_sfx(ckpt_dir: Path, regions: list[BubbleRegion], textes: list[str],
              image_size: tuple[int, int], *, mobilier: list[bool] | None = None,
-             lu: bool = True) -> None:
+             styles: list[dict] | None = None, lu: bool = True) -> None:
     """Régions de texte hors bulle + leur OCR. Même schéma que `save_regions` (métadonnées
     JSON + une image d'étiquettes), pour que le format reste lisible d'un seul coup d'œil.
 
@@ -711,24 +963,36 @@ def save_sfx(ckpt_dir: Path, regions: list[BubbleRegion], textes: list[str],
     if ancien is not None and list(ancien[1]) != list(textes):
         (ckpt_dir / SFX_TRADUCTION_FILENAME).unlink(missing_ok=True)
     w, h = image_size
-    label = np.zeros((h, w), dtype=np.uint8)
-    meta = []
-    for i, r in enumerate(regions, start=1):
-        label[r.mask] = i
-        meta.append({"bbox": list(r.bbox), "score": r.score, "cls": r.cls, "kind": r.kind})
-    Image.fromarray(label, mode="L").save(ckpt_dir / SFX_MASKS_FILENAME)
+    meta = [{"bbox": list(r.bbox), "score": r.score, "cls": r.cls, "kind": r.kind}
+            for r in regions]
+    # ⚠ Deux plafonds INDÉPENDANTS : le compteur de `sfx_masks.png` repart à 1 dans son propre
+    # fichier, une planche peut donc porter 250 bulles et 250 onomatopées sans qu'aucun des
+    # deux ne déborde. C'est la raison pour laquelle la garde est posée ici aussi et pas une
+    # seule fois en amont.
+    _ecrire_image_atomique(image_etiquettes(regions, w, h, ou=str(ckpt_dir.name)),
+                           ckpt_dir / SFX_MASKS_FILENAME)
     if mobilier is not None:
         for m, est_mobilier in zip(meta, mobilier):
             m["mobilier"] = bool(est_mobilier)
-    (ckpt_dir / SFX_FILENAME).write_text(
+    _ecrire_atomique(
+        ckpt_dir / SFX_FILENAME,
         json.dumps({"format": FORMAT_VERSION, "image_size": [w, h],
                     # `lu` distingue « détectée mais pas encore OCRisée » de « lue et vide ».
                     # C'est ce qui permet de filtrer le mobilier de page AVANT de payer la
                     # lecture — le filtre a besoin des boîtes de TOUT le tome, donc il ne peut
                     # pas tourner pendant la détection d'une planche isolée.
                     "lu": bool(lu),
-                    "regions": meta, "textes": list(textes)},
-                   ensure_ascii=False, indent=1), encoding="utf-8")
+                    "regions": meta, "textes": list(textes),
+                    # ⚠ Lot 21, L21.2 — le STYLE mesuré de chaque zone hors bulle, aligné
+                    # par position. Clé OPTIONNELLE : absente d'un cache écrit avant ce lot,
+                    # `load_sfx_complet` rend alors `[]` et rien ne se relance.
+                    # `FORMAT_VERSION` n'est PAS incrémentée, et c'est délibéré : elle encode
+                    # le contrat de *nombre et d'ordre* auquel `ocr.json` et
+                    # `traduction.json` s'alignent, qu'une clé de provenance ne touche pas.
+                    # L'incrémenter ferait `downstream("detection")` sur tous les projets —
+                    # des heures de GPU pour un champ que personne n'attend encore.
+                    "styles": list(styles or [])},
+                   ensure_ascii=False, indent=1))
 
 
 def load_sfx(ckpt_dir: Path) -> tuple[list[BubbleRegion], list[str]] | None:
@@ -740,7 +1004,7 @@ def load_sfx(ckpt_dir: Path) -> tuple[list[BubbleRegion], list[str]] | None:
 
 
 def load_sfx_complet(ckpt_dir: Path) -> dict | None:
-    """Tout ce que `sfx.json` porte : régions, textes, `mobilier` par zone, `lu`, taille.
+    """Tout ce que `sfx.json` porte : régions, textes, `mobilier`, `styles`, `lu`, taille.
 
     `load_sfx` reste la vue courte (régions + textes), celle dont l'orchestrateur se sert au
     rendu ; le filtre de mobilier, lui, a besoin du reste."""
@@ -748,7 +1012,11 @@ def load_sfx_complet(ckpt_dir: Path) -> dict | None:
     mask_path = Path(ckpt_dir) / SFX_MASKS_FILENAME
     if not meta_path.exists():
         return None
-    data = json.loads(meta_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        _prevenir_cache_abime(meta_path)
+        return None
     meta = data.get("regions", [])
     textes = list(data.get("textes", []))
     taille = tuple(data.get("image_size") or (0, 0))
@@ -757,17 +1025,22 @@ def load_sfx_complet(ckpt_dir: Path) -> dict | None:
     # étaient alors indissociables). Le lire comme « non lu » relancerait l'OCR de deux tomes.
     lu = bool(data.get("lu", True))
     if not meta:
-        return {"regions": [], "textes": textes, "mobilier": [], "lu": lu, "taille": taille}
+        return {"regions": [], "textes": textes, "mobilier": [], "styles": [], "lu": lu,
+                "taille": taille}
     if not mask_path.exists():
         return None
-    label = np.asarray(Image.open(mask_path))
+    try:
+        label = np.asarray(Image.open(mask_path))
+    except (OSError, ValueError):
+        _prevenir_cache_abime(mask_path)
+        return None
     regions = [
         BubbleRegion(bbox=tuple(m["bbox"]), mask=(label == i), score=m.get("score", 1.0),
                      cls=m.get("cls", 0), kind=m.get("kind", "onomatopee"))
         for i, m in enumerate(meta, start=1)
     ]
-    return {"regions": regions, "textes": textes, "mobilier": mobilier, "lu": lu,
-            "taille": taille}
+    return {"regions": regions, "textes": textes, "mobilier": mobilier,
+            "styles": list(data.get("styles") or []), "lu": lu, "taille": taille}
 
 
 def save_sfx_traduction(ckpt_dir: Path, textes: list[str]) -> None:

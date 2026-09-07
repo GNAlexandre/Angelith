@@ -77,6 +77,11 @@ class EtatPlanche:
     origines: dict[int, str] = field(default_factory=dict)
     mises_en_page: dict[int, dict] = field(default_factory=dict)
     taille: tuple[int, int] | None = None
+    #: Sens de lecture de la planche, tel que `regions.json` l'a enregistré. Il voyage AVEC
+    #: l'état parce que `poser_regions` en a besoin et qu'il est pur — il ne peut pas aller
+    #: le chercher sur le disque. Sans lui, toute édition de zone re-triait la planche en
+    #: ordre manga : sur un webtoon, un mélange massif et silencieux des répliques.
+    sens: str = checkpoints.SENS_HISTORIQUE
 
     def instantane(self) -> "EtatPlanche":
         """Copie SUPERFICIELLE, sûre parce qu'aucun masque n'est muté en place.
@@ -89,7 +94,7 @@ class EtatPlanche:
             traduction=list(self.traduction), manuelles=dict(self.manuelles),
             origines=dict(self.origines),
             mises_en_page={k: dict(v) for k, v in self.mises_en_page.items()},
-            taille=self.taille)
+            taille=self.taille, sens=self.sens)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -112,7 +117,8 @@ def lire_etat(ckpt_dir: Path) -> EtatPlanche:
         manuelles=checkpoints.load_traduction_manuelle(ckpt_dir),
         origines=checkpoints.load_origines(ckpt_dir),
         mises_en_page=checkpoints.load_mise_en_page(ckpt_dir),
-        taille=taille)
+        taille=taille,
+        sens=checkpoints.sens_enregistre(ckpt_dir))
 
 
 def ecrire_etat(ckpt_dir: Path, etat: EtatPlanche, *, motif: str = "edition_manuelle",
@@ -124,8 +130,11 @@ def ecrire_etat(ckpt_dir: Path, etat: EtatPlanche, *, motif: str = "edition_manu
     d'une session d'édition, et le seul écrit coûteux du lot."""
     ckpt_dir = Path(ckpt_dir)
     if regions_changees:
+        # `sens` est repassé EXPLICITEMENT plutôt que laissé à la préservation silencieuse de
+        # `save_regions` : c'est le sens dans lequel `poser_regions` vient effectivement de
+        # trier, et l'écrire ici garde le champ d'accord avec l'ordre qu'il décrit.
         checkpoints.save_regions(ckpt_dir, etat.regions, etat.taille,
-                                 detection={"motif": motif})
+                                 detection={"motif": motif}, sens=etat.sens)
     checkpoints.save_ocr(ckpt_dir, etat.ocr)
     checkpoints.save_traduction(ckpt_dir, etat.traduction)
     checkpoints.save_traduction_manuelle(ckpt_dir, etat.manuelles)
@@ -154,7 +163,13 @@ def rendre_disjoints(regions: list[BubbleRegion]) -> tuple[list[BubbleRegion], l
     entièrement recouverte DISPARAÎT, et sans lui les index décaleraient silencieusement.
 
     Sans cette passe, `masks.png` mentirait : c'est une image d'étiquettes, le dernier masque
-    écrit gagne, et la région recouverte reviendrait amputée au rechargement."""
+    écrit gagne, et la région recouverte reviendrait amputée au rechargement.
+
+    ⚠ **Cette fonction ne trie rien**, et c'est délibéré : l'arbitrage entre deux bulles qui se
+    recouvrent appartient au site d'appel, parce que les deux appelants n'ont pas le même
+    arbitre : la détection trie par SCORE décroissant
+    (`orchestrator_manga._fabriquer_regions`), l'édition manuelle garde l'ordre positionnel
+    (`poser_regions`, qui dit pourquoi)."""
     pris = None
     sorties: list[BubbleRegion] = []
     origines: list[int] = []
@@ -201,14 +216,47 @@ def poser_regions(etat: EtatPlanche, nouvelles: list[BubbleRegion],
     re-détection, ruineux pour une retouche : ajouter une bulle oubliée sur une planche qui en
     compte sept jetterait les six autres. D'où l'appariement par IoU, qui rend à chaque bulle
     restée la même son texte, sa correction manuelle **et** son origine, même quand l'ordre de
-    lecture a changé."""
+    lecture a changé.
+
+    ## Pourquoi PAS le tri par score du chemin de détection (lot 12, L4.6)
+
+    L'autre appelant de `rendre_disjoints` trie par score décroissant avant de l'appeler : sur
+    deux bulles qui se recouvrent, la mieux notée garde les pixels partagés. Aligner ce chemin
+    sur le même tri a été examiné et **écarté**, pour trois raisons distinctes :
+
+    1. **Le score n'est pas un discriminant ici.** Une région tracée à la main naît avec
+       `score = 1.0` (`edition.py`). Trier par score mettrait donc toutes les zones dessinées
+       à égalité en tête, dans un ordre décidé par le tri — c'est-à-dire arbitrairement.
+    2. **L'arbitre est l'utilisateur, et il s'exprime par `touchees`.** Ce qu'il vient de
+       tracer doit gagner ; c'est déjà ce que l'ordre positionnel donne, puisque l'éditeur
+       place la zone modifiée à sa place dans la liste qu'il tient.
+    3. **Un tri global ferait bouger des bulles que l'édition ne touche pas.** Retoucher la
+       bulle 7 réordonnerait 1 à 6 entre elles, donc changerait laquelle cède ses pixels à sa
+       voisine — une amputation à distance, invisible, sur une planche que l'utilisateur
+       croyait ne pas avoir modifiée. `touchees` est de surcroît indexé sur `nouvelles`
+       **avant** réordonnancement : un tri ici demanderait de le remapper, pour un gain nul.
+
+    Le vrai correctif des pixels partagés n'est de toute façon ni ici ni là-bas : c'est le
+    format de `masks.png`, une image d'étiquettes où un pixel ne peut appartenir qu'à une
+    région.
+
+    ⚠ Et il n'arrivera pas par la largeur de l'étiquette. Le lot 14 a posé la question et l'a
+    tranchée : passer à `uint16` (ce qu'il fait, au-delà de 255 régions) borne le NOMBRE de
+    régions, pas le partage des pixels. Réparer vraiment demanderait **un masque par région**,
+    donc un format de cache entièrement différent, pour un défaut qui touche 15 planches sur
+    125 mesurées — cf. `docs/mesures/webtoon-2026-08-26.md`."""
     disjointes, origines = rendre_disjoints(nouvelles)
     if not disjointes:
         raise ErreurDocument("l'opération ne laisserait aucune bulle sur la planche")
-    if len(disjointes) > 255:
-        # `masks.png` est en mode "L" : au-delà, deux bulles partageraient une étiquette.
+    if len(disjointes) > checkpoints.PLAFOND_ETIQUETTES:
+        # ⚠ La limite est celle de `checkpoints.image_etiquettes`, pas un 255 recopié.
+        # Elle valait 255 jusqu'au lot 14 parce que `masks.png` était écrit en `uint8` sans
+        # que rien ne le dise ; elle est désormais choisie par planche (cf. le module), et
+        # cette garde-ci ne doit surtout pas rester en arrière — un refus à 255 sur un format
+        # qui en accepte 65 535 serait aussi faux que l'enroulement qu'il remplaçait.
         raise ErreurDocument(
-            f"{len(disjointes)} bulles : le format d'étiquettes en supporte 255")
+            f"{len(disjointes)} bulles : le format d'étiquettes en supporte "
+            f"{checkpoints.PLAFOND_ETIQUETTES}")
 
     survivantes = set(origines)
     if any(k not in survivantes for k in touchees):
@@ -217,14 +265,17 @@ def poser_regions(etat: EtatPlanche, nouvelles: list[BubbleRegion],
             "n'aurait aucun pixel à elle. Redessine-la à côté, ou scinde la bulle existante.")
 
     marquees = {id(disjointes[origines.index(k)]) for k in touchees}
-    ordonnees = ocr_mod.reading_order(disjointes)
+    # ⚠ `etat.sens`, jamais le défaut. Trier une planche de webtoon en ordre manga la mélange
+    # entièrement — et en silence, puisque le nombre de bulles reste juste et que
+    # `regions.json` continue d'annoncer le bon sens.
+    ordonnees = ocr_mod.reading_order(disjointes, etat.sens)
     touchees_finales = {i for i, r in enumerate(ordonnees) if id(r) in marquees}
 
     # Appariement glouton par IoU décroissante : une bulle « conservée » est la MÊME bulle,
     # pas une bulle au même endroit.
     vers_ancien = detection_retry.apparier(ordonnees, etat.regions, seuil=SEUIL_REPORT)
 
-    neuf = EtatPlanche(regions=ordonnees, taille=etat.taille)
+    neuf = EtatPlanche(regions=ordonnees, taille=etat.taille, sens=etat.sens)
     a_relire: list[int] = []
     conserves = 0
     for i in range(len(ordonnees)):

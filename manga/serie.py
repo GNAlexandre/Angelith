@@ -86,15 +86,19 @@ def build_dir_de(build_root, projet: str, tome: str) -> Path:
     return Path(build_root) / projet / tome / "manga"
 
 
-def dossier_planches(vol_dir) -> Path | None:
-    """`<Chapitre>/manga/`, ou `<Chapitre>/` lui-même — le MÊME repli que
-    `sources_manga.scan_volume`. Un pré-vol qui ne regarderait pas où le scan ira lirait un
-    autre chapitre que celui qui sera traité."""
-    vol_dir = Path(vol_dir)
-    manga_dir = vol_dir / "manga"
-    if not manga_dir.is_dir():
-        manga_dir = vol_dir
-    return manga_dir if manga_dir.is_dir() else None
+def dossier_planches(vol_dir, config: dict | None = None) -> Path | None:
+    """Dossier où le run ira lire les planches, ou `None` s'il n'y en a pas.
+
+    ⚠ Délègue à `sources_manga.resoudre_source`, le résolveur UNIQUE — et pas à une copie de
+    sa logique. La règle a maintenant quatre branches (format, langue, et leurs replis) : un
+    pré-vol qui les redériverait à côté lirait tôt ou tard un autre chapitre que celui qui
+    sera traité, ce qui est exactement le défaut que cette docstring mettait en garde."""
+    from . import sources_manga
+    try:
+        dossier, _fmt, _code, _av = sources_manga.resoudre_source(Path(vol_dir), config)
+    except SystemExit:
+        return None
+    return dossier
 
 
 def _compter_archive(chemin: Path) -> int | None:
@@ -117,14 +121,14 @@ def _compter_archive(chemin: Path) -> int | None:
         return None
 
 
-def compter_pages_source(vol_dir) -> int | None:
+def compter_pages_source(vol_dir, config: dict | None = None) -> int | None:
     """Planches attendues pour ce chapitre. `0` = rien à traiter, `None` = indénombrable.
 
     Les archives PRIMENT sur les images isolées, exactement comme dans
     `sources_manga.scan_volume` — sans quoi un chapitre livré en `.cbz` accompagné d'une
     jaquette isolée serait compté à une planche, et déclaré partiel à jamais."""
     from . import ingest
-    manga_dir = dossier_planches(vol_dir)
+    manga_dir = dossier_planches(vol_dir, config)
     if manga_dir is None:
         return 0
     try:
@@ -151,11 +155,23 @@ def compter_pages_rendues(build_dir) -> int:
     return sum(1 for _ in dossier.glob("page_*.png"))
 
 
-def etat_chapitre(sources_root, build_root, projet: str, tome: str) -> EtatChapitre:
-    """Statut d'un chapitre, en lecture seule et sans rien charger d'inutile."""
+def etat_chapitre(sources_root, build_root, projet: str, tome: str,
+                  config: dict | None = None, *,
+                  balayage: dict[int, dict] | None = None) -> EtatChapitre:
+    """Statut d'un chapitre, en lecture seule et sans rien charger d'inutile.
+
+    `config` sert à reconnaître les dossiers de langue (`langues.dossiers`). Sans lui le
+    pré-vol ne voit que la structure historique — il compte alors 0 planche sur un chapitre
+    rangé en `webtoon/ENG/`, et l'annonce « sans source ».
+
+    `balayage` est un `etat_planches.balayer_tome` **déjà fait**, pour l'appelant qui en a de
+    toute façon besoin — c'est le cas de `bibliotheque.py`, qui y lit ses comptes
+    d'étapes. Sans lui, ce chapitre serait balayé deux fois par affichage de la bibliothèque :
+    mesuré au lot 34, c'était **2 607 `scandir` au lieu de 1 304** sur le corpus. Le passer ne
+    change aucun verdict — c'est la même fonction, appelée une fois au lieu de deux."""
     vol_dir = Path(sources_root) / projet / tome
     build_dir = build_dir_de(build_root, projet, tome)
-    source = compter_pages_source(vol_dir)
+    source = compter_pages_source(vol_dir, config)
     rendues = compter_pages_rendues(build_dir)
 
     if source == 0:
@@ -174,7 +190,8 @@ def etat_chapitre(sources_root, build_root, projet: str, tome: str) -> EtatChapi
     # Les comptes coïncident : c'est le SEUL cas où « est-ce à jour ? » se pose, donc le seul
     # qui paie l'import de numpy et Pillow. Un `--list` sur une œuvre neuve ne le paie jamais.
     from . import etat_planches
-    perimees = etat_planches.planches_a_relettrer(build_dir)
+    perimees = (etat_planches.planches_a_relettrer(build_dir) if balayage is None
+                else etat_planches.perimees_du_balayage(balayage))
     if perimees:
         return EtatChapitre(tome, source, rendues, perimees, A_RELETTRER,
                             f"{len(perimees)} planche(s) à relettrer")
@@ -203,9 +220,10 @@ def lister_chapitres(sources_root, projet: str) -> list[str]:
     return sorted((p.name for p in proj.iterdir() if p.is_dir()), key=natural_key)
 
 
-def etats_serie(sources_root, build_root, projet: str) -> list[EtatChapitre]:
+def etats_serie(sources_root, build_root, projet: str,
+                config: dict | None = None) -> list[EtatChapitre]:
     """L'état de tous les chapitres d'une œuvre, dans l'ordre de lecture."""
-    return [etat_chapitre(sources_root, build_root, projet, tome)
+    return [etat_chapitre(sources_root, build_root, projet, tome, config)
             for tome in lister_chapitres(sources_root, projet)]
 
 

@@ -1,3 +1,17 @@
+# ⚠ ENVELOPPE depuis le lot 37 (2.31.0, 2026-09-06). Les dépendances sont déclarées une seule
+# fois, dans `pyproject.toml` ; ce fichier les appelle par leur EXTRA. Motif : le `.spec` de
+# PyInstaller, la CI et cinq fichiers ne peuvent pas être trois sources de vérité — le jour où
+# deux divergent, le gel manque un module et le symptôme est un `ImportError` chez
+# l'utilisateur, pas chez toi.
+#
+# ⚠ **Ce fichier ne disparaît pas**, et sa prose non plus : la CI, les procédures et le README
+# le citent nommément, et les mesures écrites plus bas ne sont écrites nulle part ailleurs.
+#
+# ⚠ **Ce qui change pour toi**, et le CHANGELOG le dit : `-e .` installe aussi `angelith`
+# lui-même, en mode éditable. Conséquence pratique : lance la commande **depuis la racine du
+# dépôt**, parce qu'un `-e .` d'un fichier de requirements se résout contre le RÉPERTOIRE
+# COURANT, pas contre le fichier.
+
 # Interface graphique (lot 16) — OPTIONNELLE.
 #
 # Fichier séparé, comme requirements-manga.txt et pour la même raison : ni le light novel ni le
@@ -15,4 +29,4 @@
 # La logique métier de l'éditeur (manga/edition.py, manga/traduction_unitaire.py) est en Python
 # nu et ne dépend PAS de Qt : elle se teste et s'utilise sans rien installer d'ici. Seul le
 # dossier gui/ importe PySide6.
-PySide6>=6.7
+-e .[gui]

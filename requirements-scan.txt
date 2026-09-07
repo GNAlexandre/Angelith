@@ -1,11 +1,33 @@
+# ⚠ ENVELOPPE depuis le lot 37 (2.31.0, 2026-09-06). Les dépendances sont déclarées une seule
+# fois, dans `pyproject.toml` ; ce fichier les appelle par leur EXTRA. Motif : le `.spec` de
+# PyInstaller, la CI et cinq fichiers ne peuvent pas être trois sources de vérité — le jour où
+# deux divergent, le gel manque un module et le symptôme est un `ImportError` chez
+# l'utilisateur, pas chez toi.
+#
+# ⚠ **Ce fichier ne disparaît pas**, et sa prose non plus : la CI, les procédures et le README
+# le citent nommément, et les mesures écrites plus bas ne sont écrites nulle part ailleurs.
+#
+# ⚠ **Ce qui change pour toi**, et le CHANGELOG le dit : `-e .` installe aussi `angelith`
+# lui-même, en mode éditable. Conséquence pratique : lance la commande **depuis la racine du
+# dépôt**, parce qu'un `-e .` d'un fichier de requirements se résout contre le RÉPERTOIRE
+# COURANT, pas contre le fichier.
+
 # Dépendances de la brique SCAN (lecture d'un LN japonais livré en images — voir scan/).
 # Sous-ensemble strict de requirements-manga.txt : si tu as déjà installé la brique manga,
 # tu n'as rien de plus à faire.
 #   pip install -r requirements-scan.txt
 
-numpy>=1.26          # analyse de la mise en page (projections, gouttières) — aucun modèle
-manga-ocr>=0.1.14    # OCR japonais vertical (télécharge son modèle depuis Hugging Face au
-                     # premier lancement — ~424 Mo, une seule fois, puis hors ligne)
+-e .[scan]
+#
+# Ce que l'extra `scan` porte — les lignes d'origine, gardées en prose :
+#   numpy>=1.26          analyse de la mise en page (projections, gouttières) — aucun modèle
+#   manga-ocr>=0.1.14    OCR japonais vertical — télécharge son modèle depuis Hugging Face au
+#                        premier lancement (~424 Mo, une seule fois, puis hors ligne)
+#
+# ⚠ **« Sous-ensemble strict » n'est plus une affirmation, c'est une mesure** (2026-09-06) :
+# dans deux venv propres, le jeu « manga » et le jeu « manga + scan » rendent la MÊME liste de
+# 72 paquets, 1 983,4 Mo et 39 259 fichiers. Le `PLAN-37` demandait quatre jeux de dépendances
+# à peser ; il n'y en a que trois de distincts, et c'est celui-ci qui manque à l'appel.
 
 # Volontairement PAS de dépendance à onnxruntime : la brique SCAN ne détecte rien par
 # réseau de neurones. Toute l'analyse de page (colonnes, ruby, mobilier, coupes) est

@@ -542,6 +542,10 @@ def tome_psd(tmp_path):
     config["chemins"]["sources"] = str(tmp_path / "sources")
     config["chemins"]["build"] = str(tmp_path / "build")
     config["chemins"]["prompts"] = str(racine / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    config.setdefault("langues", {})["packs"] = str(racine / "langues")
     config["manga"]["detection"]["model_path"] = str(tmp_path / "absent.onnx")
     # ⚠ Neutraliser le détecteur de BULLES ne suffit pas : la passe `sfx` est hors du graphe
     # d'invalidation, donc elle tourne même sur un tome déjà en cache et charge le vrai

@@ -1,0 +1,58 @@
+# Dependabot — mensuel et groupé, et les deux mots comptent.
+#
+# ⚠ **Pas en hebdomadaire.** Sur un projet à un mainteneur, un flux continu de PR de
+# dépendances devient du bruit qu'on cesse de lire — et c'est exactement comme cela qu'une
+# mise à jour cassante passe au milieu de neuf mises à jour anodines. Une PR par mois, groupée,
+# se relit ; quatre par semaine, séparées, se fusionnent sans être lues.
+#
+# ⚠ **Groupé**, pour la même raison : le dépôt a cinq fichiers de dépendances
+# (`requirements*.txt`) et une CI à quatre jobs. Sept PR ouvertes en parallèle, dont chacune
+# relance toute la matrice, coûtent plus de minutes de CI que la mise à jour n'en fait gagner.
+#
+# ## Ce que Dependabot ne remplace pas
+#
+# Le run hebdomadaire du banc (`ci.yml`, `schedule`) met à jour onnxruntime et numpy **au
+# moment de la mesure**, sans PR. Les deux sont complémentaires : Dependabot propose un
+# changement de fichier qu'un humain relit ; le run hebdomadaire répond à « une mise à jour
+# amont a-t-elle fait bouger le rappel ? » — question à laquelle une PR de dépendance ne
+# répond pas, puisqu'elle ne mesure rien.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly
+      day: monday
+      time: "05:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 2
+    groups:
+      python:
+        patterns: ["*"]
+    labels:
+      # `sans-changelog` : une montée de version de dépendance ne change rien à ce qu'un tome
+      # produit, donc elle n'a pas d'entrée de CHANGELOG à écrire. L'étiquette est ce que
+      # `tools/verifier_livraison.py` reconnaît — et elle reste VISIBLE dans la liste des PR,
+      # là où un mot magique dans un message ne le serait pas.
+      - "sans-changelog"
+      - "dépendances"
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+      day: monday
+      time: "05:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]
+    labels:
+      - "sans-changelog"
+      - "dépendances"
+    commit-message:
+      prefix: "chore(deps)"

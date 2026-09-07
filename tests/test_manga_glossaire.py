@@ -47,6 +47,10 @@ def _config(tmp_path: Path) -> dict:
     config["chemins"]["sources"] = str(tmp_path / "sources")
     config["chemins"]["build"] = str(tmp_path / "build")
     config["chemins"]["prompts"] = str(ROOT / "prompts")
+    # Les prompts et le guide de style vivent dans le PACK de langue cible.
+    # Désigné en absolu : `pytest` tourne depuis un `tmp_path`, où `langues/`
+    # relatif n'existe pas.
+    config.setdefault("langues", {})["packs"] = str(ROOT / "langues")
     # Chemin DÉLIBÉRÉMENT inexistant : une extraction sur cache ne doit jamais le toucher.
     config["manga"]["detection"]["model_path"] = str(tmp_path / "absent.onnx")
     config["manga"]["detection"]["telechargement_auto"] = False
@@ -138,7 +142,20 @@ class _FauxDetecteur:
     def __init__(self, *a, **k):
         pass
 
-    def detect(self, image, conf_threshold=None, iou_threshold=None):
+    @classmethod
+    def depuis_config(cls, det_cfg, *, dire=None):
+        """L'orchestrateur construit par la FABRIQUE depuis qu'elle est le point unique
+        (cf. `BubbleDetector.depuis_config`). Le double doit honorer le même contrat, sinon
+        il ne teste plus le chemin réel."""
+        return cls()
+
+    def detect(self, image, conf_threshold=None, iou_threshold=None, input_size=None,
+               rejets=None, sautees=None):
+        # `input_size` et `rejets` sont arrivés au lot 12 : le premier pour l'escalade (qui
+        # relance une planche suspecte à une autre résolution sans reconstruire le détecteur),
+        # le second pour compter les détections écartées par motif. `sautees` est arrivé au
+        # lot 14, pour les fenêtres auxquelles la porte d'encre n'a pas payé d'inférence. Le
+        # double honore le contrat complet, sinon il ne teste plus le chemin réel.
         type(self).appels += 1
         return [_region()]
 
@@ -152,8 +169,18 @@ def modeles_factices(monkeypatch):
     import manga.detection as det
     import manga.ocr as ocr_mod
 
-    def _boom(*a, **k):
-        raise AssertionError("une extraction sur cache ne doit pas charger le détecteur ONNX")
+    class _boom:
+        """Une CLASSE, pas une fonction : l'orchestrateur passe par `depuis_config`, et un
+        `_boom.depuis_config` inexistant lèverait un `AttributeError` opaque là où on veut
+        l'assertion qui nomme la faute."""
+
+        def __init__(self, *a, **k):
+            raise AssertionError(
+                "une extraction sur cache ne doit pas charger le détecteur ONNX")
+
+        @classmethod
+        def depuis_config(cls, det_cfg, *, dire=None):
+            return cls()
 
     _FauxOCR.appels = 0
     _FauxDetecteur.appels = 0
@@ -374,8 +401,8 @@ def test_en_dry_run_le_glossaire_n_est_pas_reecrit(tmp_path, monkeypatch, modele
     laisserait plus rien à répéter en blanc.
 
     ⚠ Le cas `avec_terminologue` est celui qui compte, et il n'est pas théorique : re-fusionner
-    des notes DÉJÀ en cache change le glossaire **sans un seul appel LLM**. Mesuré sur *manga A
-    Zero manga A* Vol.2 — 150 planches reprises, 0 appel, 23 fusions.
+    des notes DÉJÀ en cache change le glossaire **sans un seul appel LLM**. Mesuré sur *manga A*
+    Vol.2 — 150 planches reprises, 0 appel, 23 fusions.
 
     ⚠ Cette garantie vaut pour `--extract-glossary`, et pour lui seul : le `--dry-run` d'un run
     manga ordinaire écrit l'OCR, les pages, le rapport et le CBZ (cf.

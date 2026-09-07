@@ -7,6 +7,29 @@
 
 # --- Serveur d'inférence local (API compatible OpenAI) ---
 llm:
+  # --- Traduire, ou non (lot 39) ------------------------------------------------------
+  #
+  # `actif: false` fait tourner un tome SANS AUCUN appel LLM : détection, nettoyage, OCR et
+  # rendu s'exécutent normalement, les bulles sortent VIDES, et tu saisis les répliques dans la
+  # Retouche. Elles vont dans `traduction_manuelle.json`, que le pipeline ne réécrit jamais.
+  #
+  # ⚠ **C'est pour les machines qui ne feront jamais tourner de LLM en local**, et pour les
+  # jours où le serveur est arrêté. Ce n'est PAS `--dry-run`, qui SIMULE une traduction : ici
+  # rien ne prétend avoir traduit, et le RAPPORT.md l'écrit planche par planche.
+  #
+  # ⚠ **Le défaut est `true`, donc rien ne change** si tu ne touches à rien. Le mode se demande
+  # aussi par `--sans-llm` (light novel et manga) ou par la case du formulaire de lancement.
+  #
+  # ⚠ **Le light novel REFUSE ce mode**, et ce n'est pas un oubli : il n'existe aucune surface
+  # de saisie manuelle pour de la prose (la Retouche est un éditeur de planches), et un roman
+  # rendu sans traduction sortirait avec son texte source dans un .docx français — une sortie
+  # fausse. `pipeline/orchestrator.py` le dit déjà pour un traducteur désactivé : « sans
+  # traduction, le pipeline n'a rien à produire ».
+  #
+  # Même nom et même doctrine que `illustration.llm.actif`, plus bas : à false, le chemin reste
+  # déterministe, reproductible SANS SERVEUR, donc testable sans rien installer.
+  actif: true
+
   # Ollama expose une API compatible OpenAI sur le port 11434.
   base_url: "http://localhost:11434/v1"
   api_key: "ollama" # valeur factice : tout est local
@@ -220,6 +243,23 @@ decoupage:
 # Correspondance dossier → code (insensible à la casse). Tu crées sous chaque Tome
 # les dossiers ENG / JAP / ESP / CHINOIS et éventuellement FR (brouillon à améliorer).
 langues:
+  # --- Langue de SORTIE ---
+  # Code du pack de langue cible, cherché sous `packs/`. `fr` par défaut, qui est la seule
+  # valeur pour laquelle le comportement historique s'applique : sans dossier `langues/`, le
+  # projet lit ses prompts, son guide de style et ses gabarits là où il les a toujours lus
+  # (`chemins.prompts`, `chemins.style_guide`, `rendu.reference_docx`, `rendu.epub_css`).
+  # Une config qui ne touche pas à ces deux clés produit donc exactement la même sortie
+  # qu'avant, au bit près.
+  #
+  # ⚠ Un pack demandé mais introuvable ou incomplet ARRÊTE le run au démarrage, avec la liste
+  # des packs disponibles. Jamais de repli silencieux vers le français : six heures de GPU
+  # pour découvrir qu'un tome est sorti dans la mauvaise langue coûtent bien plus cher qu'un
+  # refus immédiat.
+  #
+  # Voir langues/README.md pour l'anatomie d'un pack et la marche à suivre pour en ajouter un.
+  cible: fr
+  packs: langues
+
   dossiers:
     ENG: en
     ENGLISH: en
@@ -337,11 +377,22 @@ rendu:
   # false : le tiret « — » est généré par ton style Word « Paragraphe de liste »
   #         (et par le CSS pour EPUB/PDF). true : l'IA écrit « — » dans le texte.
   dialogue_dash_in_text: false
-  reference_docx: "templates/reference.docx"
-  epub_css: "templates/epub.css"
+  # Gabarits de sortie. VIDES = ceux du pack de langue cible
+  # (`langues/<code>/templates/`) : la typographie d'un dialogue et le nom des styles Word
+  # dépendent de la langue.
+  #
+  # Les renseigner PRIME sur le pack — c'est ainsi qu'on impose SON reference.docx. Et parce
+  # que la valeur explicite l'emporte, un chemin fautif est signalé par `--check` plutôt que
+  # masqué par le gabarit du pack.
+  reference_docx: null
+  epub_css: null
   pdf_engine: "weasyprint"
   formats: [docx, epub, pdf]
   # Gabarits de blocs custom-style, calés sur TON reference.docx (noms XML exacts).
+  #
+  # Le pack de langue cible en fournit un jeu par défaut (`langues/<code>/pack.yaml`,
+  # `styles_word`) ; ce bloc-ci PRIME, parce qu'il est calé sur ton propre document et qu'un
+  # pack n'a pas à te le reprendre.
   styles:
     dialogue: "List Paragraph" # ↔ « Paragraphe de liste » (tiret auto)
     pensee: "Pensée"
@@ -360,8 +411,68 @@ chemins:
   sources: "sources"
   build: "build"
   glossaire_fichier: "glossaire.yaml" # cherché dans sources/<Projet>/ (un par œuvre)
-  style_guide: "style_guide.md"
+
+  # Guide de style. VIDE = celui du pack de langue cible (`langues/<code>/style_guide.md`),
+  # ce qui est le cas normal — le guide dépend de la langue de sortie.
+  #
+  # Le renseigner PRIME sur le pack : c'est ainsi qu'on impose son propre guide. Et parce
+  # que la valeur explicite l'emporte, un chemin fautif est SIGNALÉ par `--check` au lieu
+  # d'être masqué par celui du pack.
+  style_guide: null
+
+  # Prompts. ⚠ Ici le PACK fait autorité, contrairement aux clés ci-dessus : un pack sans
+  # ses huit prompts n'est pas un pack, et le résolveur le refuse au démarrage. Cette clé ne
+  # sert plus qu'au repli historique — aucun dossier `langues/`, installation antérieure à
+  # la refonte. Pour changer un prompt, édite celui du pack.
   prompts: "prompts"
+
+# --- Vérification des versions (lot 37) — DÉSARMÉE, et ce n'est pas un oubli ---
+#
+# Angelith ne se met PAS à jour tout seul, et n'en aura pas le droit sans une décision écrite :
+# un mécanisme de mise à jour est un canal d'exécution de code sur ta machine. Ce qui existe
+# ici est plus modeste — savoir qu'une version existe :
+#
+#   · UN `GET` sur l'API publique des releases GitHub, et une comparaison de trois entiers ;
+#   · le résultat s'affiche dans « À propos », avec un lien. Rien ne se télécharge.
+#
+# ⚠ `verifier: false` par défaut, et le motif est l'un des six différenciateurs annoncés du
+# projet : « 100 % local, rien ne sort de la machine ». Un appel réseau au démarrage, même
+# anodin, contredit la promesse — donc il est opt-in, et il le dit.
+#
+# Ce qui ne part pas, énuméré plutôt que promis (cf. `core/maj.py`) : aucun identifiant de
+# machine, d'installation ou d'utilisateur, aucune télémétrie, aucun numéro de version dans
+# l'agent utilisateur, aucun corps de requête. Ce qui part : une ligne `GET` et l'adresse IP
+# que tout `GET` porte.
+#
+# Le délai d'attente est de 3,0 s, du même ordre que les 2,0 s des sondes de l'accueil
+# (`gui/sondes.py`) et sans commune mesure avec les 30 s de `core.llm.test_connection` : ce
+# sont trois questions différentes, donc trois budgets différents.
+#
+# ⚠ MISE À JOUR 2026-09-06, lot 40 — `verifier` passe à `true`, et l'AVERTISSEMENT CI-DESSUS
+# EST LEVÉ, pas effacé. Il décrit exactement ce que la 2.31.0 livrait, et son motif n'était pas
+# faux : il était plus large que ce qu'il voulait dire.
+#
+# « 100 % local, rien ne sort de la machine » porte sur les ŒUVRES — aucun texte, aucune
+# planche, aucun glossaire, aucune traduction ne quitte cette machine, et cela reste vrai mot
+# pour mot. Un `GET` anonyme sur une URL publique ne dit rien d'une œuvre. La formulation de
+# 2.31.0 mettait les deux dans le même sac ; c'est elle qui est corrigée.
+#
+# Ce que ça change concrètement : au démarrage, l'application demande à GitHub s'il existe une
+# version plus récente, et le propose si oui. La fenêtre porte « Ne plus afficher », qui écrit
+# `maj_silencieuse` dans `.angelith/interface.json` — ⚠ elle masque LA FENÊTRE, pas la
+# capacité : le bouton d'« À propos » continue de marcher, et la préférence est réversible
+# depuis les Réglages. Pour tout couper, c'est ici : `verifier: false`.
+#
+# ⚠ La clé ABSENTE vaut toujours `false` (`core/maj.py:armee`). Une installation antérieure au
+# lot 37 n'a pas cette section et ne se met pas à appeler le réseau parce que personne ne lui a
+# rien dit.
+maj:
+  verifier: true
+  # Vide = l'API du miroir public, `GNAlexandre/Angelith`. C'est là que les releases sont
+  # publiées ; le dépôt de travail, lui, est privé.
+  url: ""
+  # La page que le lien ouvre. Une API JSON ne se lit pas dans un navigateur.
+  page: ""
 
 # --- Naturalisation (reformulage par le traducteur) ---
 naturalisation:
@@ -454,6 +565,25 @@ manga:
     # cache. C'est l'agent qui gagne le plus à raisonner : il doit conclure sur un registre à
     # partir d'un échantillon, pas restituer un texte.
     manga_contexte: { model: "yume-27b", endpoint: "reflexion" }
+    # --- Relecture à MANDAT ÉTROIT (lot 15, L7.9) — LAISSÉE COMMENTÉE ---
+    #
+    # La brique manga n'a AUCUN agent en aval : ce qui sort du traducteur est dessiné dans la
+    # bulle. Le light novel, lui, a un `correcteur` câblé et livré à `null` — même situation,
+    # même prudence.
+    #
+    # ⚠ Un relecteur GÉNÉRIQUE qui « améliore le style » serait le pire ajout possible : un
+    # appel par planche, un résultat non reproductible, et autant de choses défaites que
+    # réparées. Celui-ci a un mandat NOMMÉ et court — registre, accord, contradiction,
+    # glossaire — et il ne peut proposer une correction qu'en nommant la règle violée. Une
+    # correction sans règle nommée, ou nommant une règle inconnue, est **rejetée par le code**,
+    # pas par le modèle.
+    #
+    # ⚠ Il est livré DÉSACTIVÉ parce qu'il n'est pas encore MESURÉ. Le rapport publie ce qu'il
+    # faut pour le juger — propositions, appliquées, rejets par motif — et la quatrième règle
+    # (« un terme du glossaire présent dans la source et absent du rendu ») tourne de toute
+    # façon SANS lui : elle est purement lexicale. S'il ne gagne rien, on le laisse commenté.
+    # C'est un résultat aussi.
+    # manga_relecteur: { model: "yume-27b" }   # + un appel LLM par planche traduite
 
   temperatures:
     manga_traducteur: 0.3
@@ -461,6 +591,7 @@ manga:
     glossariste: 0.2
     manga_onomatopees: 0.4   # une onomatopée se cherche, elle ne se déduit pas
     manga_contexte: 0.2      # une fiche factuelle : on ne veut pas qu'elle brode
+    manga_relecteur: 0.1     # il applique quatre règles nommées, il n'invente rien
 
   # --- Contexte inter-planches ---
   # La continuité du dialogue ne s'attrape pas sur une planche isolée : pronoms, sujets
@@ -479,7 +610,18 @@ manga:
   # est par planche, jamais par lot.
   contexte:
     planches_precedentes: 3   # 0 = comportement d'avant le lot 14 (aucun contexte)
-    repliques_max: 18         # plafond dur, pour qu'une planche bavarde ne gonfle pas le prompt
+    # Plafond dur, pour qu'une planche bavarde ne gonfle pas le prompt.
+    #
+    # ⚠ Le budget est RÉPARTI ENTRE LES PLANCHES depuis le lot 15, et pas tronqué globalement.
+    # Le code concaténait les répliques des trois planches puis coupait `[-18:]` : l'ordre
+    # étant chronologique croissant, cette troncature gardait la FIN — donc, sur une planche
+    # bavarde, la fin de N−1 et RIEN de N−3 ni de N−2. Silencieusement. On garde désormais les
+    # six dernières de chacune : on perd des répliques dans les deux cas, on ne perd plus de
+    # planches entières.
+    #
+    # ⚠ Et chaque ligne dit d'où elle vient (« Planche N−1 : … »). Quelques tokens, et une
+    # liste plate redevient une séquence : le modèle sait laquelle une phrase peut prolonger.
+    repliques_max: 18
 
     # --- Fiche de contexte de l'ŒUVRE (agent `manga_contexte`, optionnel) ---
     # Le glossaire est un dictionnaire de TERMES : il ne dit rien du registre ni des rapports
@@ -491,9 +633,21 @@ manga:
     # Décommente `manga_contexte` sous `manga.modeles` pour l'activer ; sans agent, la fiche est
     # vide et rien ne change.
     #
-    # ⚠ Chaque token de la fiche est payé UNE FOIS PAR PLANCHE dans le prompt de traduction :
-    # 400 tokens × 131 planches = 52 000 tokens de prefill sur un tome (+16 %). D'où les deux
-    # plafonds ci-dessous, volontairement serrés.
+    # ⚠ Chaque token de la fiche est payé UNE FOIS PAR PLANCHE dans le prompt de traduction.
+    # D'où les deux plafonds ci-dessous, volontairement serrés.
+    #
+    # ⚠ Le chiffre annoncé ici était une ESTIMATION au plafond, et il n'avait jamais été payé :
+    # jusqu'au lot 11, la fiche n'atteignait pas le chemin par défaut (elle était déclarée au
+    # paramètre de `_translate_page` et jamais lue). Mesuré depuis, sur les huit `contexte.txt`
+    # réellement produits dans `build/` :
+    #
+    #   · une fiche pèse **174 à 261 tokens** (médiane 219) — pas 400, qui est le PLAFOND
+    #     `max_tokens` ci-dessous et non la taille usuelle ;
+    #   · sur le Vol.1 du manga A : 255 × 131 planches = **33 405 tokens** de prefill ajoutés,
+    #     soit **+10,5 %** des 318 390 tokens du tome — et non les +16 % estimés.
+    #
+    # C'est un compte de tokens de l'ÉNONCÉ, pas le résultat d'un run : il ne dépend ni du
+    # modèle ni de la température, et se refait par `core.tokens.estimate` sur le cache.
     budget_echantillon: 3000  # tokens d'OCR échantillonnés sur tout le tome pour rédiger la fiche
     max_tokens: 400           # taille MAXIMALE de la fiche produite
 
@@ -547,6 +701,124 @@ manga:
     # think: "low"
     # thinking_budget: 2500   # le 16 000 de la racine est calibré pour un bloc LN : hérité tel
     #                          # quel, il autoriserait une trace plus longue que le lot lui-même.
+
+  # --- STRUCTURE DE PLANCHE : ce que la planche sait d'elle-même (lot 15) ---
+  #
+  # Jusqu'ici, le traducteur recevait une liste plate « 1..N » et devait deviner tout le reste.
+  # Trois informations lui manquaient, et le pipeline calculait déjà les trois — ou de quoi les
+  # calculer — avant de les jeter :
+  #
+  #   · les GROUPES — `ocr.reading_order` coupe la planche par ses gouttières et n'en gardait
+  #     qu'un ordre plat. Une réplique en tête de groupe est très souvent une nouvelle prise de
+  #     parole : un modèle qui voit la rupture ne continue pas la phrase précédente ;
+  #   · le TYPE de bulle — `BubbleRegion.kind` ne vaut que "bulle" ou "onomatopee", et vaut
+  #     "bulle" 1 599 fois sur les deux tomes de référence. Rien ne distinguait un dialogue
+  #     d'une pensée, d'un récitatif ou d'un cri, alors que le français les écrit différemment ;
+  #   · le LOCUTEUR — `geometry.width_profile` calcule la plage contiguë POUR EXCLURE la queue
+  #     de la bulle, c'est-à-dire le seul signal graphique qui désigne celui qui parle.
+  #
+  # Tout est DÉTERMINISTE et sans le moindre appel LLM : morphologie de masque, gouttières,
+  # direction de queue. Le coût est de ~14 ms par bulle, mis en cache dans
+  # `.checkpoints/page_XXXX/structure.json`.
+  #
+  # ⚠ LA RÈGLE, et elle gouverne les trois : **ne rien affirmer qu'on ne sache**. Un groupe
+  # faux fait continuer une phrase par-dessus un changement de plan ; un type faux fait écrire
+  # un cri comme un récitatif ; une étiquette de locuteur fausse fait tutoyer un inconnu. Dans
+  # les trois cas l'annotation ABSENTE vaut mieux que l'annotation fausse — le modèle sait
+  # travailler sans, c'est ce qu'il faisait avant.
+  #
+  # Calibré sur 2 534 bulles, puis vérifié sur les **7 862 bulles** des dix volumes de
+  # `build/` : **86,2 % des bulles restent « indéterminées »**, dialogue 6,9 %, récitatif
+  # 5,4 %, pensée 0,9 %, cri 0,6 %. Un classifieur qui type tout est un classifieur suspect ;
+  # `python tools/mesurer_structure.py --tous` republie la distribution sur n'importe quel
+  # volume, sans charger le moindre modèle.
+  #
+  # ⚠ Le taux de DIALOGUE varie beaucoup d'un tome à l'autre (2,4 % à 20,1 %), et ce n'est pas
+  # une variation de style : la queue n'est lisible que si le masque de détection la porte.
+  # Cette colonne mesure donc autant la qualité de segmentation d'un tome que sa proportion de
+  # répliques parlées.
+  #
+  # ⚠ Le mot « case » est un ABUS DE LANGAGE et n'apparaît nulle part dans le prompt : la
+  # coupe X-Y ne détecte aucune case, elle coupe des gouttières. Le prompt dit « groupes
+  # séparés par une rupture de mise en page », sinon le modèle inférerait une précision qui
+  # n'existe pas.
+  #
+  # ⚠ Aucune reconnaissance de personnages : les étiquettes de locuteur sont LOCALES à la
+  # planche, et le prompt dit qu'elles ne valent que « probablement ». Suivre un personnage
+  # d'une planche à l'autre demanderait un modèle, et les seuls publiés (Magi, *The Manga
+  # Whisperer*, CVPR 2024) sont sous licence de recherche académique — inutilisables dans un
+  # projet redistribué sous AGPL.
+  structure:
+    # `false` = comportement d'avant le lot 15 : liste plate, aucune annotation, énoncé
+    # identique au caractère près. C'est ce qui rend le lot comparable par diff.
+    actif: true
+    # Gouttière minimale pour qu'une coupe soit une RUPTURE DE MISE EN PAGE et non un simple
+    # espace entre deux bulles d'un même plan, en fraction de l'étendue de la planche sur
+    # l'axe de la coupe. À 0,045 sur une planche 1125×1600 : 72 px verticaux.
+    gouttiere_min_frac: 0.045
+    # --- Seuils du classifieur de TYPE, calibrés sur les masques de build/ ---
+    # Un récitatif est un RECTANGLE : il remplit sa boîte et ses côtés sont parallèles.
+    recitatif_remplissage_min: 0.985
+    recitatif_rectangularite_min: 0.97
+    # Un cri a des lobes PÉRIODIQUES et PROFONDS, et c'est la conjonction qui trie.
+    #
+    # ⚠ La périodicité n'est pas un raffinement : un premier classifieur triait le cri sur la
+    # seule amplitude du relief, et la mesure a montré qu'il attrapait les masques les plus
+    # BRUITÉS du tome, pas les ballons en étoile. Un contour sale et un ballon de cri ondulent
+    # autant ; seul le second le fait régulièrement.
+    cri_harmonique_min: 0.10
+    cri_ondulation_min: 0.25
+    # Une pensée a des festons : des lobes périodiques eux aussi, mais PEU PROFONDS.
+    #
+    # ⚠ C'est le type le plus fragile, et le seul dont le seuil soit franchement prudent :
+    # les masques de détection sont bruités, et toute bande d'ondulation « moyenne »
+    # attraperait 15 à 30 % des bulles — c'est-à-dire les bulles ordinaires. La conjonction
+    # retenue n'en garde que 1,0 %. La desserrer, c'est faire écrire des dialogues en voix
+    # intérieure, et ce n'est pas rattrapable en aval.
+    pensee_harmonique_min: 0.030
+    pensee_ondulation_max: 0.15
+    pensee_pointes_min: 8
+    # --- Locuteurs ---
+    # Deux queues qui désignent des points distants de moins de ceci (fraction de la diagonale
+    # de la planche) désignent le même locuteur.
+    locuteur_rayon_frac: 0.09
+    # En dessous de deux bulles à queue lisible, AUCUNE étiquette n'est posée sur la planche.
+    locuteur_min_bulles: 2
+
+  # --- Garde-fous de CONTENU, côté manga (lot 15, L7.8) ---
+  #
+  # ⚠ À ne pas confondre avec la clé `garde_fous:` de PREMIER NIVEAU, plus haut : celle-là est
+  # hors du bloc `manga:`, donc structurellement inatteignable depuis `config["manga"]`. C'est
+  # littéralement pourquoi la brique manga n'avait aucun garde-fou de perte de contenu et que
+  # `grep -rn perte_mots manga/` renvoyait zéro.
+  #
+  # Le défaut que ce bloc ferme : les six motifs de `quality_manga` sont tous morphologiques
+  # ou statistiques, et AUCUN ne détectait une réplique abrégée. Une bulle japonaise de 40
+  # caractères rendue par « Ouais. » les passait tous les six — elle n'est pas vide, elle est
+  # numérotée, elle est en français, elle est unique, et elle est courte.
+  #
+  # Or la pression est STRUCTURELLEMENT dans le sens de l'abrègement : le prompt injecte un
+  # budget de caractères par bulle sans aucune contrepartie sur la fidélité. On demandait
+  # d'être court, et on ne vérifiait jamais qu'on n'avait pas coupé. (Le prompt a été
+  # rééquilibré dans le même lot : la place est une CONTRAINTE, pas un objectif.)
+  garde_fous:
+    # Ratio plancher `tokens(rendu) / tokens(source)`, PAR FAMILLE DE LANGUE SOURCE.
+    #
+    # ⚠ Calibré, pas choisi. Mesuré sur les paires source/rendu déjà en cache dans `build/` —
+    # 1 702 bulles CJK sur trois volumes, 16 bulles latines sur le webtoon — en écartant les
+    # sources de moins de 8 tokens :
+    #
+    #     source CJK    médiane 0,65   p10 0,39   p5 0,33   p2 0,24   p1 0,20
+    #     source latine médiane 1,06   p10 0,88   p5 0,84   p2 0,79   p1 0,77
+    #
+    # Le japonais est dense : un ratio unique produirait soit des faux positifs en masse sur
+    # le CJK, soit un plancher inatteignable sur le latin. Les valeurs sont sous le 2ᵉ centile
+    # de leur famille — le motif ne se déclenche que sur une réplique franchement amputée.
+    #
+    # `0` DÉSARME le motif pour cette famille, sans toucher aux six autres.
+    ratio_court:
+      cjk: 0.22
+      latin: 0.55
 
   # Rattrapage UNITAIRE des bulles laissées vides par la traduction de planche.
   #
@@ -608,7 +880,21 @@ manga:
   # entraînés pour partie sur Manga109-s. À vérifier avant toute diffusion des planches
   # produites — même vigilance que pour les polices.
   onomatopees:
-    actif: false
+    # ACTIVÉE par défaut depuis la 2.3.0. Ce qu'elle coûte, dit franchement :
+    #   · 94,7 Mo de poids téléchargés une fois (`comic-text-detector`, cf. manga_models/) ;
+    #   · une passe ONNX de détection de texte par planche ;
+    #   · en mode "rapport" (le défaut ci-dessous), un appel LLM par planche portant du texte
+    #     hors bulle — pour le LIRE et le traduire dans RAPPORT.md, sans rien dessiner.
+    #
+    # ⚠ Elle ne périme AUCUN cache : `sfx` est dans `checkpoints.CACHE_NON_BLOQUANT`, ne
+    # dépend que de `detection` et ne nourrit que `rendu`. L'activer sur un tome déjà traduit
+    # ne relance donc ni l'OCR des bulles, ni la traduction de planche.
+    #
+    # ⚠ Le défaut du CODE reste `False` (`orchestrator_manga.py`), et ce n'est pas une
+    # contradiction : il ne s'applique qu'à un `config.yaml` où le bloc `onomatopees` est
+    # entièrement ABSENT. Cette ligne-ci dit ce que le projet recommande ; ce défaut-là dit
+    # quoi faire quand personne n'a rien choisi.
+    actif: true
     # "rapport" (DÉFAUT) : détecter, lire, traduire — et n'écrire QUE dans RAPPORT.md.
     #             Rien n'est dessiné sur la planche.
     # "glose"   : dessiner en plus la traduction à côté du texte japonais.
@@ -635,6 +921,30 @@ manga:
     # (koharu en embarque un, avec son propre jeu de caractères), « glose » deviendra le
     # défaut naturel.
     mode: "rapport"
+    # --- Joindre le CROP de la zone à l'appel de traduction (lot 15, L7.7) ---
+    #
+    # ⚠ C'était le cas le plus absurde du chemin manga : **une onomatopée est un DESSIN**. Le
+    # glyphe *est* le contenu — sa taille, son épaisseur, son inclinaison portent l'intensité —
+    # et cette passe le traduisait depuis une lecture OCR dont les trois lignes ci-dessus
+    # mesurent qu'elle hallucine. `_translate_sfx` ne recevait même pas d'objet `Image` : les
+    # deux seuls appels LLM avec image de tout le dépôt joignaient une planche pleine page.
+    #
+    # Le crop joint est RECTANGULAIRE BRUT (`ocr.region_rectangulaire`), pas l'encre isolée, et
+    # c'est une mesure : sur la zone (241,1115) de la page 25, l'encre nue donne 人間の場所??? —
+    # inventé — là où le crop brut donne ゴォ！！！都弥！！！, correct. Le masque retire justement les
+    # demi-teintes dont l'encodeur se sert.
+    #
+    # Ce que ça coûte : au plus 8 crops par planche (`MAX_CROPS_SFX`), et seulement sur les
+    # planches qui portent du texte hors bulle — 338 zones sur tout le Vol.1, dont 289 traduites.
+    #
+    # ⚠ EXIGE un modèle `manga_onomatopees` capable de VISION. Le défaut du CODE est `false`,
+    # pour la même raison que `actif` : une configuration antérieure au lot 15, ou un agent
+    # pointé sur un modèle texte, ne doit pas se mettre à échouer sans avoir été consultée.
+    # Cette ligne-ci dit ce que le projet recommande.
+    #
+    # ⚠ Et n'en déduis PAS que `mode: "rapport"` peut passer à autre chose. La LECTURE est un
+    # problème ; le DESSIN en est un autre, et il reste hors périmètre. L'IA ne dessine jamais.
+    vision: true
     model_path: "manga_models/text_detector.onnx"
     telechargement_auto: true
     model_url: ""
@@ -647,6 +957,85 @@ manga:
     # boîtes : une réplique de 200 px² dans un ballon de 40 000 px² donne un IoU de 0,005 et
     # serait déclarée « hors bulle », alors qu'elle y est entièrement (idée reprise de koharu).
     containment_bulle: 0.90
+    # --- Aire minimale d'une COMPOSANTE CONNEXE, avant tout groupement ---
+    # À ne pas confondre avec `aire_min` ci-dessous, qui s'applique au groupe FUSIONNÉ.
+    #
+    # ⚠ 1 est le défaut historique, et il coûte cher : `composantes` alloue un masque booléen
+    # PLEINE PAGE par composante connexe, y compris pour une tache de trame d'un pixel — 1,8 Mo
+    # sur une planche 1125×1600, 10,8 Mo sur une bande webtoon 1080×10 000. Et
+    # `fusionner_proches` boucle ensuite en O(n²) Python pur sur ces composantes, sans que rien
+    # n'en borne le nombre.
+    #
+    # ⚠ **Le relever n'est PAS neutre**, et le raisonnement évident est faux : on aimerait dire
+    # qu'une dilatation ne peut que faire grossir une composante, donc que le seuil ne change
+    # rien. Mais `aire_min` est comparé à l'aire du groupe FUSIONNÉ, pas à la composante : un
+    # fragment passé sous ce seuil — un dakuten, un trait d'allongement, un éclat de glyphe —
+    # est supprimé alors qu'il aurait rejoint un groupe légitime, et le masque comme la boîte
+    # de ce groupe changent. C'est exactement ce que `fusionner_proches` existe pour faire.
+    #
+    # ⚠ **Le lot 14 a mesuré ce coût, et il n'est pas là où on le croyait.** Sur une bande de
+    # 1080×10 000, la passe rend **24 composantes**, pas deux mille : la boucle O(n²) porte sur
+    # 276 paires et se compte en dixièmes de seconde. Ce qui coûte, c'est l'inférence — 109 s
+    # sur cette machine, contre 0,5 s pour tout le reste de la passe réunie. Un masque local
+    # avec sa boîte reste un gain de mémoire honnête (~160 Mo sur le pic d'une bande), mais ce
+    # n'est **pas** le levier de temps qu'on croyait tenir ici.
+    min_composante: 1
+
+    # --- Fenêtrage de la lecture du texte hors bulle (lot 14, L6.1) ---
+    # Le même défaut que celui des bulles, dans le même module, et il y était resté : la bande
+    # ENTIÈRE partait dans un carré de 1024, où une planche de 1080×10 000 n'occupe plus que
+    # **110 colonnes sur 1 024**. Mesuré avant correction : le masque marque 6,65 % de la
+    # planche et rend 24 composantes — la passe ne trouvait pas « rien », elle trouvait des
+    # taches, à une résolution où un ゴォォォ et un aplat de trame ne se distinguent plus.
+    #
+    # ⚠ **Ce que ça coûte, exactement.** Une inférence de ce modèle vaut le même prix quelle
+    # que soit la taille de la planche — l'entrée est un carré de 1024 dans tous les cas.
+    # Mesuré sur trois tailles au même endroit : 1080×10 000 → 109 s, 1080×3 072 → 123 s,
+    # 1125×1 600 → 125 s. Fenêtrer multiplie donc le coût **par le nombre de fenêtres,
+    # exactement** : six fenêtres, six fois le prix, sans remise.
+    #
+    # ⚠ Ces secondes-là sont celles d'un environnement CPU SEUL. Le perf.log du run de
+    # référence, avec `onnxruntime-directml`, donne 1,5 à 1,9 s pour toute la passe sur une
+    # planche paginée — un rapport de ~65× entre les deux backends (cf. `providers` sous
+    # `manga.detection`). Sur GPU, six fenêtres coûtent une dizaine de secondes par bande ; sur
+    # CPU, une dizaine de minutes. D'où l'interrupteur, et d'où ce paragraphe.
+    #
+    # ⚠ **Ce qu'il a fallu deux bandes pour voir**, et une seule aurait livré le mauvais
+    # défaut. Rejeu :
+    #
+    #     planche 3 (dialogue)   · bande entière : 2,46 %, 0 zone,                 128 s
+    #     planche 3              · fenêtrée (6)  : 1,97 %, 0 zone,                 787 s
+    #     planche 6 (action)     · bande entière : 0,27 %, 0 zone,                 195 s
+    #     planche 6              · fenêtrée (6)  : 0,64 %, 5 ZONES (max 39 607 px²), 927 s
+    #     planche 1 (liminaire)  · bande entière : 6,65 %, 4 zones (max 480 001),   268 s
+    #     planche 1              · fenêtrée (6)  : 5,62 %, 8 zones (max 285 444),  1 099 s
+    #
+    # Sur une bande de DIALOGUE, le fenêtrage ne fait que nettoyer le masque. Sur une bande
+    # d'ACTION, il rend 5 zones là où la passe pleine bande n'en trouvait aucune, à des tailles
+    # d'onomatopée — c'est exactement la planche pour laquelle cette passe existe, et la passe
+    # pleine bande y est aveugle. C'est ce cas-là qui décide.
+    #
+    # ⚠ La nuance, dite franchement : sur un LIMINAIRE illustré, les deux passes se trompent.
+    # La fenêtrée découpe le plus gros blob (480 001 → 285 444 px²) mais en rend deux fois
+    # plus. 285 444 px², c'est 2,6 % de la bande — du dessin pris pour du texte, pas une
+    # onomatopée. Il n'existe aucune borne SUPÉRIEURE d'aire dans `hors_des_bulles` ; c'est le
+    # prochain levier, et il se mesurera.
+    #
+    # ⚠ Le coût est réel (×4,8 à ×6,1) mais il ne tombe QUE sur les bandes : sur une planche
+    # paginée ce réglage ne fait rigoureusement rien, `fenetres()` rendant une liste vide. Et
+    # il est ANNONCÉ — une ligne dans perf.log, une fois par run, avec la clé pour l'éteindre.
+    #
+    # false = comportement d'avant le lot 14, au bit près.
+    fenetrage: true
+    # ⚠ PLUS HAUTES que les fenêtres de détection de bulles (2 160 px), et pour trois raisons
+    # mesurées : ce modèle tourne à 1024 quand l'autre tourne à 640 (il voit déjà 1,6× plus
+    # grand) ; le recouvrement doit couvrir le TEXTE et non la bulle — la plus haute bulle du
+    # corpus fait 833 px, la colonne de katakana de la page 63 en fait **1 470** ; et chaque
+    # fenêtre est une inférence pleine, donc on n'en paie pas deux pour voir moins bien.
+    # 3 072 px rendent une occupation de 360 px sur 1 024, contre 110 pour la bande entière.
+    fenetre_hauteur: 3072
+    fenetre_recouvrement: 1600
+
     # px² — en dessous, c'est du bruit de trame, pas du lettrage.
     aire_min: 1200
     # Rayon de groupement des traits, en pixels. 0 = automatique (0,8 % du petit côté, soit
@@ -655,10 +1044,30 @@ manga:
     groupement: 0
 
     # --- Mobilier de page (filigranes de scan) ---
-    # Mesuré sur les rendus v0.40.0 : sur les 448 zones hors bulle du Vol.1 du manga A,
-    # 283 sont des filigranes (ＲａｗＬａｚｙ．ＳＩ, 13DL.me, ＤＥＦＲａｍＡＳ) — 63 %.
-    # manga B : 105 sur 217. Autant de lectures OCR et d'appels LLM payés pour du
-    # mobilier, et un rapport noyé.
+    # ⚠ CORRIGÉ au lot 21. Ce commentaire annonçait « 283 filigranes sur les 448 zones du
+    # Vol.1 du manga A — 63 % » et « 105 sur 217 » pour le manga B. Ces deux chiffres sont
+    # FAUX, et le commit qui les a introduits (v1.0.0, lot 13) porte lui-même la mesure qui
+    # les contredit, à trois lignes d'écart : « Vol.1 : 92 mobilier · 15 bruit latin ·
+    # 81 ponctuation · 260 japonais » — dont la somme fait bien 448, sans place pour 283
+    # filigranes. Le 283 n'a jamais eu de dénominateur : c'était une impression, pas une
+    # mesure, et `docs/chiffres-de-reference.md` existe pour trancher exactement ce cas.
+    #
+    # La mesure, rejouée sur les caches réels (`python tools/banc_sfx.py --tous`, 2026-08-28,
+    # 2 456 zones sur 6 tomes) :
+    #
+    #     manga A Vol.1 : 448 zones · 92 mobilier (2 groupes) · 15 bruit · 81 ponct. · 260 texte
+    #     manga A Vol.2 : 465 zones · 114 mobilier · 20 bruit · 94 ponct. · 237 texte
+    #     manga A Vol.3 : 379 zones · 129 mobilier · 14 bruit · 43 ponct. · 193 texte
+    #     manga A Vol.4 : 438 zones · 0 mobilier · 41 bruit · 78 ponct. · 319 texte
+    #     manga C Vol.1 : 509 zones · 0 mobilier · 12 bruit · 55 ponct. · 442 texte
+    #     manga B Chap.5: 217 zones · 0 mobilier · 12 bruit · 47 ponct. · 158 texte
+    #
+    # Soit **92 sur 448 (20,5 %)** pour le Vol.1 et **0 sur 217** pour le manga B, et non
+    # 63 % et 48 %. Le plafond est structurel : le détecteur ne VOIT le filigrane que sur
+    # 47 et 45 planches sur 150 selon le groupe — un balayage complet de `mobilier_iou` et
+    # `mobilier_frac_planches` ne dépasse jamais 181 zones, et 123 seulement se trouvent à
+    # proximité d'une position récurrente. Ce n'est pas le filtre qui manque des filigranes,
+    # c'est la détection qui ne les trouve pas sur les deux tiers des planches.
     #
     # Le discriminant n'est ni la position (un vrai texte peut occuper un coin) ni le contenu
     # (l'OCR n'est pas fiable ici) : c'est la RÉCURRENCE GÉOMÉTRIQUE. Un filigrane revient à la
@@ -671,13 +1080,282 @@ manga:
     mobilier_iou: 0.50            # recouvrement de boîtes valant « même position »
     mobilier_aire_max_frac: 0.05  # au-delà de 5 % de la planche, jamais du mobilier
 
+    # ═══ LIRE l'onomatopée : les cinq clés du lot 21 ═══════════════════════════════════
+    #
+    # Le lot 21 n'a rien changé au chemin nominal. Il a MESURÉ ce que la lecture vaut, et
+    # les cinq clés ci-dessous sont ce qu'on peut en faire. Toutes sont désarmées dans le
+    # CODE ; celles que `config.yaml` arme sont dites une par une.
+    #
+    # ## Le chiffre qui gouverne tout le bloc
+    #
+    # Échantillon de **60 zones tirées au sort** (graine 21, `tools/banc_sfx.py`), chacune
+    # transcrite à l'œil sur son crop, sur les six tomes dont le cache porte la passe.
+    # Verdict de `manga-ocr` sur les **41 zones dont la lecture nourrit le LLM** :
+    #
+    #     lecture exacte                      6   14,6 %
+    #     lecture partielle                   6   14,6 %
+    #     PLAUSIBLE MAIS FAUSSE              21   51,2 %   ← le cas dangereux
+    #     manifestement absurde               8   19,5 %
+    #
+    # Le plan de lot posait le seuil de décision : « si le taux d'exactitude dépasse 80 %,
+    # une bonne part de ce plan devient discutable ; s'il est sous 30 %, la lecture devient
+    # le cœur du lot ». Il est à **14,6 %**.
+    #
+    # ⚠ Et le détail qui change la conclusion : les 6 lectures exactes sont **4 narrations
+    # sur 9** (44 %) et **2 onomatopées sur 14** (14 %) — les deux étant des katakana
+    # standard de deux signes, `ゴッ` et `ズッ`. `manga-ocr` lit la NARRATION imprimée, qui
+    # est typographiquement du dialogue, et n'atteint presque jamais l'onomatopée stylisée.
+    # C'est exactement ce qu'il est. `mode: "rapport"` reste donc le défaut, et il le reste
+    # avec un chiffre derrière lui au lieu de trois exemples.
+    #
+    # ⚠ **Et la DÉTECTION n'est pas fiable non plus** — le dossier du lot affirmait le
+    # contraire. Sur les mêmes 60 zones, par nature réelle : 14 onomatopées, 9 narrations,
+    # 7 filigranes (correctement écartés), **16 zones sans aucun texte** et **14 agrégats**
+    # mêlant onomatopée, bulle et dessin dans une seule boîte. Une zone détectée sur quatre
+    # seulement est une onomatopée. La détection trouve bien la colonne de katakana de la
+    # page 63 ; elle rend aussi 27 % de dessin pur.
+
+    # --- Seconde voie de LECTURE, et concordance (L21.3) --------------------------------
+    #
+    # Aucun de ces modèles ne rend un score de confiance exploitable : `manga-ocr` rend
+    # toujours une phrase plausible, c'est tout le problème. Le seul critère qui reste est la
+    # CONCORDANCE — deux voies indépendantes qui s'accordent sur une lecture sont un signal
+    # fort, deux voies qui divergent le sont dans l'autre sens.
+    #
+    # Armée, cette clé fait LIRE les crops par le modèle `manga_onomatopees` (voie A) et
+    # confronte sa transcription à celle de `manga-ocr` (`manga/sfx_lecture.py`). Les zones
+    # concordantes sont `lecture_sure`, les autres `lecture_douteuse` — et c'est ce drapeau,
+    # et lui seul, qui autorisera `PLAN-22` à dessiner quoi que ce soit.
+    #
+    # ⚠ Ce qu'elle coûte : **un appel LLM de plus par planche porteuse**, au plus 8 crops
+    # (`MAX_CROPS_SFX`). Sur le Vol.1 du manga A, 141 planches sont porteuses.
+    #
+    # ⚠ EXIGE un modèle `manga_onomatopees` capable de VISION, comme `vision:` ci-dessus.
+    #
+    # ⚠ Désarmée, TOUTES les zones sont `lecture_douteuse`, et ce n'est pas une sévérité
+    # gratuite : c'est l'état réel du dépôt — une lecture, aucune confirmation. L'appeler
+    # « sûre » reviendrait à baptiser le problème.
+    concordance: false
+
+    # --- Voie C : exporter les crops des zones à lecture douteuse (L21.3) ---------------
+    #
+    # Nombre maximal de crops écrits par tome, dans `build/<Œuvre>/<Tome>/manga/
+    # sfx_illisibles/`. 0 = aucun.
+    #
+    # `RAPPORT.md` liste déjà les onomatopées ; il ne fournit pas l'image, et c'est ce qui
+    # rend la liste inutilisable. Un dossier de crops transforme « il y a 260 zones de texte
+    # quelque part dans ce tome » en une planche-contact qu'un humain traite en une passe.
+    # C'est peu, et c'est ce que la mesure ci-dessus rend nécessaire : à 14,6 % de lectures
+    # exactes, la transcription à la main N'EST PAS un repli, c'est le chemin fiable.
+    #
+    # ⚠ Sous `build/`, donc régénérable et jamais versionné : les planches du corpus ne sont
+    # pas redistribuables.
+    crops_illisibles: 0
+
+    # --- Refuser une traduction BRODÉE (L21.4) ------------------------------------------
+    #
+    # Rapport `tokens(rendu) / tokens(source)` au-delà duquel une traduction d'onomatopée est
+    # refusée — la zone reste alors sans glose, et le rapport le dit.
+    #
+    # `_translate_sfx` réutilisait les garde-fous de DIALOGUE tels quels, et le seul qui
+    # borne la longueur ne peut pas se déclencher ici : son budget est
+    # `max(24, tokens(source) × 3)`, et le plancher de 24 tokens absorbe tout quand la source
+    # fait un caractère. Une hallucination bien formée passait les sept motifs.
+    #
+    # Mesuré sur les **1 596 paires source/rendu** déjà en cache dans `build/` :
+    #
+    #     p50 0,32   p75 0,50   p90 0,64   p95 0,83   p99 2,50   max 14,00
+    #
+    # Une traduction d'onomatopée est donc en règle générale **plus courte que sa source en
+    # tokens**. 3,0 est au-delà du 99ᵉ centile ; croisé au plancher de 8 tokens rendus, il
+    # retient **6 paires sur 1 596 (0,38 %)**, dont `『あ』 → « C'est faisable. Après la
+    # diffusion vient le focalisation. »` et `『あれ』 → « Mitsukage… Désolé de t'avoir
+    # impliqué, je vais te le rendre. »`. Aucun faux positif dans les six.
+    #
+    # ⚠ Deux des six ne se produiraient plus : leur source est `．．．`, que le triage rend
+    # désormais sans appel LLM. Sur le pipeline actuel, 4 sur 1 596 — 0,25 %.
+    #
+    # ⚠ **Ce réglage n'est PAS iso-comportement**, et c'est le seul du lot : armé, il vide
+    # des traductions qui étaient écrites au rapport. C'est écrit en tête du CHANGELOG.
+    # 0 = désarmé (le défaut du code).
+    broderie_ratio: 3.0
+
+    # --- Bornes HAUTES de la détection (L21.1) — LIVRÉES DÉSARMÉES ----------------------
+    #
+    # Le lot 14 avait nommé le levier : « il n'existe aucune borne SUPÉRIEURE d'aire dans
+    # `hors_des_bulles` ; c'est le prochain levier, et il se mesurera ». Il est mesuré, le
+    # résultat est négatif, et il est livré tel quel.
+    #
+    # Sur 2 456 zones, la distribution d'aire est CONTINUE — aucun creux ne sépare le dessin
+    # du texte :
+    #
+    #     borne 0,05 → 648 zones rejetées (26 %), dont 557 classées « texte »
+    #     borne 0,10 → 364 (15 %), dont 313 · borne 0,20 → 178 (7 %), dont 147
+    #
+    # Et la vérité terrain dit l'inverse de ce qu'on attendait. Par nature réelle, sur les 60
+    # zones de l'échantillon : **onomatopée** aire médiane 3,4 %, maximum 32,3 % · **dessin
+    # sans aucun texte** médiane 0,8 %, maximum 4,2 %. Le dessin pris pour du texte est plus
+    # PETIT que les vraies onomatopées. Une borne haute couperait donc exactement ce que la
+    # passe existe pour trouver.
+    #
+    # La zone de 285 444 px² du liminaire, qui avait suggéré ce levier, est un **agrégat** —
+    # plusieurs objets réunis dans une boîte — et non du dessin pur. Le bon remède n'est pas
+    # de la jeter mais de la découper ; c'est un autre travail.
+    #
+    # Le garde-fou de FORME ne discrimine pas non plus : `geometry.remplissage` sépare une
+    # bulle d'un masque bi-lobé (médiane 0,89 sur 687 bulles, 0,60-0,61 pour les deux faux
+    # doubles) mais transposé au hors-bulle il est plat — 0,457 sur les onomatopées de
+    # l'échantillon contre 0,456 sur le dessin pur, et 0,37 à 0,48 dans toutes les bandes
+    # d'aire du corpus.
+    #
+    # Les deux clés existent pour un corpus qui se comporterait autrement. 0 = pas de borne,
+    # comportement d'avant le lot au bit près. Tout rejet est compté au rapport.
+    aire_max_frac: 0.0
+    remplissage_max: 0.0
+
+    # ═══ EFFACER le texte hors bulle : les six clés du lot 22 ═══════════════════════════
+    #
+    # ## La décision d'architecture, tranchée par écrit avant le code
+    #
+    # « L'IA ne dessine jamais » (README §12) reste écrit en cinq mots. Le lot 22 était le
+    # seul autorisé à renégocier ce principe ; il l'a **refusé**, pour trois raisons mesurées
+    # et dans cet ordre :
+    #
+    #   1. le garde-fou de lecture rend le modèle inutile aujourd'hui — voir plus bas ;
+    #   2. `Qwen-Image-Edit` fait 20 milliards de paramètres (Apache-2.0, vérifié le
+    #      2026-08-26) là où la contrainte écrite du projet est déjà « un modèle de 27
+    #      milliards sur un GPU grand public », occupé par le traducteur ;
+    #   3. la licence des poids `big-lama` n'a pas pu être établie sur une source primaire.
+    #      Le dépôt porte déjà deux poids sous contrainte ; un troisième rendrait la
+    #      redistribution indéfendable.
+    #
+    # Ce qui est livré est **déterministe** : `manga/effacement.py` remplit un masque d'encre
+    # dilaté par la couleur de fond mesurée au lot 21, ou par diffusion depuis le bord du
+    # trou. C'est le mode « texte » de `clean.py` transposé hors de la bulle. Aucun modèle,
+    # aucune dépendance neuve, pas d'OpenCV.
+    #
+    # ## ⚠ Le garde-fou qu'AUCUNE clé ne désarme, et ce qu'il coûte
+    #
+    # Une zone dont la LECTURE n'est pas concordante n'est **jamais** effacée. La règle est
+    # dans le code, pas ici : effacer sur une lecture douteuse produit une erreur DESSINÉE à
+    # la place d'une erreur SIGNALÉE, ce que toute la brique existe pour éviter.
+    #
+    # Conséquence, dite plutôt que découverte : le taux de `lecture_sure` est de **0 %** sur
+    # les six tomes du corpus, faute de seconde voie (`concordance` ci-dessus exige un
+    # serveur LLM vision). **Armer `mode` ne change donc aujourd'hui pas un pixel.** Le
+    # chemin est complet et testé ; sa condition d'entrée n'est pas remplie, et
+    # `RAPPORT.md` le dit zone par zone.
+    #
+    # ## Ce que le déterministe vaut, mesuré
+    #
+    # `python tools/banc_effacement.py --tous --markdown`, sur les 2 455 zones des six tomes.
+    # Trois chiffres, et il faut les lire ensemble : l'**empreinte** (part de la boîte
+    # repeinte — le coût), le **résidu** (part encore en fort contraste après — l'efficacité),
+    # et la **couture rapportée au grain** du fond intact (1,0 = se raccorde comme le fond se
+    # raccorde à lui-même — la visibilité).
+    effacement:
+      # "aucun" (DÉFAUT) : rien n'est calculé. Comportement d'avant le lot 22, au bit près.
+      # "calque" : l'effacement est calculé et joint au PSD comme calque `Effacement SFX`,
+      #            masquable donc réversible d'un clic. **`pages_out/` n'est PAS touché** —
+      #            la planche aplatie reste identique à celle d'avant.
+      # "aplati" : le calque est en plus composé sur la planche finale. C'est le seul mode
+      #            qui change un pixel de sortie.
+      #
+      # ⚠ Il n'entre PAS dans le graphe d'invalidation. `sfx` reste dans
+      # `checkpoints.CACHE_NON_BLOQUANT` : l'effacement est un ÉTAGE nouveau, après le
+      # nettoyage, qui ne modifie pas le nettoyage. Aucun rendu existant n'est périmé, et
+      # aucune relance de tome n'est due. C'était la voie 1 des trois que le plan de lot
+      # posait, et c'est celle qui rend le calque PSD séparé naturel.
+      mode: "aucun"
+
+      # "diffusion" (DÉFAUT) · "uniforme" · "auto"
+      #
+      # ⚠ **Ce défaut contredit une prémisse du plan de lot, et c'est une mesure.** Le plan
+      # posait qu'au-dessus de 0,60 d'uniformité « un remplissage de couleur unique serait
+      # correct », la diffusion n'étant qu'un repli pour la bande du milieu. Mesuré sur les
+      # 217 zones du *manga B* Chap.5 — couture rapportée au grain du fond intact :
+      #
+      #     tout uniforme    2,78   · sur le seul palier ≥ 0,60 : 2,43
+      #     tout diffusion   0,89   · sur le seul palier ≥ 0,60 : 0,84
+      #
+      # Le remplissage plat laisse une arête deux fois et demie plus franche que celle que le
+      # dessin porte naturellement, **y compris là où le fond est réputé uni** : ce qu'il ne
+      # reconstruit pas, c'est le halo d'anti-crénelage que la dilatation n'a pas mangé. Le
+      # résidu, lui, ne les départage pas (0,108 contre 0,124).
+      #
+      # "uniforme" reste disponible — il est plus rapide (une écriture contre 32 passes de
+      # numpy) et un corpus au fond parfaitement plat n'a rien à y perdre. "auto" rejoue le
+      # schéma à deux bandes du plan, pour qui veut le revérifier.
+      methode: "diffusion"
+
+      # Ne sert qu'en `methode: "auto"`. Le seuil de `clean_bubbles`, transposé au fond LOCAL.
+      seuil_uniformite: 0.60
+
+      # S'applique TOUJOURS : sous ce seuil, **rien n'est peint**, et le rapport le dit.
+      #
+      # C'est le palier qui a sauvé la page 44 du Vol.1 — un gratte-ciel aux fenêtres sombres
+      # pris pour une bulle, uniformité 0,131, que le mode « texte » repeignait entièrement en
+      # noir. Il concerne **260 zones sur 2 455 (10,6 %)** du corpus. Une zone abandonnée garde
+      # son texte source, visible donc corrigible à la main, au lieu de coûter un morceau de
+      # planche.
+      #
+      # ⚠ 0,35 est calibré sur des BULLES (797 du *manga A* Vol.1) et transposé ici par
+      # comparabilité, pas par calibration. Un seuil propre au hors-bulle demande de voir des
+      # effacements casser, donc une seconde voie de lecture.
+      seuil_abandon: 0.35
+
+      # Écart de luminance au fond local au-delà duquel un pixel est de l'encre. Même valeur
+      # que `manga.nettoyage.seuil_texte`, et pour la même raison : c'est le même contraste,
+      # mesuré contre le même fond.
+      seuil_encre: 45
+
+      # Dilatation du masque d'encre, en multiple du rayon adaptatif de la boîte — pour manger
+      # l'anti-crénelage, qui sans cela laisse un halo gris à la forme exacte du caractère.
+      #
+      # ⚠ **Balayé, et le balayage ne désigne aucun optimum.** Sur les 217 zones du
+      # *manga B* Chap.5 (`tools/banc_effacement.py --dilatation …`) :
+      #
+      #     dilatation      0,6    1,0    1,6    2,4    3,2
+      #     empreinte     0,402  0,476  0,557  0,653  0,710   ← ce qu'on repeint du dessin
+      #     résidu        0,122  0,111  0,099  0,082  0,070   ← ce qu'il reste du glyphe
+      #     couture/grain  1,65   1,94   1,83   1,94   1,99   ← plat, ne départage rien
+      #
+      # Deux lignes monotones et opposées, une troisième plate : aucun coude. 1,0 est retenu
+      # parce qu'à départage nul on prend celui qui touche le moins au dessin — la règle qui a
+      # déjà décidé du mode « aucun » de `clean_bubbles`.
+      dilatation: 1.0
+
+      # Passes de la diffusion (itération de Jacobi sur l'équation de Laplace, numpy pur).
+      # Chaque passe propage la valeur des bords d'un pixel : 32 couvre un trait de 64 px,
+      # c'est-à-dire une onomatopée pleine page. L'amorce étant la couleur de fond mesurée,
+      # une diffusion tronquée rend le papier, pas l'encre.
+      passes_diffusion: 32
+
   # Mode de traduction :
   #  - "texte"  : traduit à partir du texte OCR seul (rapide, pas d'image envoyée) —
   #    par défaut, et suffisant pour la plupart des planches.
   #  - "vision" : envoie EN PLUS la planche entière au LLM, qui peut alors s'appuyer
   #    sur le contexte visuel (scène, expressions) pour mieux traduire — nécessite
   #    un modèle avec la capacité `vision` (vérifie via `ollama show <modèle>` ;
-  #    yume-27b l'a). Plus lent (encodage image), à réserver aux passages ambigus.
+  #    yume-27b l'a). Plus lent (encodage image).
+  #  - "cible"  : le premier passage est TEXTUEL ; c'est le DIAGNOSTIC qui décide, planche
+  #    par planche, d'une seconde tentative avec image. (lot 15)
+  #
+  # ⚠ Ce commentaire disait « à réserver aux passages ambigus » — et le code n'offrait pas
+  # cette granularité. En "vision", une image PLEINE PAGE partait pour TOUTES les planches du
+  # tome, sans condition : le coût maximal pour les 90 % de planches qui n'en ont pas besoin,
+  # donc en pratique un mode que personne n'activait. Aucun crop de bulle ni de case n'était
+  # jamais envoyé nulle part.
+  #
+  # C'est ce que "cible" corrige. Une planche dont le premier essai déclenche un motif de
+  # `quality_manga.MOTIFS` — vide, bulles manquantes, source résiduelle, répétition,
+  # emballement, réplique disproportionnée — EST une planche ambiguë : elle est refaite avec
+  # les crops de ses GROUPES (cf. `manga.structure`), pas avec la planche entière. Un crop de
+  # groupe est cinq à dix fois plus léger et bien plus lisible pour un modèle vision, parce
+  # que le sujet occupe le cadre. Une planche qui passe du premier coup ne coûte rien de plus.
+  #
+  # ⚠ "cible" exige lui aussi un modèle capable de vision : c'est le même appel, seulement
+  # plus rare et mieux cadré.
   mode_traduction: "texte"
 
   detection:
@@ -699,12 +1377,156 @@ manga:
 
     conf_threshold: 0.35
     iou_threshold: 0.45
+
+    # --- Résolution d'entrée du réseau ---
+    # Le modèle reçoit toujours un CARRÉ de ce côté-là : `_letterbox` y met la planche entière
+    # en conservant son ratio, le reste étant du gris. C'est donc la résolution effective à
+    # laquelle le détecteur voit chaque bulle.
+    #
+    # 640 est la résolution d'entraînement standard d'Ultralytics, et le défaut ne change pas :
+    # un tome relancé sans toucher cette clé produit un `regions.json` identique au bit.
+    #
+    # Mais ce n'était pas une contrainte du MODÈLE — seulement une constante que rien ne
+    # remontait. Les poids téléchargés (`model_dynamic.onnx`) sont un export à axes dynamiques
+    # et acceptent n'importe quelle résolution multiple de 32.
+    #
+    # Ce que 1024 change : la résolution effective est multipliée par 1,6 sur TOUTES les
+    # planches — y compris les scans paginés basse résolution (844×1200, 848×1200) où les
+    # petites bulles de fond arrivent sous 30 px — et **sans une seule inférence
+    # supplémentaire**, là où le fenêtrage ci-dessous en paie une par fenêtre. Le coût est
+    # celui d'un tenseur 2,56× plus gros : compter environ ×2 sur le temps d'inférence.
+    #
+    # ⚠ Un export à axes FIGÉS refuse toute autre valeur ; le message le dit et nomme la clé.
+    input_size: 640
+
+    # --- Aire minimale d'une détection, en FRACTION de l'aire de la planche ---
+    # 0.0 = aucun filtre, et c'est le défaut livré : la clé arrive avec son instrumentation
+    # (RAPPORT.md compte désormais les rejets par motif), sa calibration se fait au banc.
+    #
+    # ⚠ En fraction, jamais en pixels. Les deux seuils du projet restés en pixels absolus —
+    # `scission.aire_min` et `onomatopees.aire_min` — sont exactement ceux qui cassent sur les
+    # scans 844×1200 de manga D.
+    #
+    # Ce que le filtre attrape : le seul garde-fou géométrique du post-traitement était
+    # « moins de 2 px de côté ». Une détection de 10×10 px à score 0,36 survivait donc à tout,
+    # traversait l'ordre de lecture, l'OCR (agrandie ×2 puis lue — du bruit) et **occupait une
+    # place numérotée dans le prompt du traducteur**, décalant toute la planche.
+    #
+    # ⚠ Mesuré avant de choisir une valeur : trop haut, le filtre mange les petites bulles de
+    # fond, qui sont du vrai contenu. Le tableau du banc mesure `aire < 0,05 %` à 0 bulle sur
+    # les volumes paginés et 2 sur le webtoon — une première borne connue.
+    aire_min_frac: 0.0
+
+    # --- Escalade : plus aucune planche muette ---
+    # Une planche est SUSPECTE quand elle contredit ses voisines. Elle reçoit alors une SECONDE
+    # inférence à un réglage plus sensible, et `manga/detection_retry.py` — l'arbitre à quatre
+    # vétos calibré au lot 4.2 — décide si le résultat remplace le premier.
+    #
+    # Mesuré sur les dix volumes de build/ : **188 planches sur 1 513 rendent zéro bulle**
+    # (12,4 %), dont **183 portent de l'encre** — des pages entièrement non traduites.
+    #
+    # Ce que l'escalade en fait, mesuré aux réglages ci-dessous (docs/mesures/escalade-2026-08-25.md) :
+    # **188 → 153 planches à zéro bulle** (−18,6 %), **35 pages redevenues parlantes**,
+    # **47 bulles gagnées**, et **zéro régression** — aucune bulle perdue, aucun effondrement
+    # de seuil, aucun masque gonflé. Les neuf volumes paginés gagnent tous quelque chose.
+    #
+    # ⚠ Ce que ça coûte : une inférence de plus sur les planches suspectes SEULEMENT — mesuré
+    # à 5,5 s par planche suspecte, soit 1 002 s pour les 183 planches des dix volumes. La
+    # détection n'est pas l'étape chère (manga A Vol.2 : 46 min 56 s au total pour
+    # 150 planches, dont l'essentiel en LLM et en PSD).
+    # ⚠ Ce que ça ne coûte pas : aucun cache n'est invalidé. Une planche déjà détectée est
+    # sautée comme avant ; l'escalade ne joue que sur une détection fraîche.
+    #
+    # `actif: false` rend exactement le comportement d'avant.
+    escalade:
+      actif: true
+      # Le réglage plus sensible. `input_size` est le vrai levier : il change ce que le réseau
+      # PEUT voir, là où baisser `conf_threshold` ne fait qu'accepter ce qu'il émettait déjà —
+      # sur le webtoon, mesuré, descendre jusqu'à 0,10 ne gagnait AUCUNE bulle « parce que le
+      # réseau ne les émet pas du tout ».
+      input_size: 1024
+      conf_threshold: 0.20
+      # Déclencheur 2 — la planche est très en dessous de la médiane de bulles du tome. Les
+      # médianes mesurées vont de 3 (manga B) à 6 (manga A Vol.3/4, manga C, manga D
+      # Vol.1) : à 0,25, une planche à 1 bulle dans un tome à médiane 6 est relancée. 0.0
+      # désarme ce déclencheur et ne laisse que le premier (zéro bulle sur une planche encrée).
+      mediane_frac: 0.25
+      # …et il ne s'arme qu'après avoir vu ce nombre de planches : sans cette borne, la
+      # planche 2 d'un tome déciderait à elle seule de la médiane.
+      mediane_echantillon_min: 20
+      # Seuil du TEST D'ENCRE du déclencheur 1 — part de pixels s'écartant du fond médian de la
+      # planche. Volontairement bas, et l'asymétrie est le sujet : un faux positif coûte une
+      # inférence sur une page de garde, un faux négatif efface du décompte une planche
+      # entièrement non traduite.
+      #
+      # ⚠ Ce test ne dépend PAS de la passe onomatopées, et c'est tout son intérêt : le seul
+      # discriminant qui existait était `qa["sfx"]`, qui n'existe pas quand la passe est
+      # inactive — les trois volumes de manga D n'ont aucun `sfx.json`, et leurs
+      # 72 planches à zéro bulle n'étaient triées du tout.
+      seuil_encre: 0.004
     # Fournisseur(s) ONNX Runtime, dans l'ordre de préférence. "DmlExecutionProvider"
     # accélère sur AMD/Windows via DirectML — nécessite `pip install
     # onnxruntime-directml` (remplace `onnxruntime` : les deux paquets sont
     # MUTUELLEMENT EXCLUSIFS, n'installe que l'un des deux). Repli automatique sur
     # CPU si absent/indisponible ; largement suffisant en pratique (~1-3 s/planche).
     providers: ["CPUExecutionProvider"]
+
+    # --- Découpage des bandes TRÈS ALLONGÉES (webtoon) ---
+    # Le réseau reçoit toujours un carré de `input_size` de côté (640 par défaut, cf. plus
+    # haut) : une planche est donc réduite en conservant son ratio, et le reste du canevas est
+    # du gris. Les chiffres ci-dessous sont ceux de 640. Sur une bande de 1080×10000, la planche
+    # n'occupe plus que 10,8 % de la largeur, et une bulle de 400×500 px arrive au réseau en
+    # 26×32 px — la limite de détectabilité de YOLOv8. Mesuré : descendre `conf_threshold`
+    # jusqu'à 0,10 ne récupère AUCUNE bulle, parce que le réseau ne les émet pas du tout.
+    #
+    # On détecte donc fenêtre par fenêtre. À 2160 px de haut, la même bulle arrive en 118×148.
+    # ⚠ Coût : une inférence par fenêtre (8 pour une planche de 10 000 px), soit ~70 s au lieu
+    # de ~8 s par planche. Ne s'applique QU'AUX images dépassant `fenetre_ratio_min`.
+    fenetre_ratio_min: 3.0 # hauteur/largeur en deçà duquel on ne découpe pas (manga : ~1,4)
+
+    # --- Le vrai critère : ce que le réseau VOIT de la planche (lot 14, L6.4) ---
+    # Le ratio ci-dessus était une falaise, et à trois titres : il tombe au mauvais endroit
+    # (un webtoon découpé par son éditeur en tranches de 1080×3000 a un ratio de 2,78 — aucun
+    # fenêtrage, alors que ses bulles arrivent au réseau à ~85×107 px) ; il ne bouge pas avec
+    # `input_size`, alors que c'est exactement ce qui change ce que le réseau voit ; et il
+    # découperait une double page de manga très allongée sans que personne l'ait demandé.
+    #
+    # Ce qui compte est le nombre de pixels du canevas qu'occupe le PETIT CÔTÉ de la planche
+    # après letterbox : `petit_côté × input_size / grand_côté`. Sur une bande 1080×10 000 à
+    # 640, c'est **69 px sur 640** ; sur une planche paginée 1440×2048, **450 px**.
+    #
+    # 0.0 = dérivée de `fenetre_ratio_min` à 640, soit 213,3 px — donc **iso-comportement**,
+    # vérifié planche par planche sur les 1 513 du corpus : zéro écart. Ce qui change, c'est
+    # que le seuil suit désormais `input_size` : à 1024, il ne découpe plus qu'à partir d'un
+    # ratio de 4,8, et une bande cesse de payer 8 inférences là où le réseau voit déjà assez
+    # grand. `tools/apercu_detection.py` affiche l'occupation à chaque résolution essayée.
+    fenetre_occupation_min: 0.0
+
+    # --- Porte d'ENCRE sur les fenêtres : sauter ce qui n'a rien à montrer (lot 14, L6.5) ---
+    # Part de pixels s'écartant du fond médian, en dessous de laquelle une fenêtre ne reçoit
+    # pas d'inférence. Même mesure que `escalade.seuil_encre`, volontairement.
+    #
+    # ⚠ **0.0 = DÉSARMÉE, et c'est mesuré.** L'idée est juste dans l'absolu — une bande
+    # comporte de larges plages sans texte. Sur le seul webtoon du corpus, elle ne tient pas :
+    # **0 fenêtre sur 71** tombe sous le seuil d'encre (la moins encrée est à 0,0065, la
+    # médiane à 0,79 — c'est une bande couleur, illustrée d'un bord à l'autre).
+    #
+    # ⚠ Et le gain visé était surestimé d'un ordre de grandeur. Ce fichier annonçait « ~70 s
+    # au lieu de ~8 s par planche » : mesuré sur les 9 bandes, le fenêtrage coûte **7,1 s**
+    # contre **0,85 s** pour une inférence unique. Le facteur ×8,3 était juste, les valeurs
+    # absolues ne l'étaient pas. Une porte parfaite économiserait donc des SECONDES sur un
+    # tome de 48 minutes — contre le risque de sauter une fenêtre qui portait une bulle, très
+    # exactement le défaut que le lot 12 vient de corriger. Mauvais marché.
+    #
+    # Le mécanisme reste livré, instrumenté (RAPPORT.md compte les fenêtres sautées), pour la
+    # bande en noir et blanc à grandes plages vides que ce corpus ne contient pas. Il ne saute
+    # jamais TOUTES les fenêtres d'une planche, quel que soit le seuil.
+    fenetre_encre_min: 0.0
+
+    fenetre_hauteur: 2160 # 2× la largeur d'une planche de webtoon
+    # ⚠ Doit rester ≥ la plus haute bulle attendue : c'est ce qui garantit que toute bulle est
+    # entièrement contenue dans au moins une fenêtre. Mesuré sur le corpus : 833 px.
+    fenetre_recouvrement: 900
 
     # Scission des régions BI-LOBÉES : le détecteur émet parfois UNE instance là où le
     # dessinateur a mis DEUX ballons qui se touchent (5 régions pour 6 ballons page 136 du tome
@@ -714,7 +1536,9 @@ manga:
     # 17-31 px. Rien ne le signalait : autant de traductions que de bulles, et le texte tenait.
     #
     # Les seuils viennent d'une mesure sur les 797 bulles du tome, dont les 40 découpages
-    # candidats ont été inspectés un par un (cf. manga/geometry.py, `scinder_par_erosion`).
+    # candidats ont été inspectés un par un (cf. manga/geometry.py, `scinder_par_erosion`,
+    # qui annonce 790 pour le même tome — écart non expliqué, cf.
+    # docs/chiffres-de-reference.md).
     # Réglage volontairement CONSERVATEUR : scinder à tort casse une planche correcte, ne pas
     # scinder laisse le défaut en place. Résultat mesuré : 19 scissions sur 18 planches,
     # zéro faux positif, une douzaine de vrais doubles manqués.
@@ -734,6 +1558,102 @@ manga:
       # En dessous de ce remplissage SANS avoir pu être scindée, la région est listée dans
       # RAPPORT.md (« Régions bi-lobées SUSPECTES ») : c'est là que le lettrage peut souffrir.
       seuil_suspect: 0.70
+
+      # ══ Lot 13 — les 33 suspectes non scindées ═══════════════════════════════════════
+      # Le réglage ci-dessus laisse 33 régions bi-lobées suspectes non scindées sur les cinq
+      # volumes du corpus, et elles sont NOMMÉES dans les RAPPORT.md, avec leur remplissage.
+      # Les trois leviers ci-dessous sont là pour aller les chercher. Tous sont livrés
+      # INACTIFS, donc à comportement identique au bit près : ils changent le NOMBRE de
+      # bulles d'un tome déjà traité, ce que le mécanisme d'invalidation existant absorbe
+      # (`invalider_textes` + `downstream("detection")`), mais qui se décide, pas se subit.
+
+      # --- Les trois valeurs qui étaient réellement en dur ---
+      # ⚠ Contrairement à `seuil_remplissage` et `seuil_suspect`, qui l'étaient déjà, ces
+      # trois-là n'étaient dans AUCUN défaut : les écrire ici n'aurait rien fait, en silence.
+      #
+      # `max_lobes` n'est pas un rejet mais une TRONCATURE des germes : une grappe de cinq
+      # ballons est ramenée à quatre, et les pixels du cinquième repartent au lobe le plus
+      # proche. RAPPORT.md les compte désormais (« Germes de lobe TRONQUÉS »).
+      max_lobes: 4
+      germe_frac: 0.02 # aire minimale d'un germe, en fraction de l'aire du masque
+      k_max: 0 # rayon d'érosion maximal ; 0 = automatique (petit côté de la boîte // 3)
+
+      # --- Aire minimale, en fraction du CARRÉ DU PETIT CÔTÉ de la planche ---
+      # 0.0 = on garde `aire_min` ci-dessus, en pixels, et c'est le défaut livré.
+      #
+      # ⚠ En pixels, le seuil ne veut pas dire ce qu'on croit. manga D Vol.1 mélange
+      # QUATRE tailles de planche dans un seul tome (844×1200, 1000×1200, 1030×732,
+      # 1688×1200) : 10 000 px² n'y désigne pas la même chose d'une planche à l'autre. Deux
+      # petites bulles collées de 90×90 font 16 200 px² ensemble et passent, tandis que deux
+      # de 60×60 font 7 200 px² et ne sont JAMAIS examinées. Ce qu'on veut dire, c'est « assez
+      # grande pour qu'un goulot soit interprétable ».
+      #
+      # ⚠ Le PETIT CÔTÉ, et surtout pas l'aire — c'est le motif de `nettoyage.marge_bord`.
+      # Sur un webtoon, « la planche » est une bande d'un chapitre entier (1080×10 000) : une
+      # fraction d'aire y vaudrait 60 480 px², six fois le seuil visé, et le garde-fou
+      # deviendrait le plus sévère sur le format où les ballons sont déjà les plus petits.
+      # Le carré du petit côté rend 9 215 px², ce qui est le bon ordre de grandeur.
+      #
+      # Valeur iso-comportement sur la planche de référence (1125×1600) : 10000 / 1125² ≈ 0.0079.
+      #
+      # ⚠ Mesurée sur les six volumes du corpus, elle ne change RIEN : aucune région ne tombe
+      # dans la bande nouvellement éligible. Elle rend le seuil juste, elle ne rapporte pas de
+      # bulle ici. Cf. docs/mesures/doubles-2026-08-25.md.
+      aire_min_frac: 0.0
+
+      # --- Exiger la STABILITÉ d'une scission, au lieu du premier k qui passe ---
+      # 1 = régime historique : la validation a lieu une seule fois, au premier échelon
+      # d'érosion qui sépare, et un échec des garde-fous fait abandonner toute l'échelle.
+      #
+      # ≥ 2 = un découpage n'est retenu que s'il se présente IDENTIQUE sur ce nombre
+      # d'échelons consécutifs (même nombre de lobes, lobes appariés par IoU de boîtes).
+      # C'est PLUS exigeant que le critère historique, pas moins : un vrai goulot produit une
+      # scission robuste sur une plage de k, un artefact de bruit produit une scission qui
+      # n'existe qu'à un seul k. Ce qui est abandonné, c'est seulement le renoncement au
+      # premier échec — un goulot large cède à k=3 en donnant deux lobes déséquilibrés, alors
+      # qu'à k=5 il aurait donné deux lobes propres.
+      #
+      # Coût : k_max érosions au lieu d'un arrêt au premier succès. `erode` est en O(1) par
+      # axe (sommes cumulées), donc le surcoût est LINÉAIRE en k_max, jamais quadratique.
+      stabilite: 1
+      iou_stabilite: 0.80 # IoU de boîtes exigée pour dire « c'est le même découpage »
+
+      # --- Compacité d'un lobe, relative à celle du PARENT ---
+      # 0.0 = seuil absolu (`remplissage_lobe_min` ci-dessus), et c'est le défaut livré.
+      #
+      # ⚠ L'angle mort du seuil absolu : deux ballons de CRI accolés — contour en étoile, très
+      # courant en action — ont chacun un remplissage naturellement bien en dessous de 0,72.
+      # Ils ne sont donc jamais scindés, quel que soit le k. Et ce sont précisément les bulles
+      # où deux personnages crient séparément, donc où la fusion se voit le plus : les 38
+      # « dentelées ou à longue queue » de manga A Vol.2 et les 19 de webtoon A.
+      #
+      # En relatif, le seuil d'un lobe devient
+      #     max(remplissage_lobe_plancher, remplissage_lobe_relatif × remplissage du parent)
+      # Le critère devient « la scission ne DÉGRADE pas la compacité » au lieu de « les lobes
+      # sont compacts dans l'absolu ». Un parent à 0,60 accepte des lobes à 0,57 ; un parent à
+      # 0,89 exige des lobes convaincants.
+      remplissage_lobe_relatif: 0.0
+      # Plancher bas et très permissif du mode relatif — il refuse les scissions franchement
+      # dentelées, et rien ne peut passer en dessous.
+      remplissage_lobe_plancher: 0.20
+
+      # --- Sonde d'ENCRE : se servir du trait, pas seulement du masque ---
+      # Toute la scission est morphologique. Or le TRAIT de contour est un signal fort,
+      # présent et gratuit — la chose la plus noire et la plus continue de la région —, et
+      # deux ballons accolés ont DEUX contours qui se touchent : une ligne d'encre traverse la
+      # région exactement là où le goulot se trouve.
+      #
+      # ⚠ C'est le seul point du lot dont le résultat est INCERTAIN, et il est mené comme une
+      # évaluation : livré inactif, avec un critère d'abandon écrit à l'avance dans
+      # `manga/bubbles_split.py` (au moins cinq vrais doubles gagnés, zéro faux positif —
+      # sinon la sonde saute). En appui et jamais en remplacement : elle ne peut que relâcher
+      # le garde-fou de forme sur un découpage que l'érosion avait DÉJÀ proposé. Un trait sans
+      # goulot est signalé au rapport, jamais scindé d'autorité.
+      encre:
+        actif: false
+        part_min: 0.60 # part de la couture entre lobes qui doit être de l'encre
+        facteur_seuil: 0.50 # où placer la barre fond/encre dans l'histogramme du masque
+        plancher_confirme: 0.35 # remplissage exigé d'un lobe quand l'encre confirme
 
   nettoyage:
     # Le masque du détecteur couvre TOUTE la bulle, contour compris. On l'érode avant
@@ -756,13 +1676,35 @@ manga:
 
   typeset:
     # Police pour le texte français réinjecté. Vide = repli automatique : voir
-    # templates/fonts/README.md pour la chaîne complète et les licences. Le défaut
-    # livré est Comic Neue Bold (SIL OFL 1.1) ; avant, la chaîne tombait
-    # systématiquement sur Arial. Vérifie la licence de toute police substituée avant
-    # de partager les planches produites.
-    font_path: ""
-    font_path_italique: "" # emphase : le traducteur encadre la réplique de *…*
-    font_path_gras: ""
+    # templates/fonts/README.md pour la chaîne complète et les licences. Le défaut livré
+    # est Comic Neue Bold (SIL OFL 1.1) ; avant, la chaîne tombait systématiquement sur
+    # Arial. Vérifie la licence de toute police substituée avant de partager les planches.
+    #
+    # ⚠ La police est choisie BULLE PAR BULLE : s'il lui manque un seul caractère, toute
+    # la réplique est redessinée dans la première police de repli qui la couvre, et cette
+    # bascule n'apparaît dans aucun rapport. Mesuré sur un tome de 150 planches avec une
+    # police à qui manquaient « » œ Ç À — ♪ : 63 bulles sur 818, sur 45 planches, sorties
+    # dans une AUTRE police. Le pré-vol du run le dit maintenant en deux secondes, et
+    # `python run_manga.py --check` sans lancer de run. Pour compléter une police à partir
+    # de ses propres tracés : `python tools/completer_police.py <police.ttf>` (⚠ travail
+    # dérivé — cf. NOTICE avant de t'en servir).
+    #
+    # ⚠ Une police plus LARGE change la mise en page : corps plus petits, et des bulles
+    # étroites qui passent en débordement (cause `police_trop_large`). Le pré-vol annonce
+    # le rapport de largeur à ComicNeue-Bold, à corps égal.
+    #
+    # ⚠ Un chemin Windows se met en guillemets SIMPLES. En guillemets doubles, YAML traite
+    # `\` comme une échappe : le `\U` de `\Users` réclame 8 chiffres hexadécimaux et le
+    # chargement échoue, tandis que le `\t` de `\tome` passerait en SILENCE en produisant
+    # une tabulation, donc un chemin faux.
+    font_path: 'C:\Users\tourn\Yume-Trad\templates\fonts\Wildjess_normal_complet.ttf'
+    # ⚠ CLÉS SANS EFFET. Aucun code ne les lit : `grep -rn font_path_italique manga/` ne rend
+    # rien, et l'orchestrateur ne passe que `font_path` au rendu. Le comportement `*…*` →
+    # italique qu'elles suggèrent n'existe pas davantage : manga/consignes.py demande au
+    # modèle de NE PAS produire d'italique, faute de savoir le lettrer. Conservées pour ne
+    # pas casser les configs existantes ; les modifier ne change rien à la sortie.
+    font_path_italique: 'C:\Users\tourn\Yume-Trad\templates\fonts\Wildjess_Italic.TTF'
+    font_path_gras: 'C:\Users\tourn\Yume-Trad\templates\fonts\Wildjess_BoldItalic.TTF'
     taille_min: 11
     taille_max: 60
     # Plancher EMPRUNTABLE, jamais la taille de travail : on n'y descend que lorsque la bulle
@@ -782,6 +1724,29 @@ manga:
     # suspension se lisent comme un silence, donc la planche n'est pas trahie, et le trou
     # devient repérable. "" rétablit la bulle vierge.
     marqueur_vide: "…"
+    # --- Lettrage d'une zone HORS BULLE (lot 22, L22.3) ---
+    #
+    # ⚠ Ces trois clés ne servent QUE le mode `manga.onomatopees.effacement`, qui est désarmé.
+    # Le lettrage des bulles ne les lit jamais, et un tome rendu sans y toucher est identique
+    # au bit près.
+    #
+    # Épaisseur du contour d'un lettrage hors bulle, en fraction du corps. 0,125 n'est pas
+    # choisi : c'est **la valeur que le dépôt emploie déjà** pour du texte posé sur du dessin
+    # — `gloss.dessiner` écrit `max(1, taille // 8)` depuis le lot 13, et c'est le seul endroit
+    # du code qui ait vu de vraies planches sur ce point.
+    contour_epaisseur_sfx: 0.125
+    # Plancher d'aire d'une zone hors bulle, en px². **Désarmé (0), et c'est une mesure** :
+    # `manga.onomatopees.aire_min` borne déjà la détection à 1 200 px², donc toute zone qui
+    # arrive au lettrage est au-dessus de `aire_min_bulle` (900) par construction. Un second
+    # plancher ne pourrait que rejeter.
+    aire_min_sfx: 0
+    # Fait pivoter le lettrage d'une zone mesurée « verticale » (une colonne de katakana).
+    # **Désarmé**, et le dire est plus honnête que l'armer : le lot 22 n'a pu lettrer AUCUNE
+    # zone réelle (taux de `lecture_sure` de 0 %), donc personne n'a vu à quoi ressemble une
+    # onomatopée française inclinée sur ce corpus. Armer un réglage qu'aucune image ne soutient
+    # est exactement ce que la règle de mesure honnête du dépôt interdit.
+    sfx_rotation: false
+
     # --- Gloses des onomatopées (cf. `manga.onomatopees`) ---
     # Corps maximal d'une glose. Elle est posée dans un blanc du dessin, pas dans une bulle :
     # trop grande, elle ne trouve plus de place et n'est pas posée du tout.
@@ -790,6 +1755,28 @@ manga:
     glose_marge: 0.45      # air autour du texte, en fraction du corps
     glose_ecart: 3         # px minimum entre la glose et l'encre qu'elle ne doit pas toucher
     glose_contour: true    # sur du dessin, c'est le contour qui fait la lisibilité
+    # --- Contour MESURÉ plutôt que noir ou blanc pur (lot 21, L21.5) ---
+    #
+    # ⚠ Le plan du lot 21 posait ici une prémisse FAUSSE, et elle est corrigée plutôt que
+    # recopiée : il attribuait un contour « blanc par construction » à `typeset.calque_fit`,
+    # qui prend `stroke_fill = (*style.background, 255)` alors que `clean.analyze_regions`
+    # force `background = (255,255,255)` pour toute zone non-bulle. C'est exact pour le
+    # lettrage DES BULLES — mais les gloses ne passent pas par `calque_fit` : `gloss.dessiner`
+    # a toujours choisi sa polarité localement (luminance moyenne sous le rectangle < 110).
+    # Le contour d'une glose n'est donc pas blanc par construction ; il est noir OU blanc.
+    #
+    # Le défaut réel est que ces deux pôles sont PURS. Sur un aplat de trame grise, un
+    # contour blanc franc découpe un halo qui se voit plus que la glose elle-même. Armé, ce
+    # réglage prend la couleur dominante réellement mesurée sous le rectangle — histogramme
+    # de luminance Rec. 601 à 32 classes, classe modale, affinage ±16, médiane RGB, la
+    # méthode déjà calibrée de `clean._couleur_de_fond` — et oppose au texte le pôle
+    # contrasté.
+    #
+    # ⚠ Ne concerne QUE le mode `manga.onomatopees.mode: "glose"`, qui n'est pas le défaut.
+    # Il n'y a donc aujourd'hui aucun pixel de sortie derrière ce réglage, et c'est pourquoi
+    # il est livré désarmé plutôt qu'armé sur une mesure d'images que le lot n'a pas faite.
+    # false = comportement d'avant le lot, au bit près.
+    glose_contour_mesure: false
     interligne: 1.12 # × (ascendante + descendante), métriques réelles de la police
     interligne_min: 0.95 # 1er repli si le texte ne tient pas
     marge_interne: 0.04 # fraction de la largeur de bulle
@@ -831,6 +1818,80 @@ manga:
     #   true            : exiger le cache, échouer avec un message clair s'il manque ;
     #   false           : comportement d'avant (identifiant de dépôt, révision revalidée).
     hors_ligne: "auto"
+    # Moteur d'OCR. `manga-ocr` est un modèle JAPONAIS : son décodeur n'a pas de token
+    # d'espace (le japonais n'en écrit pas), si bien qu'une planche anglaise en ressort
+    # collée et parsemée de kanji inventés — `HE'S CERTAINLY NO ORDINARY PERSON` lu
+    # `ＨＥＳＣＥＲＴＡＮＡＹＮＯＯＯＲＤＩＮＡＲＹＰＥＲＳＯＮ`, une date lue `２０１６年１０月`.
+    # Le LLM traduit ensuite cette bouillie sans broncher : le défaut est INVISIBLE au
+    # rapport, il ressemble à une mauvaise traduction.
+    #   "auto" (défaut) : manga-ocr pour le japonais, RapidOCR (PP-OCRv4) sinon ;
+    #   "manga_ocr"     : forcer manga-ocr, quelle que soit la langue ;
+    #   "rapidocr"      : forcer RapidOCR (latin, cyrillique, hangûl, chinois).
+    # RapidOCR demande `pip install rapidocr-onnxruntime` (cf. requirements-manga.txt).
+    moteur: "auto"
+
+  # Langue SOURCE supposée quand un tome ne porte pas de dossier de langue, c'est-à-dire
+  # pour la structure historique `sources/<Projet>/<Tome>/manga/*.png`. Pour désigner la
+  # langue explicitement, crée un sous-dossier — les mêmes noms que le light novel :
+  #   sources/<Projet>/<Tome>/manga/ENG/*.png      → manga, source anglaise
+  #   sources/<Projet>/<Tome>/webtoon/ENG/*.png    → webtoon, source anglaise
+  # (table des noms : `langues.dossiers`, plus haut. Ou `run_manga.py --langue ENG`.)
+  langue_source: "jp"
+
+  # --- Formats de planche ---
+  # Un format REDÉCLARE seulement ce qui diffère du manga et hérite de tout le reste par
+  # fusion profonde (détection, nettoyage, OCR, rendu, modèles, températures). C'est ce qui
+  # évite d'entretenir deux configurations parallèles.
+  #
+  # ⚠ Le sens de lecture est une propriété du FORMAT, jamais de la langue : un scan anglais
+  # d'un manga japonais se lit droite→gauche, un webtoon coréen se lit gauche→droite.
+  formats:
+    webtoon:
+      rendu:
+        # Pilote la numérotation des bulles envoyée au modèle ET le ComicInfo.xml — les deux
+        # doivent être d'accord, sinon les répliques atterrissent dans les mauvaises bulles.
+        #
+        # ⚠ **NE SUPPRIME PAS CES DEUX LIGNES, même si elles ont l'air redondantes** avec
+        # `SENS_PAR_DEFAUT["webtoon"]` de manga/formats.py. La résolution se fait dans
+        # l'ordre : bloc de format → racine `manga.rendu.sens_lecture` → défaut du format.
+        # Comme la racine pose explicitement "droite_gauche" (plus bas dans ce fichier), le
+        # défaut du format n'est JAMAIS atteint : c'est uniquement cette ligne-ci qui fait
+        # marcher le webtoon. Les supprimer numéroterait les bulles à l'envers sur toute la
+        # bande, sans un avertissement. Couvert par tests/test_manga_webtoon.py.
+        sens_lecture: "gauche_droite"
+
+        # --- Le poids des PSD, mesuré ---
+        # Une bande de 1080×10 000 pèse **42 à 60 Mo** en PSD (mesuré sur les 9 bandes du
+        # chapitre de référence : 420 Mo au total), contre 7,2 Mo pour une planche paginée.
+        # Le calque du scan d'origine en est environ un tiers, et le scan reste de toute façon
+        # sous sources/ : sur ce format, le confort ne vaut pas 140 Mo par chapitre.
+        #
+        # ⚠ Les PSD de bande ont été VÉRIFIÉS, ce n'est pas une précaution en l'air : les 9
+        # ont été écrits sans un seul échec, et le format PSD plafonne à 30 000 px de côté —
+        # trois fois plus qu'une bande ordinaire. Au-delà, `manga/psd.py` refuse la planche en
+        # le disant, et le reste des formats de sortie continue (lot 14, L6.6).
+        psd_original: false
+
+      # ── Ce qui N'EST PAS ici, et pourquoi ────────────────────────────────────────────
+      # Un bloc de format ne doit porter que ce qui DIFFÈRE vraiment. Le lot 14 a mesuré les
+      # trois candidats évidents et les a tous les trois écartés — c'est un résultat, pas un
+      # oubli :
+      #
+      # · `detection.fenetre_*` — inutile. Le découpage ne se décide plus sur le ratio mais
+      #   sur ce que le réseau VOIT de la planche (`detection.OCCUPATION_MIN`, lot 14, L6.4) :
+      #   69 px de canevas sur 640 pour une bande, 450 pour une page. Le même critère sépare
+      #   les deux formats sans en nommer aucun, et il suit `input_size`. Un cas particulier
+      #   « webtoon » serait un second critère à entretenir pour un seul phénomène.
+      #
+      # · `detection.input_size` — non mesuré, donc non livré. Relever la résolution coûte ~2×
+      #   par fenêtre ; sur une bande déjà découpée en 8, personne n'a encore mesuré ce que ça
+      #   rapporte. `tools/apercu_detection.py --resolutions` répond planche par planche, et
+      #   affiche désormais l'occupation du canevas à chaque résolution.
+      #
+      # · `onomatopees.fenetre_*` — les défauts du module (3 072 px de fenêtre, 1 600 px de
+      #   recouvrement, cf. manga/text_detection.py) sont déjà calibrés pour la bande, et ils
+      #   sont inertes sur une planche paginée, qui n'est jamais découpée. Les recopier ici
+      #   n'ajouterait qu'une occasion de divergence.
 
   rendu:
     # Formats de sortie du tome traduit : "images" (dossier de pages), "cbz", "pdf", "psd".
@@ -881,6 +1942,10 @@ manga:
     psd_texte: "type"
     # → ComicInfo.xml : Manga=YesAndRightToLeft. Sans cette clé, un lecteur affiche la
     # planche de gauche à droite et inverse les doubles pages.
+    # ⚠ Pilote AUSSI l'ordre dans lequel les bulles sont numérotées pour le modèle. Le
+    # changer sur un tome déjà détecté fait reprendre ses planches à la détection (leur
+    # ordre en cache n'est plus le bon) — les autres tomes ne sont pas touchés.
+    # Surchargé par format : cf. `manga.formats.<format>.rendu.sens_lecture`.
     sens_lecture: "droite_gauche"
     langue_iso: "fr"
     pdf_dpi: 300
@@ -964,3 +2029,441 @@ gui:
     # une planche à deux bulles et une planche à quatorze ne coûtent pas la même chose.
     # Au-delà, les planches les moins récemment vues sont oubliées et seront recomposées.
     plafond_mo: 120
+
+# =============================================================================
+# ATELIER D'ILLUSTRATION (`python run_illustration.py`) — EXPÉRIMENTAL
+# =============================================================================
+# Quatrième brique. Elle produit des images NEUVES à partir de la bible visuelle du tome.
+# Elle ne modifie AUCUNE image existante : elle lit `media/`, elle écrit dans
+# `build/<Projet>/<Tome>/illustrations/`, et `illustration/frontiere.py` refuse à
+# l'exécution toute écriture hors de ce dossier. Le principe « l'IA ne dessine jamais »
+# porte sur les pixels de l'œuvre et reste vrai mot pour mot.
+#
+# ⚠ Le run a DEUX phases avec un humain entre les deux, et la phase image REFUSE de
+# démarrer tant que `requete.yaml` porte `valide: false`. Aucune clé ci-dessous ne
+# contourne cette porte — il n'y en a pas, et il n'y en aura pas.
+illustration:
+  # DÉSARMÉE par défaut. Un utilisateur qui ne touche à rien ne voit aucune différence, ne
+  # télécharge aucun poids, et ne perd aucune seconde au démarrage : `run.py` et
+  # `run_manga.py` sont iso-comportement, cette clé à false comme à true.
+  #
+  # ⚠ REMISE À false au lot 27. Elle valait `true` depuis la 2.20.0, où les réglages de
+  # travail d'une machine sont entrés dans le commit avec le lot « police » — quatre clés
+  # (`actif`, `moteur`, `comfyui.workflow`, `comfyui.timeout`). Le dépôt PUBLIAIT donc une
+  # brique expérimentale armée, et `test_le_defaut_du_depot_est_bien_desarme` échouait sur
+  # `git show HEAD:config.yaml` depuis ce jour-là.
+  actif: false
+
+  # "factice" | "comfyui".
+  # ⚠ Le défaut n'est pas un choix de confort, c'est un aveu : les trois chemins d'exécution
+  # que le PLAN-24 demandait de mesurer sur la 7900XT n'ont PAS été mesurés (ni GPU ni réseau
+  # dans la session de livraison). "factice" rend un carré uni dont la couleur dérive de la
+  # requête entière : il vérifie la CHAÎNE — les deux phases, le marquage, la frontière, le
+  # rejeu — sans vérifier la génération. Passer à "comfyui" demande un serveur que tu
+  # installes toi-même, comme Ollama, et un workflow que tu exportes toi-même.
+  #
+  # ⚠ REMIS à "factice" au lot 27, pour la même raison que `actif` ci-dessus.
+  moteur: "factice"
+
+  poids:
+    # Le poids ne va PAS dans manga_models/ : c'est le dossier de la brique manga, et le
+    # .gitignore y couvrait *.onnx, pas *.gguf ni *.safetensors (corrigé au même commit).
+    dossier: "illustration_models"
+
+    # Nom du fichier de poids, et son URL. VIDES par défaut, et c'est délibéré : la licence
+    # des POIDS se vérifie à la source primaire au moment où tu t'en sers, et « licence du
+    # code Apache-2.0 » ne dit rien de la licence des poids. Coder une URL ici transformerait
+    # une vérification non faite en défaut du dépôt. Voir illustration_models/README.md.
+    fichier: ""
+    url: ""
+    sha256: ""
+
+    # ⚠ false, à l'inverse de manga.detection.telechargement_auto. Ce n'est pas une
+    # incohérence entre les deux briques : c'est le facteur cent. Le détecteur pèse 104 Mo
+    # (108 982 949 octets exactement), un GGUF Q4 de Qwen-Image en pèse 11,9 à 13,1 selon la
+    # quantisation — soit ~120 fois plus. Le dépôt dit déjà, pour le détecteur, qu'un
+    # téléchargement se fait « quand tu prépares la machine plutôt qu'au milieu d'un tome » ;
+    # à cette taille, la phrase devient une règle. `--check --telecharger` le demande.
+    telechargement_auto: false
+
+  image:
+    # 1328 × 1328 : le carré natif annoncé pour la famille Qwen-Image. C'est aussi la
+    # dimension à laquelle le PLAN-24 étape 0.3 demande de mesurer les trois chemins, pour
+    # qu'ils se comparent au même prix.
+    largeur: 1328
+    hauteur: 1328
+
+    # Pas de débruitage et guidage. ⚠ Ces deux valeurs APPARTIENNENT au workflow choisi
+    # ci-dessous, ce ne sont pas des réglages libres : le workflow livré par défaut porte la
+    # LoRA Lightning, distillée SANS guidage libre de classifieur, et un cfg de 4 y produit
+    # des images brûlées. Le workflow de référence (`qwen-image-2512.api.json`, sans LoRA)
+    # demande à l'inverse 50 pas et un guidage de 4,0.
+    # Mesuré le 2026-08-29 sur RX 7900 XT : 4 pas = 6,7 s/pas, 103,7 s par image en médiane
+    # sur 4 images (cf. illustration/workflows/README.md).
+    pas: 4
+    guidage: 1.0
+
+    # Graine écrite dans requete.yaml. `null` = celle de la requête (0 par défaut, ou celle
+    # de --graine). Une graine fixe est ce qui rend le rejeu comparable ; c'est le critère
+    # de reproductibilité du PLAN-24 L24.5.
+    graine: null
+
+    # Images par bloc de requête. 1 : le périmètre arrêté est « un personnage seul,
+    # reconnaissable d'une image à l'autre » — pas une planche, pas une grille de variantes.
+    par_requete: 1
+
+  comfyui:
+    # Un serveur HTTP local, comme Ollama : il ne pèse RIEN dans requirements-*.txt. Le
+    # dépôt a refusé OpenCV pour ~60 Mo (interdit n° 4) ; un `import diffusers` pèserait des
+    # gigaoctets et mettrait le dépôt en dette de compatibilité ROCm.
+    base_url: "http://127.0.0.1:8188"
+
+    # Chemin d'un workflow exporté au FORMAT API depuis ComfyUI.
+    # Le dépôt en fournit TROIS qui ont tourné, et seulement parce qu'ils ont tourné : RX
+    # 7900 XT, ROCm 7.14, ComfyUI 0.34.2, nœud ComfyUI-GGUF. Sur une autre pile, ce sont des
+    # points de départ, pas des garanties — voir illustration/workflows/README.md.
+    #
+    # ⚠ LOT 30, 2026-09-03 — un QUATRIÈME fichier est apparu dans le dossier,
+    # `qwen-image-edit-2511-controle.api.json`, et il N'EST PAS un choix possible aujourd'hui.
+    # C'est un graphe CANDIDAT : il porte le canal « image de contrôle » (pose, composition),
+    # il n'a JAMAIS été exécuté, et le poids qu'il nomme n'est installé sur aucune machine du
+    # dépôt. Il porte un bloc racine `_candidat` qui dit tout cela, que `tools/comfy.py
+    # --valider` affiche, et à cause duquel « nœud absent » et « modèle absent » y sont des
+    # RÉSERVES et non des refus — sans quoi le diagnostic passerait en rouge partout.
+    # Le désigner ici EXIGE de renseigner `canaux.image_de_controle` dans requete.yaml : ce
+    # graphe place son nœud EN SÉRIE sur le chemin du modèle et ne dégrade pas. Le refus est
+    # nommé et arrive avant le GPU (`moteur.CanalExige`).
+    # Le défaut est la variante Lightning (4 pas) ; `qwen-image-2512.api.json` est le réglage
+    # de référence à 50 pas, et il demande alors `pas: 50` et `guidage: 4.0` ci-dessus.
+    # Les marqueurs %prompt%, %prompt_negatif%, %graine%, %largeur%, %hauteur%, %pas%,
+    # %guidage%, %reference_1%…, %entite_1%/%masque_1%…, %image_controle% sont substitués.
+    # ⚠ Un canal dont le marqueur est absent du graphe est REFUSÉ avec son motif, jamais
+    # honoré à moitié : une requête à masques envoyée dans un graphe qui n'en a pas s'arrête
+    # avant la première seconde de GPU.
+    workflow: "illustration/workflows/qwen-image-2512-lightning.api.json"
+
+    # 600 s. Une PREMIÈRE génération charge les poids depuis le disque — plusieurs minutes
+    # pour un fichier de 12 Go sur un SSD partagé — avant de produire le moindre pixel. Un
+    # délai court ferait échouer le premier appel de chaque session et lui seul.
+    #
+    # ⚠ Mesuré le 2026-08-30 : après un `POST /interrupt`, ComfyUI a mis **22 minutes** à se
+    # réinitialiser, et ce délai de 600 s a expiré dessus. N'interromps pas une génération —
+    # laisse la file se vider.
+    timeout: 600
+
+    # Durée au-dessous de laquelle une « génération » n'en est pas une : c'est le CACHE
+    # D'EXÉCUTION de ComfyUI qui a répondu. 0 désarme le contrôle.
+    #
+    # ⚠ Ce n'est pas de la prudence, c'est un défaut mesuré le 2026-08-30. ComfyUI met en
+    # cache la sortie d'un graphe — légitime — mais ce cache SURVIT À UNE INTERRUPTION :
+    # après un `/interrupt`, la requête suivante au graphe identique a été servie en 1,1 s
+    # avec l'image PARTIELLEMENT DÉBRUITÉE du run avorté. Elle a été marquée et écrite comme
+    # les autres ; seule sa mesure d'écart de style (0,23 au lieu de 0,12) l'a trahie.
+    #
+    # 2,0 s vient d'un chiffre : la génération la plus rapide relevée sur cette pile est de
+    # 16 s par pas de débruitage, soit 64 s à 4 pas. Sous deux secondes, ce n'est pas une
+    # diffusion. Le moteur REFUSE alors, avant même de télécharger l'image — une image
+    # plausible et fausse est exactement ce que cette brique existe pour empêcher.
+    plancher_secondes: 2.0
+
+  vram:
+    # ⚠ Structurel, pas un réglage de confort. Le README (≈ l. 639) écrit que « ~17 Go ne
+    # tiennent de toute façon pas dans 20 Go de VRAM. Ça supprime tout scénario de seconde
+    # instance / partage de VRAM » : le LLM de traduction OCCUPE la carte. La bascule a lieu
+    # UNE fois par run, jamais une fois par image, et son coût est publié à côté du temps de
+    # génération dans le RAPPORT.md de la brique.
+    # Le RECHARGEMENT du LLM appartient à l'appelant — même division que pour la détection.
+    decharger_llm: true
+
+    # La SECONDE moitié de la bascule : en fin de run, demander à ComfyUI de rendre la carte.
+    # Le plan de série décrit bien ce cycle — « déchargement du LLM → génération → le modèle
+    # d'image est déchargé, le LLM peut revenir » — et sans lui, 12 083 Mio restent occupés
+    # après un run : un `run.py` lancé derrière trouve la carte prise.
+    #
+    # ⚠ ET POURTANT IL EST DÉSARMÉ, parce que la mesure ne soutient pas de l'armer. Relevé le
+    # 2026-08-29 sur cette pile (ComfyUI 0.34.2, ROCm 7.14, RX 7900 XT) : sur SEPT appels à
+    # `/free`, UN a fait segfauter ComfyUI — violation d'accès 0xC0000005 dans son propre
+    # `comfy/model_management.py:model_unload`. Soit 1 sur 7. Le plantage est chez ComfyUI,
+    # pas dans Angelith : nous ne pouvons pas le corriger.
+    #
+    # Ce que ça coûte quand ça arrive : RIEN des images — elles sont écrites et marquées avant
+    # cet appel. Il faut relancer ComfyUI, voilà tout. C'est quand même une surprise qu'un
+    # utilisateur n'a pas demandée, et le dépôt livre désarmé ce que la mesure ne soutient pas
+    # (même règle que `manga.onomatopees.effacement.mode: "aucun"`).
+    #
+    # Pour rendre la carte À LA MAIN, voir docs/COMMANDES.fr.md, section illustration :
+    #     python run_illustration.py --liberer-vram
+    # Mesuré : 12 083 Mio → ~470 Mio en quelques secondes.
+    #
+    # ⚠ LOT 30, 2026-09-03 — LE CHIFFRE « 1 SUR 7 » N'A PAS ÉTÉ REPRIS, ET LE RÉGLAGE RESTE
+    # DONC À `false`. Le PLAN-30 L30.4 demandait de le reprendre sur VINGT appels, avec la
+    # version de ComfyUI du jour, et d'armer ou non D'APRÈS CE CHIFFRE. La session du lot 30 a
+    # tourné sur le PC secondaire, sans serveur : elle n'a pas pu relever un seul appel. Ce
+    # qu'elle livre est le PROTOCOLE, pas le chiffre :
+    #     python run_illustration.py --liberer-vram --repetitions 20
+    # Il sonde le serveur ENTRE deux appels — le mode d'échec mesuré n'est pas « l'appel rend
+    # une erreur », c'est « ComfyUI meurt », et une boucle naïve compterait dix-neuf succès
+    # imaginaires après le premier plantage. Il n'arme rien et ne relance rien.
+    decharger_image: false
+
+    # LOT 27 — le LLM revient en fin de run, y compris sur ERREUR et sur ANNULATION.
+    #
+    # ⚠ ISO SUR LA CONFIGURATION LIVRÉE, et ce n'est pas un hasard : le rechargement n'a lieu
+    # que si la carte est RÉELLEMENT libre, c'est-à-dire si `decharger_image` ci-dessus vaut
+    # true — ce qui n'est pas le cas par défaut. Recharger ~17 Go de LLM pendant que ComfyUI
+    # tient ses ~12 Go de transformeur est exactement le scénario que toute l'architecture
+    # refuse (README ≈ l. 639 : « ~17 Go ne tiennent pas dans 20 Go de VRAM »). Quand le
+    # rechargement n'a pas lieu, la brique le DIT au lieu de le taire.
+    #
+    # À false : le LLM n'est jamais rechargé et la traduction suivante paie son chargement,
+    # comme jusqu'au lot 26. C'est un réglage de confort, pas un garde-fou.
+    recharger_llm: true
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # LOT 27 — L'INSERTION DANS LES SORTIES DU LIGHT NOVEL
+  # ─────────────────────────────────────────────────────────────────────────────
+  # ⚠ false, et un tome relancé sans y toucher sort ISO-OCTET. C'est le critère 7 du PLAN-27,
+  # et il est vérifié par un test qui rend deux fois le même Markdown et compare les octets.
+  #
+  # À true, les images RETENUES du projet (celles que « garder » a déplacées sous
+  # `sources/<Projet>/illustrations/`) sont insérées dans le Markdown assemblé du light novel,
+  # AVEC une légende obligatoire sous chacune :
+  #
+  #     « Illustration générée par IA — ne fait pas partie de l'œuvre originale »
+  #
+  # ⚠ LA LÉGENDE N'A PAS D'INTERRUPTEUR. Aucune clé ne la vide, aucun argument ne la saute :
+  # `core/insertion.py` LÈVE sur une légende vide. C'est la lecture de l'art. 50 de l'AI Act
+  # retenue au PLAN-24 (docs/ai-provenance.md), transposée à la sortie visible — le marquage
+  # machine est dans le PNG, la mention lisible est sous l'image. Son texte vient du pack de
+  # langue cible (clé `legende_illustration_ia`), donc un tome anglais porte la version
+  # anglaise.
+  #
+  # ⚠ Cette clé ne concerne QUE le light novel (`run.py`). La brique manga ne rend pas de
+  # Markdown : elle rend des planches, et rien n'y est composité — c'est la frontière de
+  # `illustration/frontiere.py`, et ce lot n'y touche pas.
+  #
+  # ⚠ RAPPORT.md liste alors chaque image insérée, avec son personnage et sa graine.
+  inserer_dans_sorties: false
+
+  insertion:
+    # Où l'image atterrit. "debut_chapitre" (le défaut) | "fin_chapitre" | "tete_de_volume".
+    #
+    # Les deux premières placent l'image dans le PREMIER chapitre qui nomme le personnage —
+    # le nom vient du sidecar de provenance, pas d'une devinette. Une image dont le
+    # personnage n'apparaît nulle part va en tête de volume plutôt que d'être perdue, et
+    # RAPPORT.md le dit.
+    position: "debut_chapitre"
+
+  identite:
+    # LOT 25 — la voie A : conditionner l'identité du personnage par des images de référence.
+    #
+    # ⚠ DÉSARMÉE, et c'est une MESURE qui le décide, pas de la prudence. Étalonné le
+    # 2026-08-29 sur le corpus réel (docs/mesures/identite-2026-08-29.md) : l'écart entre
+    # « deux références du même personnage » et « références de deux personnages différents »
+    # ne dépasse pas le bruit de la population de confusion. Le juge automatique ne sépare
+    # donc pas, et un garde-fou dont le juge ne sépare pas rendrait des verdicts qui ont l'air
+    # mesurés. Le dépôt livre désarmé ce que la mesure ne soutient pas — même règle que
+    # `manga.onomatopees.effacement.mode: "aucun"` (lot 22) et `vram.decharger_image` (lot 24).
+    #
+    # À true, la phase image prépare les références validées de la bible, les envoie au canal
+    # `references` du moteur, et mesure les trois grandeurs sur chaque PNG produit.
+    #
+    # ⚠⚠ **CETTE CLÉ ET `illustration.comfyui.workflow` VONT PAR PAIRE.** L'identité passe par
+    # des IMAGES de référence ; un graphe texte-vers-image n'a aucun nœud pour les recevoir.
+    # Armer celle-ci en laissant `qwen-image-2512-lightning.api.json` fait échouer la
+    # génération avec « canal références refusé par le moteur » — constaté à l'usage le
+    # 2026-08-31, APRÈS une session d'atelier complète. Il faut alors :
+    #
+    #     illustration.comfyui.workflow: "illustration/workflows/qwen-image-edit-2511.api.json"
+    #
+    # `python run_illustration.py --check` croise désormais les deux clés et le dit, et
+    # l'atelier le dit dans son bandeau AVANT la première question.
+    actif: false
+
+    # Nombre maximal de références envoyées au moteur. 3 n'est pas un réglage de prudence :
+    # c'est ce que le nœud TextEncodeQwenImageEditPlus de ComfyUI 0.34.2 expose (image1,
+    # image2, image3), et le graphe livré ne peut pas en câbler une quatrième.
+    references_max: 3
+
+    # Côté de la référence préparée, en pixels. Le modèle ramène de toute façon ses entrées à
+    # une aire fixe ; envoyer 6 Mpx par référence coûterait de l'encodage pour rien.
+    cote_reference: 1024
+
+    encodeur:
+      # Le juge : un encodeur d'image ONNX. `onnxruntime` est déjà une dépendance de
+      # requirements-manga.txt — c'est le seul moteur d'inférence que le dépôt accepte, et le
+      # détecteur de bulles (104 Mo) y tourne depuis le lot 9. Pas d'OpenCV (interdit n° 4),
+      # pas de torch : un cosinus entre deux vecteurs s'écrit en numpy.
+      dossier: "illustration_models"
+
+      # VIDE par défaut, exactement comme `poids.fichier` : aucune URL de poids n'est codée
+      # dans le dépôt. Mesuré ici : dinov2-base réexporté en ONNX pèse 346 627 111 octets et
+      # ne DÉCLARE AUCUNE LICENCE, alors que sa source amont (facebook/dinov2-base) déclare
+      # apache-2.0. C'est la jurisprudence du dépôt à l'envers — « licence du code ne dit rien
+      # de la licence des poids » —, et c'est à l'utilisateur de la vérifier.
+      # ⚠ Piège vérifié le 2026-08-29 : l'ETag d'une réponse HTTP de Hugging Face n'est PAS le
+      # SHA-256 du fichier, c'est celle du CDN. Seul `lfs.sha256` de l'API l'est.
+      fichier: ""
+      url: ""
+      sha256: ""
+
+      # Comment le vecteur d'une image est tiré des jetons du transformeur, et comment
+      # l'image y entre. Ces trois valeurs sont MESURÉES et non héritées : les huit
+      # combinaisons ont été mises en concurrence sur le corpus réel, et le critère est
+      # l'écart des médianes d'identité rapporté au bruit.
+      # Relevé le 2026-08-29 : centre/224 = 0,75 · plein/224 = 1,05 · centre/448 = 1,14 (cls)
+      # · plein/448 = 1,10 (cls). Aucune ne dépasse franchement 1, et c'est LE résultat du lot.
+      # `plein` est retenu contre la recette amont (`centre`) : sur des références qui sont
+      # des PAGES entières, un recadrage central jette le personnage avec la moitié de la page.
+      agregation: "cls_moy"
+      cadrage: "plein"
+      cote: 224
+
+    planchers:
+      # Les seuils du garde-fou. `null` = NON ÉTALONNÉ, et ce n'est pas zéro : un plancher à 0
+      # est un seuil que rien ne franchit, un plancher à null est un contrôle qui ne se
+      # prononce pas. Les confondre ferait passer une absence de mesure pour un verdict.
+      #
+      # Ils se remplissent depuis `python tools/banc_identite.py "<Projet>" --etalonnage`, et
+      # ils sont propres à un corpus : la médiane de confusion d'une œuvre ne dit rien d'une
+      # autre. C'est pourquoi le dépôt n'en livre AUCUN par défaut.
+      confusion: null
+      nouveaute: null
+
+      # Le style. ⚠ Livré null, donc DÉSARMÉ, et le critère 4 bis du PLAN-25 l'autorise
+      # explicitement : « un rejet automatique sur le style n'est armé que si la mesure le
+      # soutient — sinon, livrez-le désarmé et écrivez pourquoi ». Elle ne le soutient pas.
+      # La mesure de style reste calculée et SIGNALÉE dans le sidecar ; elle ne rejette rien.
+      style_descripteurs: null
+
+      # Le juge sépare-t-il, sur CE corpus ? À false, les verdicts d'identité sont posés et
+      # marqués « non opposables » plutôt que présentés comme des faits.
+      juge_utilisable: false
+
+  prompt:
+    # LOT 26 — le prompt vient de l'ŒUVRE, et l'humain le valide.
+    #
+    # Rien ici n'invente : les attributs viennent de bible.apparence, filtrés par leurs
+    # citations ; le genre vient de bible.genre_confirme, sinon de glossaire.genre ; les
+    # images viennent de bible.references[] et de bible.style.ancrages[]. Le seul texte que
+    # le dépôt écrit lui-même est la CHARPENTE, et elle vit dans
+    # illustration/gabarits/portrait.yaml — un fichier versionné, dont l'empreinte SHA-256
+    # part dans le sidecar de chaque image.
+
+    # La forme du champ texte : "prose" | "categories" | "json".
+    # ⚠ Deux conseils communautaires se contredisent SANS dénominateur — « parlez-lui en
+    # langage naturel » d'un côté, « catégories étiquetées, +30 % de précision » de l'autre.
+    # Le « +30 % » n'est recopié nulle part dans ce dépôt comme un fait : c'est l'affirmation
+    # d'un article de blog, sans corpus. La réponse retenue ici est MESURÉE sur ce corpus, et
+    # elle ne vaut que pour lui — voir docs/mesures/prompt-illustration-2026-08-30.md.
+    forme: "prose"
+
+    # La langue du prompt envoyé au MODÈLE D'IMAGE. Ce n'est pas langues.cible : le modèle
+    # est multilingue, et laquelle marche le mieux est une mesure, pas une évidence.
+    # ⚠ Réserve mesurée : les VALEURS d'attribut viennent de bible.yaml, donc de la langue de
+    # traduction. Un prompt "en" sur une bible française est un HYBRIDE — charpente anglaise,
+    # attributs français —, et c'est ce qui a été mesuré, pas de l'anglais pur.
+    langue: "fr"
+
+    # Le cadrage par défaut : "visage" | "buste" | "pied". Il ne vient JAMAIS du texte —
+    # c'est un choix, et il se corrige image par image dans requete.yaml.
+    cadrage: "buste"
+
+    # Le gabarit : illustration/gabarits/<nom>.yaml. Un seul est livré, et le périmètre
+    # arrêté le justifie — « un personnage seul ». Une scène serait un autre gabarit.
+    gabarit: "portrait"
+
+    # Comment le REGISTRE GRAPHIQUE du tome entre dans la requête :
+    #   "mots"     — bible.style.mots (écrit à la main) PUIS la signature MESURÉE du tome,
+    #                mise en mots. Coût : +25 jetons, aucune image de plus dans le canal.
+    #   "ancrages" — une illustration d'ancrage EN PLUS des références, sur le canal d'images.
+    #   "aucun"    — rien.
+    #
+    # ⚠ Le défaut est "mots", et c'est une MESURE qui le décide. Relevé le 2026-08-30, à
+    # références inchangées, sur le tome de référence :
+    #
+    #   approche            jetons   écart moyen   même régime de couleur que le tome
+    #   aucun                   79        0,12     NON
+    #   mots                   104        0,11     OUI
+    #   ancrages               107        0,10     NON
+    #
+    # L'approche par les mots est la seule qui corrige le RÉGIME DE COULEUR — le défaut que
+    # le lot 25 déclarait insoluble (« cinq images de plus n'y changeront rien »). L'approche
+    # par ancrage donne le meilleur écart MOYEN et ne corrige pas le régime : une moyenne
+    # identique pendant qu'un descripteur binaire bascule ne se moyenne pas.
+    #
+    # ⚠ Un tome sans illustration exploitable n'a pas de signature ; "mots" n'ajoute alors
+    # aucun mot, et `python run_illustration.py --check` le dit.
+    style: "mots"
+
+    # Nombre maximal de références d'IDENTITÉ retenues.
+    # ⚠ 2, et c'est un verdict de MESURE : « la rupture est entre 1 et 2, pas entre 2 et 3 »
+    # (docs/mesures/identite-2026-08-29.md §5.4). À 1 référence — une page entière — le modèle
+    # rend un COLLAGE ; à 2 un portrait cohérent ; la 3e est indiscernable de la 2e à l'œil
+    # comme au juge, et elle coûte 175 s de plus par image sur ce relevé.
+    # ⚠ Ce n'est PAS illustration.identite.references_max (3), qui est la limite TECHNIQUE du
+    # graphe : le nœud TextEncodeQwenImageEditPlus expose image1, image2, image3. Une limite
+    # mesurée et une limite câblée ne sont pas la même chose et n'ont pas à coïncider.
+    references_max: 2
+
+    # Nombre maximal d'ANCRES DE STYLE. 0 = l'approche 2 de l'étape 0.2 est DÉSARMÉE.
+    # ⚠ Le mécanisme est complet, testé, et livré éteint parce que la mesure ne soutient pas
+    # de l'armer : voir le tableau ci-dessus. Une ancre coûte en plus UNE PLACE du canal
+    # d'images — le graphe livré en expose trois, dont deux sont prises par l'identité — et
+    # 2,7 fois plus de temps sur ce relevé (324 s contre 119 s). Même règle que
+    # manga.onomatopees.effacement.mode: "aucun" (lot 22) et vram.decharger_image (lot 24).
+    #
+    # ⚠ Si tu l'armes : préfère une ancre SANS visage. Sur le corpus de référence, le modèle
+    # de vision a écarté les TROIS ancrages validés parce qu'ils portent des visages lisibles,
+    # et une ancre qui montre quelqu'un peut le faire apparaître dans l'image produite.
+    ancrages_max: 0
+
+    llm:
+      # Le LLM local CHOISIT les images de référence et dit pourquoi. Il ne rédige AUCUN
+      # attribut : ceux-là viennent de la bible, mot pour mot. Ce n'est pas une vérification,
+      # c'est une absence de branche dans illustration/prompt.py.
+      #
+      # ⚠ DÉSARMÉ par défaut : à false, la sélection reste déterministe, reproductible sans
+      # serveur, donc testable en CI. C'est aussi ce qui garde la phase 1 à moins d'une
+      # seconde — voir le coût mesuré ci-dessous.
+      actif: false
+
+      # Vide = modeles.traducteur (yume-27b, dont `ollama show` confirme la capacité vision
+      # et un projecteur CLIP de 460,73 M de paramètres).
+      modele: ""
+
+      # Côté de l'image envoyée au modèle de vision. 1024 : mesuré à 8,3 s par illustration
+      # au lot 23. Envoyer 6 Mpx bruts multiplierait l'encodage sans rien apprendre au
+      # projecteur, qui travaille de toute façon sur une grille réduite.
+      cote_vision: 1024
+
+      # Plafond de jetons du passage envoyé au LLM. 0 = decoupage.max_input_tokens (24 000).
+      # ⚠ Un chapitre entier ne passe pas : on DÉCOUPE, on ne tronque pas en silence. Une
+      # troncature muette ferait décrire une scène à partir d'un texte amputé sans que
+      # personne le sache. Un appel par image est le lot le plus petit possible, donc le plus
+      # fiable, et il rend le coût linéaire et mesurable.
+      max_input_tokens: 0
+
+  budget:
+    # Plafond d'images par run, motif d'arrêt NOMMÉ dans le journal et dans RAPPORT.md.
+    # ⚠ Il porte sur les IMAGES et non sur les personnages, parce que c'est l'image qui coûte :
+    # 103,7 s en médiane au lot 24, et jusqu'à 1 524 s au lot 25 selon ce que ComfyUI garde en
+    # VRAM. Un tome fait vingt illustrations ; `nombre_images: 4` sur huit personnages en fait
+    # trente-deux, et personne ne l'a demandé.
+    # Le dépôt a déjà cette culture : garde_fous.abandon_apres_timeouts_consecutifs,
+    # decoupage.max_input_tokens, budget unique rebranché en 2.2.0.
+    images_par_run: 8
+
+  marquage:
+    # Identifiant LOCAL de l'œuvre, écrit dans le PNG et dans le sidecar. Vide = un digest
+    # stable dérivé du nom du projet.
+    # ⚠ Le TITRE n'entre jamais dans les métadonnées. Le .gitignore refuse déjà d'exposer les
+    # titres comme noms de dossier (« le dépôt devient public, et l'arbre git exposait alors
+    # le NOM de chaque œuvre ») ; une image qui les porterait dans son PNG les exposerait le
+    # jour où elle est partagée par erreur. Le marquage lève plutôt que de laisser passer.
+    #
+    # ⚠ Il n'y a AUCUNE clé pour éteindre le marquage. AI Act art. 50(2), applicable depuis
+    # le 2026-08-02 : les sorties d'un système générant des images de synthèse doivent être
+    # marquées dans un format lisible par machine. Lecture retenue, datée et sourcée dans
+    # docs/ai-provenance.md — et signalée comme restant à confirmer.
+    identifiant_oeuvre: ""

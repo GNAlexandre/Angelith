@@ -60,6 +60,17 @@ provided `OFL.txt` travels with it and the origin is credited.
 > recorded licence and no reference from any code or configuration. It has been removed from
 > version control pending clarification of its redistribution rights. If you need it, install
 > it yourself and point `manga.typeset.font_path` at it.
+>
+> The file carries `©1995 Comicraft. All rights reserved. Unauthorized duplication
+> and/or use is a violation of applicable laws.` in its `name` table — it is a
+> commercial font, not an unlicensed unknown.
+>
+> **Derived files.** `tools/completer_police.py` produces `*_complet.ttf` from a font it
+> is given: a **derived work**, which inherits the original's rights. Most foundry
+> licences forbid modification. Such files are excluded from version control
+> (`.gitignore`), are never redistributed, and keep the original `nameID 0` copyright
+> with a derivation note appended. The tool prints this warning; running it on a font
+> you may not modify is the user's decision, not the project's.
 
 ## Corpora
 

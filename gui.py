@@ -23,52 +23,25 @@ Ce qu'elle n'apporte PAS, délibérément : aucun chemin de traitement qui lui s
 passe par `manga.orchestrator_manga.process_volume` et `manga.edition` — un tome retouché ici
 se relance à l'identique avec `run_manga.py`, et réciproquement.
 
+⚠ **Le démarrage ne charge rien** (2.25.0). Jusqu'à la 2.24.1, lancer l'interface OUVRAIT le
+premier projet par ordre alphabétique — un `Tome` lu, un `Services` construit, des aperçus
+composés — avant le premier pixel. La fenêtre s'ouvre maintenant sur un accueil qui ne touche à
+aucun tome, et les sept destinations de la nav latérale sont construites au premier affichage.
+Mesuré : 1,89 s → 0,13 s, 692 → 1 ouverture de fichier, 311 → 106 Mo
+(`docs/mesures/coquille-2026-09-04.md`).
+
 ⚠ `config.yaml` n'est jamais réécrit par l'interface. Ses commentaires sont sa documentation ;
 les réglages d'un run sont appliqués en mémoire, comme les drapeaux des CLI.
+
+⚠ **MISE À JOUR 2.31.0 (2026-09-06), lot 37 : le corps de `main` a déménagé dans
+`gui/lancement.py`**, sans une ligne réécrite. Motif : un point d'entrée de paquet s'écrit
+`module:fonction`, et ce fichier-ci n'est PAS importable — le dépôt porte un module `gui.py`
+et un paquet `gui/`, et Python résout le paquet. `python gui.py` continue de marcher à
+l'identique ; `angelith-gui` existe en plus.
 """
 from __future__ import annotations
 
-import argparse
-import sys
-
-from core import cli
-
-cli.configurer_stdout()
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser(
-        description="Interface graphique de Angelith (runs + édition des planches manga).")
-    ap.add_argument("--config", default="config.yaml")
-    ap.add_argument("--version", action="version", version=_version())
-    args = ap.parse_args()
-
-    try:
-        from PySide6.QtWidgets import QApplication
-    except ImportError:
-        raise SystemExit(
-            "L'interface graphique demande PySide6, qui n'est pas installé.\n"
-            "  → pip install -r requirements-gui.txt\n"
-            "  (les CLI `run.py` et `run_manga.py` fonctionnent sans.)")
-
-    config = cli.charger_config(args.config)
-    if "manga" not in config:
-        raise SystemExit(f"Aucune section « manga: » dans {args.config} — l'éditeur de "
-                         f"planches n'aurait rien à ouvrir.")
-
-    from gui.fenetre import Fenetre
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("Angelith")
-    fenetre = Fenetre(config, args.config)
-    fenetre.show()
-    sys.exit(app.exec())
-
-
-def _version() -> str:
-    from core.version import ETAT_BRIQUES, __version__
-    return f"Angelith {__version__} (brique manga : {ETAT_BRIQUES['manga']})"
-
+from gui.lancement import main
 
 if __name__ == "__main__":
     main()

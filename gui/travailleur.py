@@ -40,7 +40,6 @@ planches, il verrouille donc la totalité.
 from __future__ import annotations
 
 import queue
-import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +48,7 @@ from typing import Callable
 from PySide6.QtCore import QObject, QThread, Signal
 
 from core import cli, config as core_config, control
+from core.progression import progression_de_stage
 from core.reporter import Reporter
 
 # Genres de tâches. Le genre décide de ce que l'interface verrouille et de ce qu'elle affiche ;
@@ -59,8 +59,45 @@ GENRE_OCR = "ocr"                  # relire une bulle
 GENRE_TRADUCTION = "traduction"    # retraduire une bulle
 GENRE_REPRISE = "reprise"          # nettoyer + lire + traduire une zone (lot 21)
 GENRE_ASSEMBLAGE = "assemblage"    # CBZ / PDF
+# Gestes qui ne touchent PAS un tome ouvert : copier des sources sous `sources/`,
+# fusionner un glossaire, faire tourner un diagnostic. Ils passent quand même par la
+# file d'écriture, parce qu'une archive de plusieurs centaines de mégaoctets copiée sur
+# le fil d'affichage gèle la fenêtre pour toute sa durée — et qu'un import de glossaire
+# réécrit `sources/<Projet>/glossaire.yaml`, qui est partagé avec le light novel.
+GENRE_CREATION = "creation"        # copie de sources, import de glossaire, diagnostic
+# Lot 27 — l'atelier d'illustration. `planche=None` : il ne touche à aucune planche, et il
+# n'écrit que dans le dossier de sa brique. Il passe quand même par la file d'écriture, pour
+# la raison mesurée du lot 27 : une génération coûte 103,7 s en médiane et jusqu'à 1 524 s
+# (RX 7900 XT, n = 4 puis pire cas relevé), et la fenêtre serait gelée d'autant.
+GENRE_ILLUSTRATION = "illustration"
 GENRE_APERCU = "apercu"            # composition des calques de texte d'une planche
 GENRE_VIGNETTE = "vignette"        # imagette de la pellicule
+# Lot 31 — les trois sondes de l'accueil (endpoint LLM, poids de détection, Pandoc). Elles
+# passent par cette file parce que la première est un appel RÉSEAU : un Ollama arrêté répond
+# par un délai d'attente, et sur le fil d'affichage ce serait la fenêtre gelée avant le
+# premier pixel. Cf. `gui/sondes.py`.
+GENRE_SONDE = "sonde"
+#: Le balayage de la bibliothèque des œuvres (lot 34). **Lecture seule** : des `scandir` et
+#: des `stat`, aucune écriture, aucune image ouverte, aucun modèle chargé.
+GENRE_BIBLIOTHEQUE = "bibliotheque"
+#: Lot 36 — le diagnostic complet des deux briques (`core/diagnostic.py`). Un genre à lui, et
+#: pas `GENRE_SONDE` : les deux ne verrouillent rien, mais leurs RÉSULTATS vont à deux endroits
+#: differents — les trois marqueurs de l'accueil d'un côté, la page Diagnostic de l'autre. Les
+#: confondre obligerait `_sur_fin` à deviner de quelle tâche il tient le résultat, ce que le
+#: dépôt refuse déjà ailleurs (« ce n'est PAS deviné sur un libellé »).
+#: ⚠ Comme la sonde, il n'écrit rien : il entre donc dans `GENRES_SANS_VERROU`, faute de quoi
+#: il grillerait le bouton « Lancer » pendant les douze secondes du délai réseau.
+GENRE_DIAGNOSTIC = "diagnostic"
+
+#: Le téléchargement d'une mise à jour — lot 40.
+#:
+#: ⚠ **Il n'entre PAS dans `GENRES_SANS_VERROU`**, à la différence de la sonde et du
+#: diagnostic, et le motif n'est pas qu'il écrirait dans le tome : il écrit dans un dossier
+#: temporaire et ne touche rien du projet. Il en est exclu parce qu'il dure ~115 s (292 Mio à
+#: 2,5 Mio/s, mesuré le 2026-09-06) et qu'il **se termine par la fermeture de
+#: l'application** : laisser « Lancer » cliquable pendant ce temps proposerait de démarrer un
+#: run de plusieurs heures à quelqu'un qui vient de demander à quitter pour se mettre à jour.
+GENRE_MAJ = "maj"
 
 LIBELLES_GENRE = {
     GENRE_RUN: "run",
@@ -69,9 +106,62 @@ LIBELLES_GENRE = {
     GENRE_TRADUCTION: "traduction",
     GENRE_REPRISE: "reprise de bulle",
     GENRE_ASSEMBLAGE: "assemblage",
+    GENRE_CREATION: "création",
+    GENRE_ILLUSTRATION: "atelier d'illustration",
     GENRE_APERCU: "composition de l'aperçu",
     GENRE_VIGNETTE: "vignette",
+    GENRE_SONDE: "sonde d'installation",
+    GENRE_BIBLIOTHEQUE: "lecture de la bibliothèque",
+    GENRE_DIAGNOSTIC: "diagnostic",
+    GENRE_MAJ: "téléchargement de la mise à jour",
 }
+
+#: Genres qui portent `planche=None` **sans pour autant toucher le tome**.
+#:
+#: ⚠ `touche_tout()` répondait « oui » à toute tâche sans numéro de planche, ce qui est juste
+#: pour un `process_volume` — il réécrit n'importe quel checkpoint — et faux pour une sonde,
+#: qui fait trois lectures et n'ouvre aucun fichier du tome. Sans cette liste, les trois sondes
+#: de l'accueil grisaient le bouton « Lancer » pendant les deux secondes du délai réseau, à
+#: chaque démarrage : un verrou d'écriture posé par un travail qui n'écrit rien.
+#: ⚠ `GENRE_BIBLIOTHEQUE` y entre pour la raison exacte que la docstring de `touche_tout`
+#: donne pour la sonde : le balayage ne fait que LIRE des entrées de répertoire, et lui
+#: laisser griser le bouton « Lancer » pendant la seconde qu'il dure affaiblirait la
+#: LISIBILITÉ du verrou de run, pas sa force.
+GENRES_SANS_VERROU: frozenset[str] = frozenset({GENRE_SONDE, GENRE_BIBLIOTHEQUE,
+                                                 GENRE_DIAGNOSTIC})
+
+#: Ce qu'on peut FAIRE, par famille d'échec. Le texte technique reste au journal ; la ligne
+#: qui remonte à l'écran dit ce qui s'est passé et ce qu'on peut tenter.
+#:
+#: ⚠ `f"{type(err).__name__} : {err}"` était la seule chose que l'utilisateur voyait d'un
+#: échec — `PermissionError`, `ErreurEdition`, `KeyError` — dans la barre d'état comme dans le
+#: journal. Un nom de classe Python n'est pas un message : il est excellent dans un rapport de
+#: bug et inutilisable au moment où l'on cherche quoi faire. Il reste donc au JOURNAL, où il
+#: sert, et la ligne visible porte la conduite à tenir (`PLAN-19` L19.7).
+CONDUITES: tuple[tuple[type, str], ...] = (
+    (PermissionError, "Un fichier est ouvert ailleurs ou protégé en écriture. Ferme ce qui "
+                      "lit le dossier de build, puis réessaie."),
+    (FileNotFoundError, "Un fichier attendu n'est plus là. Le tome a peut-être été déplacé, "
+                        "ou un run l'a réécrit pendant ce geste."),
+    (MemoryError, "La mémoire a manqué. Baisse « Planches préchargées » et le plafond du "
+                  "cache d'aperçus dans « Projet → Préférences… »."),
+    (OSError, "L'accès au disque a échoué. Vérifie l'espace libre et les droits sur le "
+              "dossier de build."),
+)
+
+#: Ce qui est dit quand aucune conduite ne s'applique. Il ne PRÉTEND pas savoir : la seule
+#: chose honnête à dire est où regarder.
+CONDUITE_PAR_DEFAUT = "Le détail technique est dans le journal (Ctrl+J)."
+
+
+def message_utilisateur(err: BaseException, genre: str) -> str:
+    """Ce que l'écran affiche d'un échec : ce qui s'est passé, et ce qu'on peut faire."""
+    quoi = LIBELLES_GENRE.get(genre, genre)
+    for classe, conduite in CONDUITES:
+        if isinstance(err, classe):
+            return f"{quoi} : {err}. {conduite}"
+    return f"{quoi} : {err}. {CONDUITE_PAR_DEFAUT}"
+
 
 # Genres qui ne font que LIRE. Ils passent par `FilDeLecture` et ne verrouillent aucune
 # planche : rien n'est écrit, donc il n'y a rien à protéger de l'utilisateur.
@@ -105,6 +195,12 @@ class SignauxTravail(QObject):
 
     ligne = Signal(str, str)                # (niveau, texte) — info | stage | verbose | warn
     progression = Signal(int, int)          # (courant, total) ; total 0 = indéterminé
+    # Lot 32 — les deux canaux qui manquaient à la barre : la PHASE du run et l'OBJET en
+    # cours. Trois chaînes, et une chaîne vide veut dire « inchangé » : un seul signal
+    # plutôt que trois évite qu'un ordre de délivrance décide de ce qui s'affiche.
+    #   (phase, objet, detail) — phase = identifiant de `core/progression.PHASES`,
+    #   objet = nom de fichier ou plage de lot, detail = « bloc 3/10 ».
+    contexte = Signal(str, str, str)
     debut = Signal(object, str, str)        # (planche | None, genre, libellé)
     fin = Signal(object, str, bool, str)    # (planche | None, genre, succès, message)
     file = Signal(int)                      # tâches restantes, celle en cours comprise
@@ -148,15 +244,37 @@ class ReporterQt(Reporter):
 
     def stage(self, name: str) -> None:
         self._dire("stage", name)
-        # « Page 12/131 — … » et « Lot planches 21→40 … » sont les deux formes que la brique
-        # manga produit ; on en tire la progression sans imposer un second canal à
-        # l'orchestrateur, qui n'a pas à connaître l'interface.
+        # Repli pour les libellés NON instrumentés. Là où l'orchestrateur appelle `progres`,
+        # c'est lui qui fait foi ; ici on continue de lire « Page 12/131 » dans le texte, ce
+        # qui garde la barre vivante sur les étapes qui n'ont pas encore de canal chiffré.
         courant, total = progression_de_stage(name)
         if courant:
             self.signaux.progression.emit(courant, total)
 
+    def progres(self, courant: int, total: int, objet: str = "") -> None:
+        """Canal CHIFFRÉ. Ce que `stage` devinait, l'orchestrateur le dit.
+
+        ⚠ L'objet part AVANT le compte. Les deux signaux traversent vers le fil d'affichage
+        dans l'ordre d'émission, et un bandeau qui se repeint sur le compte doit déjà
+        connaître le nom de ce qu'il annonce — sinon la planche 84 s'affiche une fraction de
+        seconde sous le nom de la 83."""
+        if objet:
+            self.signaux.contexte.emit("", objet, "")
+        self.signaux.progression.emit(courant, total)
+
+    def phase(self, identifiant: str, libelle: str = "") -> None:
+        """La phase du run change (lot 32)."""
+        self.signaux.contexte.emit(identifiant, "", "")
+
     def block(self, idx: int, total: int) -> None:
-        self.signaux.progression.emit(idx, total)
+        """Un bloc de plus. **N'avance plus la barre**, et c'est le correctif du lot 32.
+
+        Un bloc redémarre à 1 à chaque étage de chaque chapitre : le faire porter la
+        progression, c'est ce qui faisait reculer la barre 66 fois sur un tome de 25
+        chapitres et changer de dénominateur 6 fois. Le bloc dit très bien où l'on en est
+        DANS l'étape — il part donc dans le détail du bandeau, où il est enfin lisible, et
+        c'est le chapitre qui porte l'avancement."""
+        self.signaux.contexte.emit("", "", f"bloc {idx}/{total}")
 
     def info(self, msg: str) -> None:
         self._dire("info", msg)
@@ -177,22 +295,13 @@ class ReporterQt(Reporter):
                            f"sauvegardé, relance pour reprendre.")
 
 
-_RE_PAGE = re.compile(r"Page (\d+)/(\d+)")
-_RE_LOT = re.compile(r"Lot planches (\d+)→(\d+)")
-
-
-def progression_de_stage(nom: str) -> tuple[int, int]:
-    """`(courant, total)` extrait d'un libellé d'étape, ou `(0, 0)`.
-
-    Volontairement tolérant : si un jour le libellé change, la barre cesse d'avancer et rien
-    d'autre ne casse. Une progression est un confort, pas une donnée."""
-    m = _RE_PAGE.search(nom)
-    if m:
-        return int(m.group(1)), int(m.group(2))
-    m = _RE_LOT.search(nom)
-    if m:
-        return int(m.group(1)), 0
-    return 0, 0
+# ⚠ `progression_de_stage` vit désormais dans `core/progression.py` — même fonction, même
+# docstring, même test, et `from gui.travailleur import progression_de_stage` continue de
+# marcher (l'import ci-dessus la rend attribut de ce module). Elle a déménagé pour une seule
+# raison : un repli de progression n'a rien à faire dans un module qui importe Qt. Le lot 32
+# rejoue des traces réelles dans le modèle, et ce rejeu doit tourner **sans PySide6** — c'est
+# la règle de couche du dépôt, appliquée à une fonction qui la respectait déjà sans pouvoir
+# le prouver.
 
 
 class FilDeTravail(QThread):
@@ -235,8 +344,14 @@ class FilDeTravail(QThread):
         return self._en_cours[0] if self._en_cours else None
 
     def touche_tout(self) -> bool:
-        """Une tâche globale (un run) est en cours : plus rien n'est éditable."""
-        return self._en_cours is not None and self._en_cours[0] is None
+        """Une tâche globale (un run) est en cours : plus rien n'est éditable.
+
+        ⚠ `GENRES_SANS_VERROU` en est exclu. Le verrou global existe parce qu'un
+        `process_volume` peut réécrire n'importe quel checkpoint ; une sonde d'installation ne
+        touche aucun fichier du tome, et lui laisser griser le bouton « Lancer » serait
+        affaiblir la LISIBILITÉ du verrou, pas sa force."""
+        return (self._en_cours is not None and self._en_cours[0] is None
+                and self._en_cours[1] not in GENRES_SANS_VERROU)
 
     def en_attente(self) -> int:
         return self._file.qsize()
@@ -261,9 +376,13 @@ class FilDeTravail(QThread):
                 self.signaux.fin.emit(tache.planche, tache.genre, True, message)
             except Exception as err:              # noqa: BLE001 — remonté à l'écran
                 self._en_cours = None
-                self.signaux.ligne.emit("warn", f"{type(err).__name__} : {err}")
+                # ⚠ DEUX messages, et c'est la décision de L19.7. Le premier garde le nom de
+                # classe : c'est ce qui rend un rapport de bug exploitable, et le journal est
+                # fait pour ça. Le second est ce que l'utilisateur lit dans la barre d'état —
+                # il dit ce qui a échoué et ce qu'on peut tenter.
+                self.signaux.ligne.emit("verbose", f"{type(err).__name__} : {err}")
                 self.signaux.fin.emit(tache.planche, tache.genre, False,
-                                      f"{type(err).__name__} : {err}")
+                                      message_utilisateur(err, tache.genre))
             self.signaux.file.emit(self._file.qsize())
 
 
@@ -456,12 +575,26 @@ def build_dir_de(config: dict, brique: str, projet: str, tome: str) -> Path:
 
 def tache_run(*, brique: str, projet: str, tome: str, config: dict, reporter: Reporter,
               force: bool = False, depuis: str | None = None,
-              page: int | None = None) -> Tache:
+              page: int | None = None, format_planche: str | None = None,
+              langue: str | None = None, conf: float | None = None,
+              iou: float | None = None, keep_awake: bool = False) -> Tache:
     """Un `process_volume`, avec l'enveloppe d'énergie et de modèles de `run_manga.py`.
 
     La recopier plutôt que l'inventer garantit qu'un run lancé d'ici laisse la machine dans le
     même état qu'un run lancé au terminal : VRAM libérée, et modèle préchargé seulement s'il
-    va réellement servir (la garde `traduira`)."""
+    va réellement servir (la garde `traduira`).
+
+    ⚠ **`keep_awake` est tenu ICI, `shutdown` ne l'est PAS**, et la ligne entre les deux est
+    celle du lot 33. L'anti-veille dure exactement le temps du travail : elle a donc sa place
+    dans la tâche, avec un `finally` qui la lève même si le run lève. L'extinction, elle,
+    commence quand le travail est FINI, doit rester visible et annulable pendant deux minutes,
+    et survivrait mal à un fil de travail qui se termine : elle est tenue par la fenêtre
+    (`gui/extinction.py`, `Fenetre._armer_extinction`).
+
+    `langue`, `conf` et `iou` sont les équivalents de `--langue`, `--conf` et `--iou`. ⚠ Les
+    deux seuils EXIGENT `page` — c'est le contrat de `process_volume` — et
+    `gui/parametres.appliquer()` les retire quand la portée est le tome, plutôt que de laisser
+    l'orchestrateur refuser après avoir chargé son modèle de détection."""
 
     def _travail():
         if brique == "manga":
@@ -473,7 +606,9 @@ def tache_run(*, brique: str, projet: str, tome: str, config: dict, reporter: Re
 
             def appel():
                 return process_volume(projet, tome, config, reporter=reporter, force=force,
-                                      restart_from=depuis, only_page=page)
+                                      restart_from=depuis, only_page=page,
+                                      format_planche=format_planche, langue=langue,
+                                      conf_threshold=conf, iou_threshold=iou)
         else:
             from pipeline.orchestrator import process_volume
             llm_cfg = config["llm"]
@@ -484,6 +619,11 @@ def tache_run(*, brique: str, projet: str, tome: str, config: dict, reporter: Re
                                       restart_from=depuis, only_chapter=page)
 
         dry = bool(config.get("options", {}).get("dry_run"))
+        # Le message est celui de la ligne de commande, et il part au JOURNAL plutôt qu'à
+        # stdout : `cli.preparer_veille` l'imprime, ce que personne ne lit dans une fenêtre.
+        inhibiteur = cli.preparer_veille(bool(keep_awake), "")
+        if keep_awake:
+            reporter.info("Veille du PC empêchée pour la durée du run (levée à la fin).")
         cli.precharger_modeles(config, modeles, dry_run=dry, base_url=llm_cfg.get("base_url"))
         try:
             termine = appel()
@@ -491,11 +631,16 @@ def tache_run(*, brique: str, projet: str, tome: str, config: dict, reporter: Re
             # Blindé comme le `finally` des deux CLI : la VRAM se libère même si le run lève,
             # et même si l'utilisateur ferme la fenêtre.
             cli.shielded_unload(config, modeles, base_url=llm_cfg.get("base_url"))
+            if keep_awake:
+                from core import power
+                power.release()
+                power.stop_inhibitor(inhibiteur)
         return ("Run terminé." if termine
                 else "Run arrêté proprement — relance pour reprendre.")
 
     return Tache(genre=GENRE_RUN, fonction=_travail, planche=None,
                  libelle=f"Run {brique} — {projet} / {tome}"
+                         + (f" (format {format_planche})" if format_planche else "")
                          + (f", planche {page}" if page else ""))
 
 

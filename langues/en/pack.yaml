@@ -1,0 +1,254 @@
+# Target-language pack — ENGLISH
+#
+# Everything that depends on the output language when translating INTO English. See
+# langues/README.md for the anatomy of a pack.
+#
+# ⚠ This pack is an ADAPTATION of langues/fr, not a translation of it. The places where the
+# two genuinely differ are commented below — they are the reason a pack is a directory of
+# data and not a table of strings.
+
+code: en
+nom: English
+
+# Accord grammatical : AUCUN, et c'est une réponse complète, pas une implémentation en
+# attente. L'anglais n'a ni genre grammatical, ni élision, ni déterminant à réécrire :
+# le forçage s'y réduit à la substitution, ce qui est exactement ce qu'il doit être.
+accord: aucun
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TYPOGRAPHY
+# ─────────────────────────────────────────────────────────────────────────────
+typographie:
+  # Curly double quotes, per style_guide.md. The copy-editor normalises straight ASCII
+  # quotes to these, so by the time the layout agent runs, dialogue is delimited by them.
+  guillemets: ["“", "”"]
+
+  # ⚠ NO dash opens an English line of dialogue — the quotes do that work. The French pack
+  # sets "—" here because French convention opens a reply with an em dash and no quotes.
+  # Left as an em dash only so that `dialogue_dash_in_text: true` has something to use if a
+  # project deliberately wants the French look.
+  tiret_dialogue: "—"
+  tiret_dans_le_texte: false
+
+  fin_de_phrase: ";.!?…"
+
+  # ⚠ ATTRIBUTION CLAUSES — the clearest example of why this is a pack FUNCTION and not a
+  # translated word list.
+  #
+  # French attribution INVERTS and puts the verb first: « dit-il », « hurla-t-elle ». The
+  # French pattern is therefore anchored straight onto the verb.
+  #
+  # English does not invert. It writes `"Go!" she shouted` — the segment after the closing
+  # quote begins with the SUBJECT, not the verb. Anchoring on the verb, as the French pack
+  # does, would match almost nothing here and every attribution clause would be split off
+  # into its own narration paragraph.
+  #
+  # Hence the optional subject group in front: a pronoun, or a capitalised name (possibly
+  # preceded by an article or a title). Both `she shouted` and `shouted the girl` match, as
+  # does `Captain Vance replied`.
+  verbes_de_parole: >-
+    (?:(?:he|she|they|it|I|we|you|the|a|an|[A-Z][\w'’-]*)\s+){0,3}(?:said|says|asked|answered|replied|responded|repeated|added|continued|went\s+on|shouted|yelled|called|cried|exclaimed|snapped|barked|whispered|murmured|muttered|mumbled|breathed|sighed|groaned|growled|grunted|hissed|laughed|chuckled|scoffed|insisted|objected|declared|announced|admitted|confessed|offered|urged|warned|thought|wondered|mused|reflected|decided|concluded)\b
+
+  titre_guide_de_style: "Style guide"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OUTPUT STYLES
+# ─────────────────────────────────────────────────────────────────────────────
+# Same XML style names as the French pack: templates/reference.docx is the same document,
+# and its styles are named in English inside the file regardless of the interface language.
+styles_word:
+  dialogue: "List Paragraph"
+  pensee: "Pensée"
+
+classes_css:
+  dialogue: dialogue
+  pensee: pensee
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INSTRUCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚠ A non-French pack MUST declare all seven. A missing key falls back to the French text
+# left at its call site in the code — which would silently emit French instructions in the
+# middle of an English run.
+consignes:
+  naturalisation_minimale: >-
+    MINIMAL editing: fix only narrative tense, subject-verb agreement, articles and number,
+    and FLAGRANT calques. Everywhere else, keep the words and the order.
+
+  naturalisation_legere: >-
+    LIGHT rewording: beyond the minimum, un-calque phrasing that "reads translated"
+    (carried-over topic-comment order, chains of "and then", stacked relative clauses) when a
+    more idiomatic English sentence says EXACTLY the same thing.
+
+  naturalisation_moderee: >-
+    MODERATE rewording: rewrite into fluent, idiomatic English EVERY sentence that reads like
+    a translation, preserving meaning, terminology, register and information.
+
+  naturalisation_marquee: >-
+    MARKED rewording: aim for the naturalness of a published novel; restructure a whole
+    sentence without hesitation so that it reads as English, without ever betraying the
+    meaning or omitting information.
+
+  titre_chapitre: >-
+    You translate a light-novel CHAPTER TITLE into natural, concise English. Follow the
+    glossary terminology STRICTLY (proper nouns, exact case). If the title is already in
+    English, return it unchanged. Answer ONLY with the translated title, on a single line,
+    with no quotes and no commentary.
+
+  # ⚠ Only the `nom` line of the CJK romanisation instruction — the rest of that instruction
+  # is language-neutral and stays in the code.
+  romanisation_rendu: >-
+    - `nom` = what the ENGLISH reader will read. Always in the Latin alphabet. Hepburn
+    romanisation for a proper noun (character, place, organisation); an English translation
+    for a common noun, a concept, a title or a function.
+
+  traduction_unitaire: >-
+    Translate into English the SINGLE line below, taken from a comics plate. Answer with the
+    translation and NOTHING else: no number, no quotes, no commentary, no variant.
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # MANGA — the fragments the comics path assembles itself (lot 15, L7.12)
+  # ───────────────────────────────────────────────────────────────────────────
+  # ⚠ These sixteen used to be French f-strings inside `manga/orchestrator_manga.py` and
+  # `manga/traduction_unitaire.py`. Their French text still lives at its call site, in
+  # `manga/consignes.py` — this pack OVERRIDES it, it does not duplicate it.
+  #
+  # ⚠ The `{...}` fields are filled by the code. A field the code does not provide, or an
+  # unbalanced brace, makes `manga.consignes.verifier()` refuse the pack AT STARTUP — never
+  # in the middle of a six-hour run. Available fields: {budget} {bulles} {debut} {fin}
+  # {groupe} {hauteur} {langue} {largeur} {numero} {ordre} {origine} {planche} {planches}
+  # {rang} {texte}.
+  #
+  # ⚠ `{langue}` is the SOURCE language name, and it comes out FRENCH ("japonais") — it is
+  # produced by `core.glossary_lang.NOMS`, which the inventory (§5) lists as still coupled to
+  # French. That is a known item, out of this lot's scope; do not work around it here.
+
+  traduction_unitaire_place: >-
+    Available space: {largeur}×{hauteur} px — aim for ≤ {budget} characters.
+
+  traduction_unitaire_replique: "Line, source language {langue}:"
+
+  manga_gabarit_ligne: "{numero}. {largeur}×{hauteur} px — aim for ≤ {budget} characters"
+
+  manga_gabarits_entete: >-
+    Space available per bubble — this is a layout constraint, not a goal: overflowing forces
+    an unreadable font size, but CUTTING THE MEANING is worse. When a faithful line does not
+    fit, render it faithfully: the letterer knows how to flag an overflow, it cannot guess
+    what you dropped.
+
+  manga_separateur_planche: "— Plate {planche} (bubbles {debut} to {fin}) —"
+
+  manga_lot_consigne: >-
+    {planches} consecutive plates, {bulles} bubbles in total. Numbering is CONTINUOUS from
+    one plate to the next: return exactly {bulles} numbered lines from 1 to {bulles}, without
+    repeating the plate separators.
+
+  manga_precedentes_entete: "Lines from the preceding plates (context, DO NOT retranslate):"
+
+  manga_precedente_ligne: "- {origine}: {texte}"
+
+  manga_bulles_entete: "Detected bubbles, source language {langue} (reading order, {ordre}):"
+
+  manga_echantillon_entete: "Sample of the volume's text, source language {langue}:"
+
+  manga_hors_bulle_entete: >-
+    Text zones outside the bubbles, source language {langue} (reading order, {ordre}):
+
+  # Lot 21, L21.3 — seconde voie de LECTURE des zones hors bulle. Elle demande une
+  # transcription et non une traduction : les deux voies doivent rester comparables
+  # (`manga/sfx_lecture.py`). La ligne vide sur du dessin est la partie qui compte.
+  manga_sfx_lecture_entete: >-
+    The attached images are text zones cropped from a comic page, in {langue}. For each
+    one, TRANSCRIBE the characters you see — do not translate, do not comment, do not
+    interpret.
+
+    If an image carries no legible text (artwork, a flat tone, a stray stroke), return an
+    EMPTY LINE after its number: that is a correct answer, and by far the most useful one.
+
+    Reply with exactly {zones} numbered lines, "N. transcription", in order, with no other
+    text.
+
+  manga_ordre_droite_gauche: "right → left, then top → bottom"
+
+  manga_ordre_gauche_droite: "left → right, then top → bottom"
+
+  manga_groupe_entete: "— Group {groupe} —"
+
+  # ⚠ Do NOT say "panel": `ocr._coupe_xy` detects no panel, it cuts gutters. Announcing panels
+  # would make the model infer a precision that does not exist.
+  manga_structure_note: >-
+    How to read this plate's annotations:
+
+    - "— Group N —" separates blocks of bubbles set apart by a break in the layout. These are
+    not detected panels: a line at the head of a group is often a new turn of speech or a
+    change of shot — do not continue the previous sentence across the break.
+
+    - "(pensée)", "(récitatif)", "(cri)" qualify the SHAPE of the bubble, not its content: a
+    thought reads as inner voice, a caption as narration, a shout stays short and blunt. A
+    bubble with no mention is ordinary dialogue, or a shape that could not be decided: treat
+    it normally.
+
+    - "[A]", "[B]" are PROBABLE speakers, inferred from the direction of the bubble tails, and
+    valid on this plate only. Two bubbles marked [A] are probably the same person, two
+    different marks probably an exchange. Use that for forms of address, agreement and
+    pronouns — never to invent a name.
+
+  manga_image_planche: "Attached image no. {rang} is plate {planche}."
+
+  manga_image_zone: "Attached image no. {rang} is zone {rang}."
+
+  manga_origine_planche: "Plate N-{ecart}"
+
+  # Bubble-type mentions. ⚠ They are the only annotation the model sees INSIDE the
+  # numbered list, so they must read as English or they break the line they annotate.
+  manga_type_pensee: "(thought)"
+
+  manga_type_recitatif: "(caption)"
+
+  manga_type_cri: "(shout)"
+
+  manga_crops_entete: >-
+    The first attempt on this plate was rejected by a guard. The attached images are zones of
+    the plate, in group order: use them to read what the OCR got wrong.
+
+  # --- Proofreader (lot 15, L7.9) — the agent is OFF by default ---------------
+  #
+  # ⚠ The four RULE NAMES stay French (`registre`, `accord`, `contradiction`,
+  # `glossaire`): `manga.relecture._LIGNE` matches on them, and a translated name is a
+  # proposal the code discards unread. Everything around them is English.
+  manga_relecteur: >-
+    You are proofreading a plate that has already been translated. Your mandate is NARROW: you
+    correct ONLY what violates one of the named rules below, and you touch nothing else — not
+    the style, not the rhythm, not the wording, not the punctuation.
+
+    Rules, and their exact names (keep them in French, they are matched literally):
+
+    - registre : inconsistent forms of address between two bubbles of the same exchange
+
+    - accord : gender or number agreement an isolated bubble could not settle
+
+    - contradiction : the line contradicts the one it answers
+
+    - glossaire : a glossary term is in the source and absent from the rendering
+
+    Answer with ONE LINE PER CORRECTION, in this strict format:
+
+    bubble_number | rule_name | full corrected line
+
+    If nothing violates a rule, answer exactly « RAS » and nothing else. A line that does not
+    name a rule from the list is discarded unread: do not propose out-of-mandate improvements,
+    they will be lost.
+
+  manga_relecteur_manques: "Glossary terms present in the source and absent from the rendering:"
+
+  manga_relecteur_manque_ligne: "- bubble {bulle}: « {source} » should render as « {nom} »"
+
+  manga_relecteur_source: "Source, in reading order:"
+
+  manga_relecteur_rendu: "Translation in place:"
+
+  # ⚠ NOT a prompt fragment: this is the caption a READER sees, printed under every AI
+  # illustration inserted into a volume (illustration.inserer_dans_sorties). It has no
+  # off switch — core/insertion.py raises on an empty caption.
+  legende_illustration_ia: >-
+    AI-generated illustration — not part of the original work

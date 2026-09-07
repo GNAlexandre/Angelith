@@ -1,0 +1,124 @@
+{
+ "corpus": "tests\\corpus\\synthetique",
+ "licence": "AGPL-3.0-or-later — généré par tools/corpus_synthetique.py, aucune œuvre tierce",
+ "planches": [
+  {
+   "verite": 8,
+   "predites": 7,
+   "trouvees": 7,
+   "fausses": 0,
+   "zero_alors_que_texte": false,
+   "fusions": 0,
+   "par_tranche": {
+    "≥40000": [
+     7,
+     7
+    ],
+    "2000–10000": [
+     0,
+     1
+    ]
+   },
+   "planche": "bande_webtoon_01.png",
+   "regime": "webtoon"
+  },
+  {
+   "verite": 7,
+   "predites": 5,
+   "trouvees": 5,
+   "fausses": 0,
+   "zero_alors_que_texte": false,
+   "fusions": 0,
+   "par_tranche": {
+    "≥40000": [
+     3,
+     4
+    ],
+    "0–2000": [
+     0,
+     1
+    ],
+    "10000–40000": [
+     2,
+     2
+    ]
+   },
+   "planche": "page_manga_01.png",
+   "regime": "manga"
+  },
+  {
+   "verite": 7,
+   "predites": 6,
+   "trouvees": 6,
+   "fausses": 0,
+   "zero_alors_que_texte": false,
+   "fusions": 0,
+   "par_tranche": {
+    "≥40000": [
+     4,
+     4
+    ],
+    "0–2000": [
+     0,
+     1
+    ],
+    "10000–40000": [
+     2,
+     2
+    ]
+   },
+   "planche": "page_manga_02.png",
+   "regime": "manga"
+  }
+ ],
+ "global": {
+  "planches": 3,
+  "zéro alors que texte": 0,
+  "fausses/planche": 0.0,
+  "rappel": 0.8182,
+  "précision": 1.0,
+  "F1": 0.9,
+  "bulles annotées": 22,
+  "bulles détectées": 18,
+  "doubles non scindées": 0,
+  "rappel par taille": {
+   "0–2000": 0.0,
+   "10000–40000": 1.0,
+   "2000–10000": 0.0,
+   "≥40000": 0.933
+  }
+ },
+ "par_regime": {
+  "manga": {
+   "planches": 2,
+   "zéro alors que texte": 0,
+   "fausses/planche": 0.0,
+   "rappel": 0.7857,
+   "précision": 1.0,
+   "F1": 0.88,
+   "bulles annotées": 14,
+   "bulles détectées": 11,
+   "doubles non scindées": 0,
+   "rappel par taille": {
+    "0–2000": 0.0,
+    "10000–40000": 1.0,
+    "≥40000": 0.875
+   }
+  },
+  "webtoon": {
+   "planches": 1,
+   "zéro alors que texte": 0,
+   "fausses/planche": 0.0,
+   "rappel": 0.875,
+   "précision": 1.0,
+   "F1": 0.9333,
+   "bulles annotées": 8,
+   "bulles détectées": 7,
+   "doubles non scindées": 0,
+   "rappel par taille": {
+    "2000–10000": 0.0,
+    "≥40000": 1.0
+   }
+  }
+ }
+}

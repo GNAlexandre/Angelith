@@ -534,6 +534,43 @@ def titrer(doc: DocumentEpub, label_toc: str | None, titre_max: int) -> None:
 # Point d'entrée
 # --------------------------------------------------------------------------- #
 
+def _analyser_document(z, idref: str, item: dict, toc_href: str, noms: set[str],
+                       *, ruby: str, sur_image) -> DocumentEpub | None:
+    """UN document du spine, analysé. `None` s'il n'a pas sa place dans le texte du tome."""
+    href = item["href"]
+    if href == toc_href or "nav" in item["properties"].split():
+        return None                      # document de navigation : jamais du texte
+    if href not in noms:
+        return None
+    base = posixpath.dirname(href)
+    analyseur = _Analyseur(ruby=ruby, sur_image=lambda s: sur_image(s, base))
+    try:
+        analyseur.feed(_texte_xml(z.read(href)))
+        analyseur.close()
+    except Exception:
+        # Un document mal formé ne doit pas faire échouer tout le tome : on garde ce qui a
+        # été analysé avant l'incident et on continue.
+        pass
+    if not analyseur.lignes:
+        return None
+    doc = DocumentEpub(idref=idref, href=href)
+    doc.lignes = analyseur.lignes
+    doc.a_un_titre = analyseur.a_un_titre
+    doc.comptes = analyseur.comptes
+    return doc
+
+
+def _fusionner_comptes(documents: list[DocumentEpub]) -> dict[str, Counter]:
+    """Lectures fusionnées sur tout le spine : un nom propre glosé une seule fois, à sa
+    première occurrence, doit rester disponible pour les chapitres suivants — c'est la
+    convention des EPUB japonais, qui ne re-glosent pas à chaque page."""
+    comptes: dict[str, Counter] = {}
+    for d in documents:
+        for base, c in d.comptes.items():
+            comptes.setdefault(base, Counter()).update(c)
+    return comptes
+
+
 def extract_epub(path: Path, media_dir: Path, extract_images: bool = True,
                  epub_cfg: dict | None = None) -> Extracted:
     """Extrait un EPUB en markdown-léger, images comprises. Voir la docstring du module."""
@@ -569,37 +606,13 @@ def extract_epub(path: Path, media_dir: Path, extract_images: bool = True,
             images.append(rel)
             return marqueur
 
-        documents: list[DocumentEpub] = []
-        for idref in spine:
-            item = manifeste[idref]
-            href = item["href"]
-            if href == toc_href or "nav" in item["properties"].split():
-                continue                     # document de navigation : jamais du texte
-            if href not in noms:
-                continue
-            base = posixpath.dirname(href)
-            doc = DocumentEpub(idref=idref, href=href)
-            analyseur = _Analyseur(ruby=ruby, sur_image=lambda s, b=base: _faire_image(s, b))
-            try:
-                analyseur.feed(_texte_xml(z.read(href)))
-                analyseur.close()
-            except Exception:
-                # Un document mal formé ne doit pas faire échouer tout le tome : on garde ce
-                # qui a été analysé avant l'incident et on continue.
-                pass
-            doc.lignes = analyseur.lignes
-            doc.a_un_titre = analyseur.a_un_titre
-            doc.comptes = analyseur.comptes
-            if doc.lignes:
-                titrer(doc, toc.get(href), titre_max)
-                documents.append(doc)
+        documents = [d for d in (
+            _analyser_document(z, idref, manifeste[idref], toc_href, noms,
+                               ruby=ruby, sur_image=_faire_image)
+            for idref in spine) if d is not None]
+        for doc in documents:
+            titrer(doc, toc.get(doc.href), titre_max)
 
     texte = "\n\n".join(d.texte for d in documents if d.texte)
-    # Lectures fusionnées sur tout le spine : un nom propre glosé une seule fois, à sa
-    # première occurrence, doit rester disponible pour les chapitres suivants — c'est la
-    # convention des EPUB japonais, qui ne re-glosent pas à chaque page.
-    comptes: dict[str, Counter] = {}
-    for d in documents:
-        for base, c in d.comptes.items():
-            comptes.setdefault(base, Counter()).update(c)
-    return Extracted(text=texte, images=images, lectures=lecture_dominante(comptes))
+    return Extracted(text=texte, images=images,
+                     lectures=lecture_dominante(_fusionner_comptes(documents)))

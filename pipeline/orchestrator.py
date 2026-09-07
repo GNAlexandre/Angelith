@@ -15,24 +15,42 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import os
 import re
 import shutil
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from core import (control, glossary, glossary_build, glossary_force, glossary_lang,
+from core import (chemins, glossary, glossary_build, glossary_force, glossary_lang,
                   quality, report, runtime, tokens)
+from core import insertion as insertion_mod
 from core.agents import build_agents
+from core.langues import resoudre_pack
 from core.control import StopRequested, clear_stop, install_sigint, should_stop
 from core.llm import LLM
 from core.reporter import Reporter
 from core.version import __version__
 
 from . import images, split
+from . import typographie as ty
 from .extract import IMG_MARKER, strip_images
 from .render import _collapse_repetitions, render
 from .sources import scan_volume
+
+#: Nom de fichier du glossaire d'une œuvre, quand `chemins.glossaire_fichier` ne le dit pas.
+#: Cité trois fois, dans trois fonctions différentes : la valeur par défaut d'un `.get()` est
+#: une décision, et trois copies d'une décision finissent par ne plus être la même.
+GLOSSAIRE_DEFAUT = "glossaire.yaml"
+
+#: Ce que le terminologue rend quand il n'a rien relevé. C'est une VALEUR SENTINELLE : elle
+#: est écrite au cache, relue, comparée, et sert de charge utile de dry-run. Cinq copies
+#: littérales pour une chaîne dont l'ÉGALITÉ compte — et dont l'accent de « signaler » fait
+#: partie.
+RIEN_A_SIGNALER = "- (rien à signaler)"
+
+#: Puce d'une sous-liste dans le rapport de fin de tome.
+PUCE_SOUS_LISTE = "\n  - "
 
 
 def _read(p: Path) -> str:
@@ -40,8 +58,17 @@ def _read(p: Path) -> str:
 
 
 def _write(p: Path, s: str) -> None:
+    """Écrit par temporaire + `os.replace`, qui est atomique sur NTFS comme sur POSIX.
+
+    ⚠ Un `write_text` direct laisse un fichier TRONQUÉ si le processus meurt au milieu, ou si
+    une synchro OneDrive verrouille la cible. `_run_blocks` traite déjà un bloc vide comme « à
+    recalculer », ce qui absorbe le cas le plus fréquent — mais pas un bloc coupé au milieu
+    d'une phrase, qui repartirait en aval comme s'il était complet. Miroir de
+    `manga.checkpoints._ecrire_atomique`."""
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(s, encoding="utf-8")
+    tmp = chemins.derive(p, ".tmp")
+    tmp.write_text(s, encoding="utf-8")
+    os.replace(tmp, p)
 
 
 def _strip_fences(t: str) -> str:
@@ -169,11 +196,15 @@ def _looks_like_glossary(text: str) -> bool:
     return hits >= 2
 
 
-def _looks_like_style_guide(text: str) -> bool:
+def _looks_like_style_guide(text: str, typo=None) -> bool:
     """Détecte qu'une sortie recopie le GUIDE DE STYLE fourni en contexte (le 9B a
     régurgité « # Guide de style — conventions générales de traduction » en tête de
-    bloc). Le titre est très distinctif → un seul signal suffit."""
-    return bool(re.search(r'(?im)^#{1,6}\s*Guide de style\b', text))
+    bloc). Le titre est très distinctif → un seul signal suffit.
+
+    ⚠ Le titre cherché vient du PACK de langue cible. Un pack anglais dont le guide
+    s'intitulerait « Style guide » rendrait ce garde-fou muet si le motif restait français —
+    et un garde-fou muet est pire qu'un garde-fou absent, parce qu'on croit l'avoir."""
+    return bool((typo or ty.DEFAUT).guide_de_style.search(text))
 
 
 def _has_runaway_repetition(text: str) -> bool:
@@ -211,7 +242,30 @@ def _salvage_repetition(text: str, dry_payload: str, min_ratio: float = 0.55) ->
     return cleaned
 
 
-def _consigne_naturalisation(intensite: float) -> str:
+def _chemin_style_guide(config: dict, pack=None) -> Path:
+    """Guide de style du pack de langue cible, ou `chemins.style_guide`.
+
+    ⚠ Le repli est écrit ICI et non dans `core/langues.py` : `chemins.style_guide` est un
+    artefact du light novel, et `tests/test_core_cli.py` interdit qu'une clé de rendu de
+    brique remonte dans le socle. Le socle sait servir un fichier d'un pack ; c'est la brique
+    qui sait lequel elle veut et d'où elle le tire sinon."""
+    pack = pack if pack is not None else resoudre_pack(config)
+    # La config EXPLICITE prime ; le pack fournit le défaut (cf. `render._chemin`).
+    explicite = (config.get("chemins") or {}).get("style_guide")
+    return Path(str(explicite)) if explicite else pack.fichier("style_guide.md")
+
+
+def _dire(pack, cle: str, defaut: str) -> str:
+    """Consigne du pack de langue cible, ou le texte français resté ici.
+
+    ⚠ Le défaut n'est PAS recopié dans `core/langues.py`, et c'est délibéré : deux chaînes
+    libres de diverger, dont l'une décide de la sortie d'un tome, seraient un défaut qu'aucun
+    test ne verrait. En le laissant à son site d'appel, l'identité au bit près du mode
+    compatibilité est vraie par construction (cf. `core.langues.Pack.consigne`)."""
+    return pack.consigne(cle, defaut) if pack is not None else defaut
+
+
+def _consigne_naturalisation(intensite: float, pack=None) -> str:
     """Traduit le curseur `naturalisation.intensite` (0.0–1.0) en une consigne injectée
     dans le message du TRADUCTEUR (# CONSIGNE DE NATURALISATION). 0 = traduction fidèle
     (comportement historique) ; 1 = reformulage marqué pour un français de roman publié.
@@ -219,16 +273,20 @@ def _consigne_naturalisation(intensite: float) -> str:
     l'intensité — c'est la garantie du prompt traducteur.md, ce curseur ne règle que
     l'AMPLEUR des reformulations de forme autorisées."""
     if intensite <= 0.15:
-        return ("Édition MINIMALE : corrige uniquement les temps du récit, les accords/genres, "
+        return _dire(pack, "naturalisation_minimale",
+                "Édition MINIMALE : corrige uniquement les temps du récit, les accords/genres, "
                 "les anglicismes et les calques FLAGRANTS. Ailleurs, garde les mots et l'ordre.")
     if intensite <= 0.45:
-        return ("Reformulage LÉGER : en plus du minimum, dé-calque les tournures qui « sentent la "
+        return _dire(pack, "naturalisation_legere",
+                "Reformulage LÉGER : en plus du minimum, dé-calque les tournures qui « sentent la "
                 "traduction » (ordre de mots anglais, « ... pour rien », négations lourdes) quand "
                 "une phrase française plus idiomatique dit EXACTEMENT la même chose.")
     if intensite <= 0.75:
-        return ("Reformulage MODÉRÉ : réécris pour un français fluide et idiomatique CHAQUE phrase "
+        return _dire(pack, "naturalisation_moderee",
+                "Reformulage MODÉRÉ : réécris pour un français fluide et idiomatique CHAQUE phrase "
                 "qui se lit comme une traduction, en préservant sens, terminologie, registre et information.")
-    return ("Reformulage MARQUÉ : vise le naturel d'un roman publié ; restructure sans hésiter une "
+    return _dire(pack, "naturalisation_marquee",
+            "Reformulage MARQUÉ : vise le naturel d'un roman publié ; restructure sans hésiter une "
             "phrase entière pour qu'elle sonne française, sans jamais trahir le sens ni omettre d'information.")
 
 
@@ -244,7 +302,8 @@ def _fmt_duree(secondes: float) -> str:
     return f"{s}s"
 
 
-def _translate_title(title: str, glo_txt: str, llm, model: str, ck: Path, dry: bool = False) -> str:
+def _translate_title(title: str, glo_txt: str, llm, model: str, ck: Path, dry: bool = False,
+                     pack=None) -> str:
     """Traduit un TITRE de chapitre en français via un appel COURT et NON-thinking (client
     par défaut), mis en cache dans `.checkpoints/chNN/title.txt` (réutilisé aux reprises).
     Renvoie le titre inchangé en dry-run, si le client est absent, ou si la sortie est vide
@@ -256,7 +315,8 @@ def _translate_title(title: str, glo_txt: str, llm, model: str, ck: Path, dry: b
             return cached
     if dry or llm is None or not title.strip():
         return title
-    system = ("Tu traduis un TITRE de chapitre de light novel en français naturel et concis. "
+    system = _dire(pack, "titre_chapitre",
+              "Tu traduis un TITRE de chapitre de light novel en français naturel et concis. "
               "Respecte STRICTEMENT la terminologie du glossaire (noms propres, casse exacte). Si le "
               "titre est déjà en français, renvoie-le inchangé. Réponds UNIQUEMENT par le titre "
               "traduit, sur une seule ligne, sans guillemets ni commentaire.")
@@ -351,6 +411,10 @@ class _CtxLN:
     # Défaut neutre, et en dernière position : les prédicats qui s'en servent ne se
     # déclenchent pas sans elle, donc tout contexte construit à la main reste inchangé.
     raison_llm: str | None = None
+    # Règles typographiques de la langue cible. Défaut NEUTRE — le français d'origine —
+    # pour que tout contexte construit à la main reste inchangé ; les tests en
+    # construisent, et c'est la convention des deux champs qui précèdent.
+    typo: object = None
 
 
 def _ln_vide(c: _CtxLN) -> bool:
@@ -362,7 +426,7 @@ def _ln_glossaire_fuite(c: _CtxLN) -> bool:
 
 
 def _ln_styleguide_fuite(c: _CtxLN) -> bool:
-    return _looks_like_style_guide(c.sortie)
+    return _looks_like_style_guide(c.sortie, c.typo)
 
 
 def _ln_repetition(c: _CtxLN) -> bool:
@@ -511,7 +575,8 @@ def _try_with_temp_retry(agent, user: str, dry_payload: str, cap: int, stats: di
                          min_ratio: float | None = None, temp_factor: float = 0.4,
                          postprocess=None,
                          repli_sans_raisonnement: bool | None = None,
-                         cjk_autorise: tuple = (), cjk_seuil: int = 0) -> tuple[str, bool, str | None]:
+                         cjk_autorise: tuple = (), cjk_seuil: int = 0,
+                         typo=None) -> tuple[str, bool, str | None]:
     """Appelle un agent ; si la sortie est vide, emballée (sature `cap`), ou (si
     `min_ratio` fourni) a perdu trop de mots par rapport à `dry_payload`, RETENTE UNE
     fois à température MODIFIÉE avant de renoncer. `postprocess` (ex. retrait de
@@ -527,7 +592,7 @@ def _try_with_temp_retry(agent, user: str, dry_payload: str, cap: int, stats: di
                  ref_words=_word_count(dry_payload) if min_ratio else 0,
                  ref_tail=_words_after_last_image(dry_payload),
                  ref_titres=len(_ATX_ANY.findall(dry_payload)),
-                 cjk_autorise=cjk_autorise, cjk_seuil=cjk_seuil)
+                 cjk_autorise=cjk_autorise, cjk_seuil=cjk_seuil, typo=typo)
     # Cause du DERNIER appel. Elle DOIT être relevée juste après chaque `agent.run` : le
     # client la remet à None à chaque `chat()`, et ce moteur peut appeler deux fois (retry à
     # température corrigée). La lire une seule fois après coup ne décrirait que le second
@@ -819,8 +884,8 @@ def run_extract_glossary(project: str, volume: str, config: dict,
     dry = config["options"].get("dry_run", False)
     verbose = config["options"].get("verbose", False)
     sources_dir = Path(config["chemins"]["sources"])
-    glo_path = sources_dir / project / config["chemins"].get("glossaire_fichier", "glossaire.yaml")
-    style_txt = _read(Path(config["chemins"]["style_guide"]))
+    glo_path = sources_dir / project / config["chemins"].get("glossaire_fichier", GLOSSAIRE_DEFAUT)
+    style_txt = _read(_chemin_style_guide(config))
     budget = config["decoupage"].get("max_input_tokens", 24000)
     glo_budget_term = min(6000, max(1500, budget // 3))
     max_chars = config["decoupage"]["max_block_chars"]
@@ -858,7 +923,8 @@ def run_extract_glossary(project: str, volume: str, config: dict,
     # consigne de romanisation ET des lectures, sinon le terminologue recopie la graphie.
     _pivot_cjk = glossary_lang.pivot_est_cjk(plan.pivot, plan.langs[plan.pivot].full_text)
     _lectures = plan.langs[plan.pivot].lectures if _pivot_cjk else {}
-    _consigne_cjk = ("\n\n" + glossary_lang.consigne_pivot_cjk()) if _pivot_cjk else ""
+    _pack = resoudre_pack(config)
+    _consigne_cjk = ("\n\n" + glossary_lang.consigne_pivot_cjk(_pack)) if _pivot_cjk else ""
 
     def _lectures_bloc(bloc: str, maxi: int = 40) -> str:
         """Gloses dont la graphie apparaît dans CE bloc (cf. `_lectures_du_bloc`)."""
@@ -928,7 +994,7 @@ def run_extract_glossary(project: str, volume: str, config: dict,
             # Reprise par bloc : relevés déjà en cache → re-merge déterministe sans LLM.
             if ck_file.exists():
                 cached = ck_file.read_text(encoding="utf-8")
-                added = glossary_build.merge_notes(glo, cached.strip() or "- (rien à signaler)",
+                added = glossary_build.merge_notes(glo, cached.strip() or RIEN_A_SIGNALER,
                                                    index=glo_index)
                 if any(added.values()):
                     glo_dirty = True
@@ -951,7 +1017,7 @@ def run_extract_glossary(project: str, volume: str, config: dict,
                     f"{glo_ctx}\n\n{style_txt}{_consigne_cjk}\n\n"
                     f"# BLOC {bi + 1}/{n} ({plan.pivot})\n{block}"
                     f"{_lectures_bloc(block)}{ref_section}",
-                    dry_payload="- (rien à signaler)", max_tokens=1024)
+                    dry_payload=RIEN_A_SIGNALER, max_tokens=1024)
             except SystemExit:
                 glossary.save(glo, glo_path)      # sauve l'acquis avant de remonter l'erreur fatale
                 raise
@@ -963,7 +1029,7 @@ def run_extract_glossary(project: str, volume: str, config: dict,
                 _dtok = _term_llm.stats["tokens_generes"] - _tok0
                 reporter.verbose(f"[terminologie] bloc {bi + 1}/{n} : {_dt:.1f}s · ~{_dtok} tok "
                                  f"· ~{_dtok / _dt if _dt > 0 else 0:.1f} tok/s")
-            notes = notes.strip() or "- (rien à signaler)"
+            notes = notes.strip() or RIEN_A_SIGNALER
             ck_file.write_text(notes, encoding="utf-8")   # checkpoint AVANT merge (reprise fiable)
             added = glossary_build.merge_notes(glo, notes, index=glo_index)
             if any(added.values()):
@@ -998,7 +1064,7 @@ def run_optimize(project: str, config: dict, reporter: Reporter | None = None) -
     dry = config["options"].get("dry_run", False)
     verbose = config["options"].get("verbose", False)
     glo_path = Path(config["chemins"]["sources"]) / project / \
-        config["chemins"].get("glossaire_fichier", "glossaire.yaml")
+        config["chemins"].get("glossaire_fichier", GLOSSAIRE_DEFAUT)
     llm = None if dry else LLM(
         base_url=config["llm"]["base_url"], api_key=config["llm"]["api_key"],
         timeout=config["llm"]["timeout"], max_retries=config["llm"]["max_retries"],
@@ -1006,6 +1072,64 @@ def run_optimize(project: str, config: dict, reporter: Reporter | None = None) -
                                debit_plancher=config["llm"].get("debit_plancher_tok_s"))
     agents = build_agents(config, llm, dry_run=dry)
     return optimize_glossary_file(glo_path, agents, reporter, dry=dry, verbose=verbose)
+
+
+def _inserer_illustrations(full_md: str, project: str, config: dict, build_dir,
+                           pack, reporter) -> tuple:
+    """`PLAN-27` L27.4 — les illustrations générées, **si et seulement si** on l'a demandé.
+
+    Rend `(markdown, [Inseree])`. Quatre garde-fous, tous non négociables, et trois d'entre
+    eux sont ici :
+
+    1. **défaut `false`** — `illustration.inserer_dans_sorties`. Un tome relancé sans que
+       l'utilisateur ait rien demandé sort **iso-octet** : on ne lit même pas le dossier des
+       images retenues. C'est le critère 7 du plan, et un test rend deux fois le même tome
+       pour comparer les octets ;
+    2. **la légende n'est pas désactivable** — `core/insertion.py` lève sur une légende vide,
+       et le texte vient du pack de langue CIBLE, donc un tome anglais porte la version
+       anglaise ;
+    3. **`RAPPORT.md` liste les images insérées**, avec leur personnage et leur graine.
+
+    Le quatrième — « aucune insertion dans un fichier destiné à autrui » — est une absence :
+    ce lot n'ajoute aucune fonction d'export, de partage, de publication ni de mise en ligne,
+    et n'en facilite aucune. L'usage arrêté est privé.
+
+    ⚠ **La brique d'illustration n'est PAS importée ici**, et elle ne doit pas l'être : le
+    light novel doit continuer de rendre un tome sur une machine où `illustration/` a été
+    effacé. Tout passe par `core/insertion.py`, qui ne connaît que des chemins de fichiers et
+    des sidecars JSON.
+
+    ⚠ **`--render-only` n'insère rien**, et c'est voulu : il rejoue le Markdown déjà
+    assemblé, qui porte déjà ses marqueurs si le run précédent en avait posé. Y réinsérer
+    doublerait chaque image à chaque rendu."""
+    reglages = dict(config.get("illustration") or {})
+    if not reglages.get("inserer_dans_sorties"):
+        return full_md, []
+    dossier = insertion_mod.dossier_retenues(config["chemins"]["sources"], project)
+    images_retenues = insertion_mod.retenues(dossier)
+    if not images_retenues:
+        _warn(reporter, f"[illustration] insertion armée mais aucune image retenue sous "
+                        f"{dossier} — rien n'est inséré. « Garder » déplace une image "
+                        f"produite depuis build/ vers ce dossier.")
+        return full_md, []
+    position = str((reglages.get("insertion") or {}).get("position") or
+                   insertion_mod.DEBUT_CHAPITRE)
+    if position not in insertion_mod.POSITIONS:
+        _warn(reporter, f"[illustration] illustration.insertion.position : "
+                        f"« {position} » inconnu — repli sur "
+                        f"« {insertion_mod.DEBUT_CHAPITRE} ».")
+        position = insertion_mod.DEBUT_CHAPITRE
+    sortie, inserees = insertion_mod.inserer(
+        full_md, images_retenues, legende=insertion_mod.legende_du_pack(pack),
+        depuis=build_dir, position=position)
+    for collision in insertion_mod.collisions(sortie):
+        # Le risque nommé par `pipeline/images.py` : « chaque document renumérote ses médias
+        # depuis 1 ». Une illustration ne vient d'aucun document, mais on le VÉRIFIE.
+        _warn(reporter, f"[illustration] collision de nom d'image — {collision}")
+    reporter.info(f"illustrations générées : {len(inserees)} insérée(s) "
+                  f"({insertion_mod.LIBELLES_POSITION[position]}), légende obligatoire "
+                  f"sous chacune")
+    return sortie, inserees
 
 
 def process_volume(project: str, volume: str, config: dict,
@@ -1016,6 +1140,13 @@ def process_volume(project: str, volume: str, config: dict,
     """Renvoie True si le tome a été traité jusqu'au bout, False s'il a été arrêté
     en cours de route (Ctrl+C / --stop) — utile pour --all (cf. run.py) : décide si
     la série doit continuer sur le tome suivant ou s'arrêter là."""
+    # ⚠ Validés ICI, à l'entrée, et pas plus bas : `project` et `volume` viennent de la ligne
+    # de commande et deviennent ensuite des composants de chemin à une quinzaine d'endroits —
+    # `sources/<projet>/glossaire.yaml`, `build/<projet>/<tome>/…`, les checkpoints. Un seul
+    # de ces endroits laissé sans garde suffit à écrire ailleurs que là où l'utilisateur
+    # croit ; les valider une fois à la frontière les couvre tous.
+    project = chemins.segment(project, "projet")
+    volume = chemins.segment(volume, "tome")
     reporter = reporter or Reporter()
     dry = config["options"].get("dry_run", False)
     verbose = config["options"].get("verbose", False)
@@ -1063,15 +1194,28 @@ def process_volume(project: str, volume: str, config: dict,
     install_sigint(reporter)
     clear_stop(build_dir)  # repart propre (efface un STOP résiduel d'un crash précédent)
 
+    # Lot 32 — la PHASE. Canal neuf, muet en console (`core/reporter.Reporter.phase`), et
+    # c'est lui qui rend la barre monotone : sans lui, `chapter(ci, n)` et `block(bi, n)`
+    # sont deux compteurs sans rapport que rien ne distingue. Mesuré sur un tome de 25
+    # chapitres : 66 reculs, 6 dénominateurs, 89,7 % d'un run de 12 h sans estimation
+    # (`docs/mesures/progression-2026-09-05.md`).
+    reporter.phase("preparation")
     plan = scan_volume(vol_dir, config, build_dir)
     reporter.volume(plan)
 
-    gname = config["chemins"].get("glossaire_fichier", "glossaire.yaml")
+    gname = config["chemins"].get("glossaire_fichier", GLOSSAIRE_DEFAUT)
     glo_path = sources_dir / project / gname
     glo = glossary.load(glo_path)
     if not glo:
         reporter.info("(pas de glossaire pour ce projet — il sera créé à partir des relevés du terminologue)")
-    style_txt = _read(Path(config["chemins"]["style_guide"]))
+    # Le pack de langue cible, résolu UNE fois pour tout le tome : il porte le guide de style
+    # et les consignes que le code construit (naturalisation, titre de chapitre).
+    pack = resoudre_pack(config)
+    # Règles typographiques de la langue cible, compilées UNE fois pour le tome. Elles
+    # servent au garde-fou « le modèle a régurgité le guide de style », dont le titre
+    # cherché dépend du pack.
+    typo = ty.Typographie.depuis_pack(pack, config.get("rendu"))
+    style_txt = _read(_chemin_style_guide(config, pack))
     max_chars = config["decoupage"]["max_block_chars"]
     max_tokens_bloc = config["decoupage"].get("max_block_tokens")
     marge_partie = config["decoupage"].get("marge_partie_bloc", 0.20)
@@ -1117,7 +1261,7 @@ def process_volume(project: str, volume: str, config: dict,
                         f"pivot [{pivot}], sans recoupement possible")
     pivot_cjk = glossary_lang.pivot_est_cjk(pivot, plan.langs[pivot].full_text)
     lectures_pivot = plan.langs[pivot].lectures if pivot_cjk else {}
-    consigne_cjk = ("\n\n" + glossary_lang.consigne_pivot_cjk()) if pivot_cjk else ""
+    consigne_cjk = ("\n\n" + glossary_lang.consigne_pivot_cjk(pack)) if pivot_cjk else ""
     if pivot_cjk:
         reporter.info(f"pivot « {pivot} » en écriture non latine — consigne de romanisation "
                       f"active" + (f" · {len(lectures_pivot)} lecture(s) relevée(s) à "
@@ -1280,7 +1424,7 @@ def process_volume(project: str, volume: str, config: dict,
     # le message du traducteur (# CONSIGNE DE NATURALISATION). Le correcteur ne reformule
     # plus : son garde-fou de perte de mots n'est donc plus desserré par l'intensité.
     intensite_nat = min(1.0, max(0.0, float(config.get("naturalisation", {}).get("intensite", 0.35))))
-    consigne_nat = _consigne_naturalisation(intensite_nat)
+    consigne_nat = _consigne_naturalisation(intensite_nat, pack)
 
     # Modèle du traducteur (chaîne), pour la traduction COURTE et non-thinking des titres.
     _trad_spec = config["modeles"]["traducteur"]
@@ -1298,6 +1442,9 @@ def process_volume(project: str, volume: str, config: dict,
     time_done = 0.0
 
     try:
+        # Le CHAPITRE est la seule unité monotone du light novel : le bloc redémarre à 1 à
+        # chaque étage de chaque chapitre. Il devient un détail affiché, pas un avancement.
+        reporter.phase("chapitres")
         for ci in range(n_ch):
             pivot_chap = plan.langs[pivot].chapters[ci]
             title = pivot_chap.title or f"Chapitre {ci + 1}"
@@ -1468,14 +1615,14 @@ def process_volume(project: str, volume: str, config: dict,
                             f"{glo_ctx}\n\n{style_txt}{consigne_cjk}\n\n"
                             f"# BLOC {bi + 1}/{n} ({pivot})\n{blocks[bi]}"
                             f"{_lectures_du_bloc(blocks[bi])}{ref_section}",
-                            dry_payload="- (rien à signaler)", max_tokens=1024)
+                            dry_payload=RIEN_A_SIGNALER, max_tokens=1024)
                         if verbose and term_llm:
                             dt = time.perf_counter() - t0
                             dtok = term_llm.stats["tokens_generes"] - tok0
                             reporter.verbose(f"[terminologie] bloc {bi + 1}/{n} : {dt:.1f}s · ~{dtok} tok générés "
                                              f"· ~{(dtok / dt if dt > 0 else 0):.1f} tok/s")
                         if not notes.strip():
-                            notes = "- (rien à signaler)"
+                            notes = RIEN_A_SIGNALER
                         f.write_text(notes, encoding="utf-8")
                         if should_stop(build_dir):
                             raise StopRequested()
@@ -1540,7 +1687,7 @@ def process_volume(project: str, volume: str, config: dict,
                 phrases sans rien apporter (décision explicite)."""
                 if not config["langues"].get("appliquer_traductions_forcees", True):
                     return txt
-                txt, n = _enforce_force(txt, glo, force_refus)
+                txt, n = _enforce_force(txt, glo, force_refus, accord=pack.accorder())
                 stats["forces_appliques"] += n
                 return txt
 
@@ -1595,7 +1742,7 @@ def process_volume(project: str, volume: str, config: dict,
                     # Tant que le bloc reste redécoupable, on INTERDIT au client de se
                     # rabattre sur une réponse non raisonnée : elle masquerait l'échec et
                     # nous priverait du redécoupage (cf. `LLM.repli_sans_raisonnement`).
-                    repli_sans_raisonnement=True if dernier_recours else False)
+                    repli_sans_raisonnement=True if dernier_recours else False, typo=typo)
 
             def _trad_resplit(pivot_block: str, refs: dict[str, str],
                               depth: int = 0, label: str = "") -> str:
@@ -1717,7 +1864,8 @@ def process_volume(project: str, volume: str, config: dict,
                     user = f"{glo_txt}\n\n{style_txt}\n\n# PREMIER JET À CORRIGER\n{translated[bi]}"
                     cap = _out_cap(translated[bi], mult=1.8)
                     out, ok, _ = _try_with_temp_retry(agents["correcteur"], user, translated[bi], cap,
-                                                      stats, min_ratio=ratio_corr, temp_factor=temp_factor)
+                                                      stats, min_ratio=ratio_corr, temp_factor=temp_factor,
+                                                      typo=typo)
                     if not ok:
                         return translated[bi]            # échec persistant → on garde le 1er jet
                     return _keep_images(translated[bi], out)
@@ -1748,7 +1896,7 @@ def process_volume(project: str, volume: str, config: dict,
                     cap = _out_cap(mep_blocks[j], mult=1.8, floor=1024)
                     out, ok, _ = _try_with_temp_retry(agents["mise_en_page"], user, mep_blocks[j], cap,
                                                       stats, min_ratio=ratio_mep, postprocess=_strip_fences,
-                                                      temp_factor=temp_factor)
+                                                      temp_factor=temp_factor, typo=typo)
                     if not ok:
                         return mep_blocks[j]             # échec persistant → texte brut du bloc
                     return _keep_images(mep_blocks[j], out)
@@ -1757,7 +1905,8 @@ def process_volume(project: str, volume: str, config: dict,
                 reporter.info("désactivée (modeles.mise_en_page: null) — texte non balisé (dialogues stylés au rendu)")
                 styled = list(mep_blocks)
 
-            title_fr = (_translate_title(title, glo_txt, llm, trad_model, ck, dry=dry)
+            title_fr = (_translate_title(title, glo_txt, llm, trad_model, ck, dry=dry,
+                                         pack=pack)
                         if (plan.mode == "traduction" and config["langues"].get("traduire_titres", True))
                         else title)
             chapter_md = f"# {title_fr}\n\n" + "\n\n".join(styled)
@@ -1771,11 +1920,13 @@ def process_volume(project: str, volume: str, config: dict,
             report_sections.append(
                 f"## Chapitre {ci + 1} — {title_fr}\n"
                 f"- Blocs : {n}\n"
-                f"- Points AMBIGU : " + (("\n  - " + "\n  - ".join(fl)) if fl else "aucun") + "\n"
-                f"- Divergences terminologie : " + (("\n  - " + "\n  - ".join(divs)) if divs else "aucune") + "\n"
-                f"- Genres à vérifier : " + (", ".join(
+                f"- Points AMBIGU : "
+                + ((PUCE_SOUS_LISTE + PUCE_SOUS_LISTE.join(fl)) if fl else "aucun") + "\n"
+                "- Divergences terminologie : "
+                + ((PUCE_SOUS_LISTE + PUCE_SOUS_LISTE.join(divs)) if divs else "aucune") + "\n"
+                "- Genres à vérifier : " + (", ".join(
                     p["nom"] for p in glo.get("personnages", []) if "⚠" in (p.get("description") or "")) or "aucun") + "\n"
-                f"- Parties détectées : " + ("; ".join(p.title for p in pivot_chap.parts)
+                "- Parties détectées : " + ("; ".join(p.title for p in pivot_chap.parts)
                                              if pivot_chap.parts else "aucune") + "\n")
 
             # Estimation du temps restant (runs complets seulement), affinée par le temps réel.
@@ -1826,6 +1977,7 @@ def process_volume(project: str, volume: str, config: dict,
         _close_llm_clients(llm, agents)
         raise
 
+    reporter.phase("finalisation")
     # Tome complet → assemblage + rendu.
     # ⚠ PAS de passe `_enforce_force` ici : les traductions imposées sont désormais
     # appliquées bloc par bloc, JUSTE APRÈS la traduction (cf. `_force_fr`). Réappliquer
@@ -1864,6 +2016,9 @@ def process_volume(project: str, volume: str, config: dict,
     if stats["forces_appliques"]:
         reporter.info(f"traductions forcées (force: true) : {stats['forces_appliques']} "
                      f"remplacement(s) appliqué(s) à la sortie du traducteur")
+    # LOT 27 — les illustrations générées, si et seulement si l'utilisateur l'a demandé.
+    full_md, illustrations_inserees = _inserer_illustrations(
+        full_md, project, config, build_dir, pack, reporter)
     # Empreinte de version en tête du Markdown assemblé : c'est l'artefact DURABLE du run,
     # rejoué tel quel par `--render-only` des mois plus tard. Un commentaire HTML est inerte
     # pour Pandoc et ne peut pas être pris pour un marqueur d'image : les trois expressions
@@ -1931,6 +2086,10 @@ def process_volume(project: str, volume: str, config: dict,
             "Le découpage en chapitres d'une source de référence divergeait de celui du pivot.\n"
             "Sans recalage, le traducteur reçoit du texte hors-chapitre et le traduit en double.\n"
             + "\n".join(f"- {m}" for m in realign_notes))
+    if illustrations_inserees:
+        # Critère 3 de L27.4 : `RAPPORT.md` liste les images insérées, avec leur personnage
+        # et leur graine. Une liste de noms de fichier obligerait à ouvrir onze sidecars.
+        resume.append("\n".join(insertion_mod.lignes_de_rapport(illustrations_inserees)))
     if force_refus:
         # Dédoublonné : le même couple revient à chaque occurrence dans le tome.
         uniques = list(dict.fromkeys(force_refus))

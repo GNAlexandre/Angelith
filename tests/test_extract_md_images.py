@@ -9,7 +9,6 @@ survivait donc dans le texte sans que le fichier ne soit jamais copié dans `med
 manquante, en silence. Le défaut vaut pour tout `.md` écrit à la main, pas seulement pour
 ceux que produit `run_ocr.py`.
 """
-from pathlib import Path
 
 from pipeline import extract
 
@@ -45,7 +44,7 @@ def test_les_chemins_sont_relatifs_au_document(tmp_path):
     doc, media = _source(tmp_path, "<!-- IMG: media/page_0005.png -->")
     ailleurs = tmp_path / "ailleurs"
     ailleurs.mkdir()
-    resultat = extract.extract(doc, ailleurs)
+    extract.extract(doc, ailleurs)
     assert (ailleurs / "page_0005.png").exists()
 
 

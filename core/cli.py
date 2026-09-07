@@ -38,8 +38,56 @@ def configurer_stdout() -> None:
 
 
 def charger_config(chemin: str = "config.yaml") -> dict:
-    with open(chemin, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+    """Lit `config.yaml`, et **valide le pack de langue cible tout de suite**.
+
+    ⚠ La résolution du pack est faite ici, au chargement, et pas au premier usage. Un
+    `langues.cible: de` sans pack allemand doit arrêter le programme AVANT que quoi que ce
+    soit ne tourne : découvrir après six heures de GPU qu'un tome est sorti dans la mauvaise
+    langue — ou pas du tout — est exactement ce que cette refonte doit rendre impossible.
+
+    `resoudre_pack` lève un `ErreurPack` (un `SystemExit`), qui porte son propre message
+    actionnable et la liste des packs disponibles.
+
+    ⚠ **Deux gestes de plus depuis la 2.31.0, et tous deux sont inertes hors gel** (`PLAN-37`
+    L37.4) : `installation.resoudre_config` choisit le fichier dans l'ordre CLI → copie
+    utilisateur → copie livrée, et `installation.ancrer_chemins` ancre les chemins relatifs
+    d'œuvres et de poids hors du dossier d'installation. Lancé depuis le dépôt, le premier rend
+    l'argument tel quel et le second rend la configuration inchangée — c'est le critère 3 de la
+    définition de « terminé », et `tests/test_installation.py` le tient."""
+    from . import glossary, installation
+    from .langues import resoudre_pack
+    with open(installation.resoudre_config(chemin), encoding="utf-8") as fh:
+        config = yaml.safe_load(fh)
+    installation.ancrer_chemins(config or {})
+    pack = resoudre_pack(config or {})
+    # Le glossaire est multi-cibles : il doit savoir de quelle langue ce run parle avant la
+    # première lecture. Posé ici, au seul endroit qui résout déjà le pack.
+    glossary.definir_cible(pack.code)
+    return config
+
+
+def bloc_langue(config: dict) -> None:
+    """Bloc « — Langue cible — » du doctor, identique pour les trois briques.
+
+    Le pack est déjà validé par `charger_config` : si on arrive ici, il est résolu. Ce bloc
+    ne re-vérifie donc pas, il MONTRE — quel pack sert, et d'où viennent réellement les
+    fichiers, ce qui est la question qu'on se pose quand une traduction sort dans une langue
+    qu'on n'attendait pas."""
+    from .langues import resoudre_pack
+    pack = resoudre_pack(config)
+    print("\n— Langue cible —")
+    if pack.racine is None:
+        print(f"✓ {pack.nom_lisible()} [{pack.code}] — mode compatibilité "
+              f"(aucun dossier langues/ : prompts, guide de style et gabarits lus à leurs "
+              f"emplacements historiques)")
+    else:
+        print(f"✓ {pack.nom_lisible()} [{pack.code}] — pack {pack.racine}")
+    dossier = pack.prompt("traducteur").parent
+    marque = "✓" if dossier.exists() else "❌"
+    print(f"  {marque} prompts : {dossier}")
+    # ⚠ Le guide de style et les gabarits docx/epub ne sont PAS listés ici : ce sont des
+    # artefacts du light novel, et `pipeline/doctor.py` les vérifie déjà. Les nommer dans le
+    # socle y ferait entrer la connaissance d'une brique — cf. `tests/test_core_cli.py`.
 
 
 def avertir_config(config: dict) -> int:
@@ -78,6 +126,43 @@ def ajouter_flags_veille(ap) -> None:
                     help="éteint le PC à la fin du run (succès OU erreur), après un délai annulable — idéal la nuit")
     ap.add_argument("--shutdown-delay", type=int, default=120, metavar="SECONDES",
                     help="délai avant extinction avec --shutdown (défaut 120 s ; annulable)")
+
+
+def ajouter_flag_sans_llm(ap) -> None:
+    """`--sans-llm` — le second fragment de CLI réellement partagé (lot 39).
+
+    Même nom, même sémantique et même texte d'aide des deux côtés, ce qui est **le critère
+    écrit** de `ajouter_flags_veille` ci-dessus pour extraire un flag plutôt que de le
+    recopier.
+
+    ⚠ **Ce n'est PAS `--dry-run`, et la confusion serait grave.** `--dry-run` SIMULE une
+    traduction : le texte source traverse l'agent inchangé et s'écrit comme s'il était traduit.
+    `--sans-llm` ne prétend rien : les bulles sortent vides, le rapport le dit planche par
+    planche, et aucun client LLM n'est contacté.
+
+    ⚠ **Le light novel accepte le drapeau et le REFUSE à l'exécution**, avec un message qui dit
+    pourquoi. Le laisser absent de sa CLI ferait croire à un oubli ; le laisser passer
+    produirait un roman dont le `.docx` français porterait le texte source."""
+    ap.add_argument("--sans-llm", action="store_true",
+                    help="aucun appel au serveur LLM : détection, nettoyage, OCR et rendu "
+                         "seulement, bulles laissées VIDES (à saisir dans la Retouche). "
+                         "Différent de --dry-run, qui simule une traduction")
+
+
+def appliquer_sans_llm(config: dict, actif: bool) -> dict:
+    """Reporte `--sans-llm` dans la configuration **déjà chargée**. Mute et rend `config`.
+
+    ⚠ Même patron que `core.modeles.outrepasser` : on mute le dictionnaire en mémoire, jamais
+    le fichier. `config.yaml` est un document de 158 Ko dont la prose est la documentation
+    (interdit 5) ; un aller-retour `yaml.safe_dump` l'effacerait.
+
+    ⚠ **Le drapeau ne peut qu'ARMER le mode, jamais le désarmer.** Ne pas le passer laisse
+    `llm.actif` décider — c'est la règle des trois états de `gui/parametres.py` : absent =
+    « n'y touche pas », et non « remets à la valeur d'usine »."""
+    if not actif:
+        return config
+    config.setdefault("llm", {})["actif"] = False
+    return config
 
 
 def make_reporter(reporter, log_dir, *, verbose: bool, dry_run: bool):
@@ -144,32 +229,68 @@ def afficher_liste(lister_projets, lister_tomes, src, build_root, projet: str | 
 # Doctor : les sections communes aux deux diagnostics
 # --------------------------------------------------------------------------- #
 
-def section_ollama(config: dict) -> bool:
+def section_ollama(config: dict, *, ecrire=print, brique: str = "socle"):
     """Bloc « — Ollama — » du doctor, identique des deux côtés (le manga lui passe une config
-    dont la section `llm` est celle de sa brique)."""
+    dont la section `llm` est celle de sa brique).
+
+    ⚠ **MISE À JOUR lot 36 (2026-09-06)** : rend une `diagnostic.Section`, plus un `bool`. Le
+    texte, lui, n'a pas bougé d'un octet — `test_connection` écrit toujours au fil de l'eau,
+    par le `ecrire` qu'on lui passe. C'était la contrainte : cette section met une douzaine de
+    secondes contre un serveur arrêté, et une capture de `stdout` aurait laissé la console
+    muette pendant tout ce temps.
+
+    `brique` porte la PORTÉE du blocage : le serveur LLM appartient au socle — toute
+    traduction en dépend, quelle que soit la brique."""
+    from . import diagnostic as diag
     from .llm import test_connection
-    print("\n— Ollama —")
-    return test_connection(config)
+    entete = "\n— Ollama —"
+    diag.dire(ecrire, entete)
+    lignes: list[str] = []
+
+    def _noter(ligne: str) -> None:
+        lignes.append(ligne)
+        if ecrire is not None:
+            ecrire(ligne)
+
+    joignable = test_connection(config, _noter)
+    base = (config.get("llm") or {}).get("base_url", "(non défini)")
+    # ⚠ **`diag.LLM` et non la brique appelante** (lot 39). Le serveur n'est pas une brique,
+    # c'est une CAPACITÉ : classé `socle`, il bloquait les QUATRE briques — y compris pour un
+    # `--from rendu`, que `gui/lanceur.py` décrit pourtant comme « relettrage seul, aucun appel
+    # LLM ». La page Diagnostic annonçait donc « Aucune brique n'est utilisable en l'état » à
+    # quelqu'un dont le relettrage marchait.
+    #
+    # ⚠ Le TEXTE console ne change pas d'un octet : `brique` n'est pas imprimé, et
+    # `tests/test_core_diagnostic_iso.py` reste vert. Seule la PORTÉE du blocage change.
+    if joignable:
+        verdict = diag.Verdict("serveur_llm", diag.LLM, diag.CONFORME,
+                               constat=f"serveur LLM joignable — {base}",
+                               lignes_console=tuple(lignes))
+    else:
+        verdict = diag.Verdict(
+            "serveur_llm", diag.LLM, diag.BLOQUANT,
+            constat=f"serveur LLM injoignable — {base}",
+            consequence="aucune traduction n'est possible ; la détection, le nettoyage et "
+                        "l'OCR, eux, tourneraient.",
+            geste="démarre Ollama (`ollama serve`) ou LM Studio, ou corrige llm.base_url "
+                  "dans config.yaml. ⚠ Angelith ne démarre aucun service à ta place.",
+            lignes_console=tuple(lignes))
+    return diag.Section(entete, (verdict,))
 
 
 def conclure(ok: bool) -> bool:
     print("\n" + ("✓ Tout est en ordre." if ok
                   else "❌ Au moins un point bloquant à corriger ci-dessus."))
-    return ok
+    return bool(ok)
 
 
-def section_dependances(modules: list[tuple[str, str]], indice: str) -> bool:
-    """Bloc « — Dépendances Python — » : `(module_importable, nom_pip)`."""
-    ok = True
-    print("\n— Dépendances Python additionnelles —")
-    for mod, nom in modules:
-        try:
-            __import__(mod)
-            print(f"✓ {nom} installé.")
-        except ImportError:
-            print(f"❌ {nom} introuvable — {indice}.")
-            ok = False
-    return ok
+def section_dependances(modules: list[tuple[str, str]], indice: str, *, ecrire=print,
+                        brique: str = "socle"):
+    """Bloc « — Dépendances Python — » : `(module_importable, nom_pip)`.
+
+    ⚠ Rend une `diagnostic.Section` depuis le lot 36 ; le texte est inchangé."""
+    from . import diagnostic as diag
+    return diag.section_dependances(modules, indice, brique=brique, ecrire=ecrire)
 
 
 # --------------------------------------------------------------------------- #

@@ -19,69 +19,20 @@ from __future__ import annotations
 
 import re
 
-from .extract import IMG_MARKER, make_marker, split_marker
+from core.marqueurs import (  # noqa: F401  (réexport : voir la note ci-dessous)
+    MARQUEUR_RE,
+    manifest_for_chapter,
+    orphan_markers,
+)
 
-_MARKER_RE = re.compile(r"<!-- IMG: (.*?) -->")
+from .extract import IMG_MARKER, split_marker
 
-
-def orphan_markers(full_text: str, chapters) -> list[str]:
-    """Contenus de marqueurs présents dans `full_text` mais dans AUCUN chapitre détecté,
-    dans l'ordre de la source et avec leur multiplicité.
-
-    Ce sont, en pratique, les PLANCHES COULEUR de tête de volume : elles précèdent la
-    première frontière de chapitre, et `split._build` ne construit les chapitres qu'à
-    partir de celle-ci — tout ce qui est avant disparaissait donc du rendu. Mesuré sur
-    roman B Vol.2 : 12 illustrations sur 20 perdues, alors que les fichiers étaient bien
-    extraits dans `media/`.
-
-    On travaille par DIFFÉRENCE de comptage plutôt qu'en exposant les bornes de
-    `detect_chapters` : c'est indépendant du chemin de détection (déterministe comme
-    repli LLM, qui appelle aussi `_build`) et ça rattrape en prime tout marqueur qui
-    serait perdu ENTRE deux chapitres."""
-    from collections import Counter
-    dans_chapitres = Counter()
-    for ch in chapters or []:
-        dans_chapitres += Counter(_MARKER_RE.findall(getattr(ch, "body", "") or ""))
-    reste = Counter(_MARKER_RE.findall(full_text)) - dans_chapitres
-    if not reste:
-        return []
-    out: list[str] = []
-    for raw in _MARKER_RE.findall(full_text):      # ordre de la source
-        if reste[raw] > 0:
-            out.append(raw)
-            reste[raw] -= 1
-    return out
-
-
-def manifest_for_chapter(chapter_text_with_markers: str) -> list[tuple[float, str]]:
-    """Renvoie [(fraction, contenu_marqueur)] pour chaque image du chapitre source.
-
-    La fraction = position du marqueur parmi les paragraphes (0 = début, 1 = fin).
-    `contenu_marqueur` est le contenu brut du marqueur (chemin, ou chemin|attrs).
-    """
-    # On segmente en « unités » (paragraphes et marqueurs), comme à l'affichage.
-    units: list[str] = []
-    buf: list[str] = []
-    for line in chapter_text_with_markers.splitlines():
-        if line.strip() == "":
-            if buf:
-                units.append("\n".join(buf)); buf = []
-        elif "<!-- IMG:" in line:
-            if buf:
-                units.append("\n".join(buf)); buf = []
-            units.append(line.strip())
-        else:
-            buf.append(line)
-    if buf:
-        units.append("\n".join(buf))
-
-    total = max(1, len(units))
-    out: list[tuple[float, str]] = []
-    for i, u in enumerate(units):
-        m = _MARKER_RE.search(u)
-        if m:
-            out.append((i / total, m.group(1)))
-    return out
+# ⚠ `orphan_markers` et `manifest_for_chapter` vivent dans `core/marqueurs.py` depuis le
+# lot 23, avec `IMG_MARKER`, `split_marker` et l'expression du marqueur : `core/` n'a pas le
+# droit d'importer `pipeline/`, et `core/illustrations.py` a besoin du même analyseur. Ils
+# sont réexportés ici sous leurs noms d'origine — `images.manifest_for_chapter(...)` désigne
+# exactement le même objet qu'avant. Ce qui reste dans ce module est ce qui relève vraiment
+# du RENDU light novel : la réinjection proportionnelle et la conversion en Markdown.
 
 
 def insert_into(final_text: str, manifest: list[tuple[float, str]]) -> str:
@@ -119,4 +70,4 @@ def markers_to_markdown(text: str, media_prefix: str = "") -> str:
         if media_prefix and not path.startswith(media_prefix):
             path = f"{media_prefix.rstrip('/')}/{path}"
         return f"![]({path}){attrs}" if attrs else f"![]({path})"
-    return _MARKER_RE.sub(_r, text)
+    return MARQUEUR_RE.sub(_r, text)

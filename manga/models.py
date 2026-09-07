@@ -36,15 +36,51 @@ DETECTEUR_URL = ("https://huggingface.co/kitsumed/yolov8m_seg-speech-bubble/"
 DETECTEUR_SHA256 = "36c26bdefe150226acd9669772e9ff5a011fa0dd4622469b49d3d5e359f3251c"
 DETECTEUR_OCTETS = 108_982_949
 
+# ⚠ **La licence du détecteur de BULLES ne mentionne PAS Manga109-s**, et c'est une correction
+# de fait : jusqu'au 2026-09-06, `gui/sondes.py` et `manga/doctor.py` la lui attribuaient. Le
+# corpus Manga109-s concerne le détecteur de TEXTE SUR LE DESSIN, plus bas dans ce fichier.
+#
+# Deux affirmations coexistent pour ce poids, et elles ne se contredisent pas — elles ne
+# répondent pas à la même question. Les deux sont écrites plutôt qu'arbitrées :
+#
+#   · la page du modèle DÉCLARE GPL-3.0 (relevé le 2026-08-25, `manga_models/README.md`) ;
+#   · ces poids sont un export **YOLOv8-seg**, et Ultralytics YOLOv8 est lui-même AGPL-3.0.
+#
+# Qui rediffuse des planches produites avec ce poids doit vérifier les deux. Ce n'est pas une
+# précaution de style : la règle des chiffres du dépôt vaut aussi pour une licence — une
+# affirmation sans sa source et sa date n'est pas une licence, c'est une impression.
+DETECTEUR_LICENCE = "GPL-3.0 (déclarée sur la page du modèle, relevé le 2026-08-25)"
+DETECTEUR_LICENCE_URL = "https://huggingface.co/kitsumed/yolov8m_seg-speech-bubble"
+DETECTEUR_LICENCE_NOTE = (
+    "⚠ Ces poids sont un export YOLOv8-seg, et Ultralytics YOLOv8 est lui-même AGPL-3.0 : "
+    "vérifie les DEUX avant toute rediffusion des planches produites.")
+
 # Détecteur de TEXTE SUR LE DESSIN (onomatopées, narration libre) — `comic-text-detector`
 # de dmMaze, export ONNX. Empreinte relevée le 2026-08-16, même usage que ci-dessus :
 # vérifier, pas imposer.
-# ⚠ Code amont GPL-3.0, poids entraînés pour partie sur Manga109-s. À vérifier avant toute
-# diffusion des planches produites.
 TEXTE_URL = ("https://huggingface.co/mayocream/comic-text-detector-onnx/"
              "resolve/main/comic-text-detector.onnx")
 TEXTE_SHA256 = "1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f"
 TEXTE_OCTETS = 94_669_756
+
+#: ⚠ **C'est CE poids-ci qui porte Manga109-s**, et lui seul des deux détecteurs.
+#:
+#: ⚠ Manga109-s est dans la LICENCE et pas seulement dans la note, parce que c'est une
+#: condition d'usage et non un commentaire : `tests/test_gui_diagnostic.py` vérifie que le mot
+#: atteint l'utilisateur avant le clic, et il a raison de le vérifier là.
+TEXTE_LICENCE = ("GPL-3.0 (code amont, relevé le 2026-08-16) — ⚠ poids entraînés pour partie "
+                 "sur Manga109-s, qui a ses propres conditions d'usage académique")
+TEXTE_LICENCE_URL = "https://huggingface.co/mayocream/comic-text-detector-onnx"
+TEXTE_LICENCE_NOTE = (
+    "⚠ À vérifier avant toute diffusion des planches produites : ces conditions ne sont pas "
+    "celles d'Angelith.")
+
+#: L'OCR japonais. Il se récupère tout seul au premier lancement, mais sa licence se dit ici
+#: comme les autres — un poids dont personne ne nomme la licence est un poids qu'on ne peut pas
+#: rediffuser en connaissance de cause.
+OCR_LICENCE = "Apache-2.0"
+OCR_LICENCE_URL = "https://huggingface.co/kha-white/manga-ocr-base"
+OCR_LICENCE_NOTE = ""
 
 _INSTRUCTIONS = (
     "  → relance avec le téléchargement automatique "

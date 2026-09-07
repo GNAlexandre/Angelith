@@ -82,7 +82,9 @@ def empreinte(project: str, config: dict) -> str:
 
 def run_extract_glossary(project: str, volume: str, config: dict, reporter: Reporter | None = None,
                          *, force: bool = False, restart_from: str | None = None,
-                         only_page: int | None = None) -> bool:
+                         only_page: int | None = None,
+                         langue: str | None = None,
+                         format_planche: str | None = None) -> bool:
     """Relève la terminologie d'UN chapitre dans le glossaire de l'œuvre. Renvoie True si le
     chapitre est allé au bout, False sur un arrêt propre (`--stop` / Ctrl+C).
 
@@ -91,6 +93,7 @@ def run_extract_glossary(project: str, volume: str, config: dict, reporter: Repo
     from .orchestrator_manga import process_volume
     return process_volume(project, volume, config, reporter=reporter or Reporter(),
                           force=force, restart_from=restart_from, only_page=only_page,
+                          langue=langue, format_planche=format_planche,
                           glossaire_seul=True)
 
 

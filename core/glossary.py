@@ -23,11 +23,12 @@ Les champs `vo/fr/note` de l'ancien schéma `termes` restent lus (compat).
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import yaml
 
-from . import glossary_lang, tokens
+from . import chemins, glossary_cibles, glossary_lang, tokens
 
 # Catégories d'« entités » : mêmes champs de base (nom / variantes / description),
 # + champs spécifiques selon la catégorie.
@@ -115,18 +116,91 @@ def fill_defaults(glossaire: dict) -> dict:
     return out
 
 
-def load(path: str | Path) -> dict:
+#: Langue cible du RUN. Posée une fois au démarrage par `cli.charger_config`, depuis le pack.
+#:
+#: ⚠ Un état de module, et c'est délibéré. La cible est une propriété du RUN, fixée avant que
+#: quoi que ce soit ne tourne et constante jusqu'à la fin : l'enfiler dans les vingt signatures
+#: qui lisent ou écrivent le glossaire ajouterait vingt paramètres qui vaudraient toujours la
+#: même chose. Le paramètre `cible=` reste disponible pour un appel explicite — c'est ce dont
+#: les tests se servent, et c'est lui qui prime.
+_CIBLE_DU_RUN = "fr"
+
+
+def definir_cible(code: str | None) -> None:
+    """Fixe la langue cible du run. Appelée au chargement de la config, pas ailleurs."""
+    global _CIBLE_DU_RUN
+    _CIBLE_DU_RUN = (code or "fr").strip().lower() or "fr"
+
+
+def cible_du_run() -> str:
+    return _CIBLE_DU_RUN
+
+
+def load(path: str | Path, cible: str | None = None) -> dict:
+    """Charge le glossaire, **à plat pour la cible demandée**.
+
+    ⚠ Le fichier est multi-cibles depuis la 2.0.0 (cf. `core/glossary_cibles.py`), mais tout
+    le reste du dépôt lit `e["nom"]`, `e["genre"]`… — 71 endroits. La conversion se fait donc
+    ICI, et le code appelant n'a rien à savoir de `cibles`.
+
+    **Migration automatique** d'un fichier à l'ancien format, avec sauvegarde `.bak` écrite
+    AVANT toute réécriture : un glossaire est du travail humain accumulé sur plusieurs tomes,
+    et le convertir sans filet serait le seul geste irréversible de ce dépôt."""
     p = Path(path)
     if not p.exists():
         return {}
     with open(p, encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+        brut = yaml.safe_load(fh) or {}
+    if not brut:
+        return {}
+    code = (cible or _CIBLE_DU_RUN).strip().lower()
+
+    if glossary_cibles.besoin_de_migration(brut):
+        # ⚠ La sauvegarde part AVANT la réécriture, et sous un nom qui ne peut pas être
+        # repris par une seconde migration : `.bak` écrasé par une migration ratée ne
+        # servirait à rien.
+        sauvegarde = chemins.derive(p, ".avant-multicibles.bak")
+        if not sauvegarde.exists():
+            sauvegarde.write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
+        # La cible de migration est celle du run : un glossaire écrit avant les packs est du
+        # français, sauf si l'on traduit déjà vers autre chose — auquel cas ces rendus sont
+        # ceux de CETTE cible, et les ranger sous `fr` serait faux.
+        brut, n = glossary_cibles.migrer(brut, code)
+        save(brut, p, cible=code, deja_multi=True)
+        print(f"[glossaire] {p.name} migré au format multi-cibles sous « {code} » "
+              f"({n} entrée(s)) — sauvegarde : {sauvegarde.name}", file=sys.stderr)
+
+    return {cat: ([glossary_cibles.aplatir(e, code) for e in entrees]
+                  if cat in ENTITY_CATS and isinstance(entrees, list) else entrees)
+            for cat, entrees in brut.items()}
 
 
-def save(glossaire: dict, path: str | Path) -> None:
+def save(glossaire: dict, path: str | Path, cible: str | None = None,
+         *, deja_multi: bool = False, entete: str | None = None) -> None:
+    """Écrit le glossaire, en **refondant** la vue plate dans le fichier multi-cibles.
+
+    ⚠ Les rendus des AUTRES langues sont relus depuis le disque et préservés : traduire un
+    tome vers l'anglais ne doit pas effacer le travail fait en français. C'est l'invariant
+    central du format multi-cibles.
+
+    `entete` remplace le bloc de commentaires de tête. Il n'a qu'un appelant,
+    `core/glossary_export.py`, et une seule raison d'être : un glossaire EXPORTÉ doit porter
+    sa provenance — l'œuvre, la version d'Angelith, la date, le nombre d'entrées — parce
+    qu'il va circuler seul, séparé du dépôt qui l'a produit, et qu'un glossaire sans
+    dénominateur ne se fusionne pas. Le corps, lui, reste écrit **par cette fonction** : deux
+    écrivains du même format finiraient par ne plus produire le même fichier, et c'est le
+    format d'ARCHIVE du glossaire."""
     p = Path(path)
+    code = (cible or _CIBLE_DU_RUN).strip().lower()
+    if not deja_multi:
+        # ⚠ `fill_defaults` AVANT la refonte, pas après : il travaille sur la forme PLATE, et
+        # c'est lui qui tient la promesse de l'en-tête du fichier — « chaque entrée affiche
+        # tous ses champs, même vides — complète-les librement ». Appelé après, il ne verrait
+        # plus que le niveau partagé et les champs de rendu disparaîtraient des entrées qui
+        # ne les portent pas encore.
+        glossaire = _refondre(fill_defaults(glossaire), p, code)
     p.parent.mkdir(parents=True, exist_ok=True)
-    header = (
+    header = entete if entete is not None else (
         "# ============================================================\n"
         f"#  Glossaire — {p.parent.name}\n"
         "#  Propre à cette ŒUVRE (réutilisé pour tous ses tomes).\n"
@@ -142,7 +216,7 @@ def save(glossaire: dict, path: str | Path) -> None:
         "#  SANS écrasement) ; tes entrées sont conservées et prioritaires.\n"
         "# ============================================================\n\n"
     )
-    filled = fill_defaults(glossaire)
+    filled = glossaire
     blocks: list[str] = []
     for cat in ORDER:
         entries = filled.get(cat)
@@ -156,6 +230,73 @@ def save(glossaire: dict, path: str | Path) -> None:
             blocks.append(yaml.safe_dump({cat: v}, allow_unicode=True, sort_keys=False, width=100))
     body = "\n".join(blocks)                    # blocs déjà terminés par \n → 1 ligne vide entre eux
     p.write_text(header + body, encoding="utf-8")
+
+
+def _est_multi(glossaire: dict) -> bool:
+    return any(glossary_cibles.est_multi(e)
+               for cat, entrees in (glossaire or {}).items()
+               if cat in ENTITY_CATS and isinstance(entrees, list)
+               for e in entrees if isinstance(e, dict))
+
+
+def _refondre(plat: dict, chemin: Path, cible: str) -> dict:
+    """Vue plate → fichier multi-cibles, en conservant les autres langues.
+
+    L'appariement avec ce que porte le disque se fait par `termes_source` d'abord (la graphie
+    d'origine, stable entre langues) puis par `nom` : deux cibles n'ont pas le même `nom` pour
+    la même entité, donc s'apparier uniquement par `nom` créerait un doublon par langue."""
+    ancien = {}
+    if chemin.exists():
+        try:
+            with open(chemin, encoding="utf-8") as fh:
+                ancien = yaml.safe_load(fh) or {}
+        except (yaml.YAMLError, OSError):
+            ancien = {}
+
+    def _index(entrees):
+        idx = {}
+        for e in entrees or []:
+            if not isinstance(e, dict):
+                continue
+            for src in (e.get("termes_source") or []):
+                idx.setdefault(("src", str(src)), e)
+            for rendu in (e.get(glossary_cibles.CLE_CIBLES) or {}).values():
+                if (rendu or {}).get("nom"):
+                    idx.setdefault(("nom", str(rendu["nom"])), e)
+            if e.get("nom"):
+                idx.setdefault(("nom", str(e["nom"])), e)
+        return idx
+
+    sortie = {}
+    for cat, entrees in (plat or {}).items():
+        if cat not in ENTITY_CATS or not isinstance(entrees, list):
+            sortie[cat] = entrees
+            continue
+        idx = _index(ancien.get(cat))
+        fondues = []
+        for e in entrees:
+            if not isinstance(e, dict):
+                fondues.append(e)
+                continue
+            reference = None
+            for src in (e.get("termes_source") or []):
+                reference = idx.get(("src", str(src)))
+                if reference is not None:
+                    break
+            if reference is None and e.get("nom"):
+                reference = idx.get(("nom", str(e["nom"])))
+            fondues.append(glossary_cibles.fusionner(reference, e, cible))
+        sortie[cat] = fondues
+    # ⚠ On NE recopie PAS les catégories que la vue plate ne porte plus. Elles ont été
+    # vidées délibérément par l'appelant — le glossariste qui dédoublonne, ou un
+    # `glossary.save(glossary.empty(), …)` — et les ressusciter depuis le disque rendrait
+    # tout effacement impossible.
+    #
+    # Les rendus des autres langues ne sont pas perdus pour autant : une entrée présente sur
+    # disque apparaît TOUJOURS dans la vue plate, avec un `nom` vide si elle n'est pas encore
+    # traduite dans cette cible (cf. `glossary_cibles.aplatir`), et `fusionner` la restitue
+    # avec ses autres langues intactes. Ce qui disparaît ici a été supprimé, pas oublié.
+    return sortie
 
 
 def counts(glossaire: dict) -> dict:

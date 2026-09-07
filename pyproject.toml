@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Alexandre Tournel
+#
+# ============================================================================
+#  Angelith — métadonnées de paquet. Lot 37 (`docs/plans/PLAN-37-L-EMPAQUETAGE.md`).
+# ============================================================================
+#
+# ## Ce que ce fichier change, et ce qu'il ne change pas
+#
+# Il ne change RIEN pour qui lance `python gui.py` ou `python run_manga.py` depuis le dépôt.
+# Il déclare trois choses qui n'existaient nulle part : un nom public, une licence lisible par
+# un outil, et des points d'entrée nommés.
+#
+# ## ⚠ La version est LUE, jamais recopiée
+#
+# `[tool.setuptools.dynamic]` lit `core.version.__version__`. Deux numéros de version, ce
+# serait un `tests/test_version.py` qui passe pendant qu'on livre le mauvais numéro — et le
+# dépôt a déjà une source unique de vérité, qui reste `core/version.py`.
+# `tests/test_pyproject.py` compare la version des MÉTADONNÉES à `__version__`, ce qui ferme
+# la boucle : si setuptools cessait de savoir lire l'attribut, le test tomberait.
+#
+# ## ⚠ Ce que ce fichier NE distribue PAS
+#
+# `config.yaml`, `templates/` et `langues/` vivent à la racine du dépôt, pas dans un paquet
+# Python : une roue ne sait pas les placer quelque part où le code les retrouverait. C'est
+# `angelith.spec` qui les embarque, et `core/installation.py:ressource()` qui les résout.
+#
+# Les deux modes de distribution SOUTENUS sont donc, au 2026-09-06 :
+#   1. le dépôt, lancé par `python gui.py` — inchangé ;
+#   2. le gel PyInstaller et son installeur — ce que le lot 37 livre.
+#
+# Une roue publiée sur PyPI n'en est pas un, et ce fichier ne prétend pas le contraire. Ce
+# qu'il rend possible tout de suite, c'est `pip install -e .[manga]`, qui est ce dont la CI et
+# les cinq `requirements-*.txt` ont besoin.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "angelith"
+description = "Traduction assistée de light novels, mangas et webtoons — 100 % local."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Alexandre Tournel" }]
+keywords = ["traduction", "manga", "webtoon", "light novel", "ocr", "llm", "local"]
+dynamic = ["version"]
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: X11 Applications :: Qt",
+  "Intended Audience :: End Users/Desktop",
+  "Natural Language :: French",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Text Processing :: Linguistic",
+]
+
+# Le socle, à la lettre de `requirements.txt` — commentaires compris, parce que le plafond
+# d'`openai` n'est pas une frilosité : la 3.x est bâtie sur httpx2, et `core/llm.py` construit
+# lui-même son `httpx.Timeout`. Voir `requirements.txt` pour la mesure.
+dependencies = [
+  "openai>=1.40,<3",
+  "httpx>=0.27",
+  "pyyaml>=6.0",
+  "pymupdf>=1.24",
+  "python-docx>=1.1",
+  "rich>=13.0",
+]
+
+# ⚠ Les cinq `requirements-*.txt` RESTENT, et deviennent des enveloppes (`-e .[manga]`). Les
+# supprimer est un lot ultérieur, avec sa migration : la CI, les documents et les procédures du
+# dépôt les citent nommément, et le critère 3 de la définition de « terminé » veut que le
+# comportement livré par défaut soit iso pour qui ne touche à rien.
+[project.optional-dependencies]
+gui = ["PySide6>=6.7"]
+manga = [
+  "numpy>=1.26",
+  "onnxruntime>=1.18",
+  "manga-ocr>=0.1.14",
+  "rapidocr-onnxruntime>=1.3",
+  "rarfile>=4.1",
+]
+# ⚠ Sous-ensemble STRICT de `manga`, et c'est mesuré : dans deux venv propres, le jeu
+# « manga + scan » et le jeu « manga » rendent la MÊME liste de 72 paquets, 1 983,4 Mo et
+# 39 259 fichiers (2026-09-06, `docs/mesures/empaquetage-2026-09-06.md`). Le fichier
+# `requirements-scan.txt` l'annonçait déjà en prose ; l'extra le déclare.
+scan = ["numpy>=1.26", "manga-ocr>=0.1.14"]
+illustration = ["numpy>=1.26"]
+dev = ["pytest>=8.0", "psd-tools>=1.9", "pytest-cov>=5.0", "ruff>=0.16"]
+
+# Les quatre briques en console, l'interface en fenêtre.
+#
+# ⚠ `angelith-gui` est dans `gui-scripts` et non dans `scripts` : sous Windows, un point
+# d'entrée console ouvre une fenêtre de terminal noire derrière l'application. C'est la seule
+# différence entre les deux tables, et elle se voit.
+[project.scripts]
+angelith = "run:main"
+angelith-manga = "run_manga:main"
+angelith-ocr = "run_ocr:main"
+angelith-illustration = "run_illustration:main"
+angelith-console = "app:main"
+
+[project.gui-scripts]
+# ⚠ `gui.lancement:main` et non `gui:main` : le dépôt porte à la fois un module `gui.py` et un
+# paquet `gui/`, et Python résout le paquet. Le corps de `main` vit donc dans
+# `gui/lancement.py` depuis le lot 37 ; `python gui.py` continue de marcher à l'identique.
+angelith-gui = "gui.lancement:main"
+
+[project.urls]
+"Code source" = "https://github.com/GNAlexandre/Angelith"
+"Journal des modifications" = "https://github.com/GNAlexandre/Angelith/blob/main/CHANGELOG.md"
+
+[tool.setuptools.dynamic]
+version = { attr = "core.version.__version__" }
+
+# Listés un par un plutôt que découverts : `sources/`, `build/` et `tests/` sont à la racine, et
+# une découverte automatique les prendrait pour des paquets ou refuserait de choisir.
+[tool.setuptools]
+packages = [
+  "core",
+  "gui",
+  "illustration",
+  "illustration.gabarits",
+  "manga",
+  "pipeline",
+  "scan",
+  "tools",
+]
+py-modules = ["app", "bibliotheque", "run", "run_illustration", "run_manga", "run_ocr"]
+
+[tool.setuptools.package-data]
+# Les gabarits de prompt d'illustration sont du code source au sens de l'interdit 6 : ils
+# décident de ce qu'un modèle produit. Ils vivent dans un paquet, donc une roue sait les porter.
+"illustration.gabarits" = ["*.yaml"]
+
+# ⚠ La configuration de `ruff` reste dans `ruff.toml`, et celle de la couverture dans
+# `.coveragerc`. Les rapatrier ici serait un déménagement gratuit : les deux outils lisent leur
+# fichier dédié en priorité, `pytest.ini` ne sait pas lire de section coverage, et un lot
+# d'empaquetage n'a pas à changer ce que le linter accepte.

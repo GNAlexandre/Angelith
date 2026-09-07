@@ -113,7 +113,7 @@ def keep_awake() -> bool:
     1. `ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED` : empêche à la fois la mise en veille
        de la machine ET celle de l'écran. Le flag écran est crucial ici : quand l'écran
        s'endort, le GPU réduit fortement sa fréquence, ce qui fait chuter l'inférence
-       (symptôme observé : un bloc à 0,4 tok/s au lieu de ~50). 
+       (symptôme observé : un bloc à 0,4 tok/s au lieu de ~50).
     2. Un thread de fond ré-arme le flag toutes les 30 s : `SetThreadExecutionState` peut
        être écrasé par une stratégie d'alimentation agressive ; le rappel périodique
        garantit que l'inhibition tient sur un run de plusieurs heures."""

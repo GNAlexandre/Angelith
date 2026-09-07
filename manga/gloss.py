@@ -44,6 +44,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image, ImageDraw
 
+from ._config import fusion
 from .detection import BubbleRegion
 from .geometry import dilate
 from .typeset import load_font, resolve_font, texte_dessinable
@@ -58,6 +59,24 @@ _DEFAUTS = {
     # toucher. Dilate les masques interdits avant le test de collision.
     "glose_ecart": 3,
     "glose_contour": True,
+    # --- Contour MESURÉ (lot 21, L21.5) ------------------------------------------------
+    #
+    # ⚠ Le plan de lot posait ici une prémisse FAUSSE, et elle est corrigée plutôt que
+    # recopiée : il attribuait le contour blanc des gloses à `typeset.calque_fit`, qui prend
+    # `stroke_fill = (*style.background, 255)` alors que `clean.analyze_regions` force
+    # `background = (255, 255, 255)` pour toute zone non-bulle. C'est exact pour le lettrage
+    # DES BULLES — mais les gloses ne passent pas par `calque_fit` : `dessiner` ci-dessous a
+    # toujours choisi sa polarité localement, par `_claire`, et son contour est donc déjà
+    # noir ou blanc selon le fond. Le défaut réel n'est pas « blanc par construction ».
+    #
+    # Le défaut réel est que ces deux poles sont **purs** : sur un aplat gris de trame, un
+    # contour blanc franc découpe un halo qui se voit plus que la glose. Armé, ce réglage
+    # prend la couleur dominante réellement mesurée sous le rectangle (mode de luminance à
+    # 32 classes, affinage ±16, médiane RGB — la méthode calibrée de `clean`) et lui oppose
+    # le pôle contrasté pour le texte.
+    #
+    # `false` = comportement d'avant le lot, au bit près.
+    "glose_contour_mesure": False,
 }
 
 # Les huit ancrages essayés, dans l'ordre de préférence à calme égal : d'abord les côtés
@@ -70,6 +89,21 @@ _ANCRAGES = (
     ("haut_droite", 1.0, -1.0), ("haut_gauche", -1.0, -1.0),
 )
 
+#: Marge de comparaison des coordonnées d'ancrage. Écrasante par rapport à tout écart de
+#: représentation, et sans effet sur les seules valeurs qui existent ici (±1 et 0,5).
+_EPS_ANCRAGE = 1e-9
+
+
+def _colle_au_bord(v: float) -> bool:
+    """`±1` = ancrage COLLÉ au bord de la boîte source ; toute autre valeur = position
+    relative dans la boîte.
+
+    ⚠ Le test s'écrivait `abs(v) == 1.0`. Il était juste — les valeurs viennent d'un littéral
+    de ce module, pas d'un calcul — mais une égalité flottante nue est une invitation : la
+    première coordonnée d'ancrage qui naîtrait d'une division ferait basculer un ancrage de
+    bord en ancrage relatif, en silence et sans rien casser de visible."""
+    return abs(abs(v) - 1.0) < _EPS_ANCRAGE
+
 
 @dataclass
 class Glose:
@@ -80,10 +114,17 @@ class Glose:
     ancrage: str
     claire: bool          # texte clair sur fond sombre
     calme: float          # écart-type des luminances sous le rectangle
+    #: Couleur DOMINANTE mesurée sous le rectangle (`clean._couleur_de_fond`), lot 21 L21.5.
+    #: `None` quand la mesure n'a pas été demandée — le rendu retombe alors sur le noir et le
+    #: blanc purs, au bit près.
+    fond: tuple[int, int, int] | None = None
 
 
 def _cfg(cfg: dict | None) -> dict:
-    return {**_DEFAUTS, **(cfg or {})}
+    """⚠ HUITIÈME site du même défaut, et le seul que le relevé du lot 11 n'avait pas vu :
+    `{**_DEFAUTS, **(cfg or {})}` laissait `glose_taille_max: null` remplacer le défaut par
+    `None`, que `load_font` reçoit ensuite en taille de police."""
+    return fusion(_DEFAUTS, cfg)
 
 
 def _zone_interdite(forme: tuple[int, int], sfx: list[BubbleRegion],
@@ -112,6 +153,23 @@ def _claire(gris: np.ndarray, rect: tuple[int, int, int, int]) -> bool:
     return bool(fenetre.mean() < 110) if fenetre.size else False
 
 
+def _fond_mesure(arr: np.ndarray, rect: tuple[int, int, int, int]) -> tuple[int, int, int]:
+    """Couleur dominante sous le rectangle d'une glose (lot 21, L21.5).
+
+    ⚠ Délègue à `clean._couleur_de_fond` plutôt que de prendre une moyenne : le choix du
+    MODE y est documenté par une mesure — sur une bulle inversée, un p90 rend « la couleur du
+    TEXTE ». Le même piège existe ici : une glose posée à côté d'une onomatopée noire aurait
+    un fond mesuré à mi-chemin entre le papier et l'encre, et son contour disparaîtrait dans
+    les deux."""
+    from .clean import _couleur_de_fond
+    x0, y0, x1, y1 = rect
+    fenetre = arr[y0:y1, x0:x1]
+    if fenetre.size == 0:
+        return (255, 255, 255)
+    fond, _luma = _couleur_de_fond(fenetre.reshape(-1, 3))
+    return fond
+
+
 def placer(image: Image.Image, sfx: list[BubbleRegion], textes: list[str], *,
            bulles: list[BubbleRegion] | None = None, cfg: dict | None = None,
            font_path: str | None = None) -> tuple[list[Glose | None], list[str]]:
@@ -122,8 +180,12 @@ def placer(image: Image.Image, sfx: list[BubbleRegion], textes: list[str], *,
     c = _cfg(cfg)
     police = resolve_font(font_path)
     bulles = list(bulles or [])
-    arr = np.asarray(image.convert("RGB"), dtype=np.float32)
+    arr_u8 = np.asarray(image.convert("RGB"))
+    arr = arr_u8.astype(np.float32)
     gris = arr.mean(axis=2)
+    # La mesure de couleur n'est faite que si elle sert : elle coûte un histogramme par
+    # candidat d'ancrage, et il y en a huit par corps essayé.
+    mesurer_fond = bool(c["glose_contour_mesure"])
     h, w = gris.shape
     interdit = _zone_interdite((h, w), sfx, bulles, int(c["glose_ecart"]))
     occupe = np.zeros((h, w), dtype=bool)
@@ -163,11 +225,11 @@ def placer(image: Image.Image, sfx: list[BubbleRegion], textes: list[str], *,
             # le masque est plein.
             ecart = int(c["glose_ecart"])
             for nom, dx, dy in _ANCRAGES:
-                if abs(dx) == 1.0:
+                if _colle_au_bord(dx):
                     x = bx1 + ecart if dx > 0 else bx0 - gw - ecart
                 else:
                     x = int(bx0 + (bx1 - bx0 - gw) * dx)
-                if abs(dy) == 1.0:
+                if _colle_au_bord(dy):
                     y = by1 + ecart if dy > 0 else by0 - gh - ecart
                 else:
                     y = int(by0 + (by1 - by0 - gh) * dy)
@@ -180,7 +242,9 @@ def placer(image: Image.Image, sfx: list[BubbleRegion], textes: list[str], *,
                 calme = _calme(gris, rect)
                 candidats.append((calme, Glose(rect=rect, texte=contenu, taille=taille,
                                                ancrage=nom, claire=_claire(gris, rect),
-                                               calme=calme)))
+                                               calme=calme,
+                                               fond=(_fond_mesure(arr_u8, rect)
+                                                     if mesurer_fond else None))))
             if candidats:
                 candidats.sort(key=lambda t: t[0])
                 pose = candidats[0][1]
@@ -215,8 +279,18 @@ def dessiner(image: Image.Image, gloses: list[Glose | None], *,
         font = load_font(police_reelle, g.taille)
         marge = (g.rect[2] - g.rect[0] - int(round(font.getlength(g.texte)))) // 2
         x, y = g.rect[0] + marge, g.rect[1] + marge
-        avant = (255, 255, 255) if g.claire else (0, 0, 0)
-        arriere = (0, 0, 0) if g.claire else (255, 255, 255)
+        # ⚠ Le contour prend la couleur MESURÉE quand elle existe, et le blanc pur sinon
+        # (lot 21, L21.5). Le texte prend le pôle opposé : sur un fond mesuré à luma 60, un
+        # contour à 60 et un texte blanc restent lisibles là où un contour blanc franc
+        # découpait un halo dans le dessin.
+        if g.fond is not None:
+            from .clean import _luma
+            fonce = float(_luma(np.array(g.fond, dtype=float))) < 128.0
+            arriere = tuple(int(v) for v in g.fond)
+            avant = (255, 255, 255) if fonce else (0, 0, 0)
+        else:
+            avant = (255, 255, 255) if g.claire else (0, 0, 0)
+            arriere = (0, 0, 0) if g.claire else (255, 255, 255)
         epaisseur = max(1, g.taille // 8) if c["glose_contour"] else 0
         draw.text((x, y), g.texte, font=font, fill=avant,
                   stroke_width=epaisseur, stroke_fill=arriere)

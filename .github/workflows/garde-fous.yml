@@ -1,0 +1,158 @@
+# Les garde-fous de dépôt (lot 20) — ce qui se vérifiait à la main avant chaque commit.
+#
+# ## Pourquoi un fichier séparé de `ci.yml`
+#
+# Ces quatre jobs ne mesurent pas le CODE, ils mesurent la LIVRAISON : la traçabilité des
+# commits, ce qui entre dans l'arbre, et la discipline de CHANGELOG. Ils tournent sur
+# `pull_request` uniquement, parce qu'ils raisonnent tous sur un DIFF contre une base — sur un
+# push direct il n'y a pas de base à comparer, et un garde-fou qui compare contre lui-même est
+# un garde-fou qui passe toujours.
+#
+# ## Les outils vivent dans `tools/`, pas dans ce fichier
+#
+# `verifier_disclosure.py`, `verifier_arbre.py` et `verifier_livraison.py` sont du Python
+# testé (`tests/test_outils_atelier.py`, 51 tests) et lançables en local avant le push. Un
+# garde-fou qu'on ne peut vérifier qu'en poussant se découvre faux au moment où il refuse à
+# tort une PR pressée — c'est-à-dire au moment où on le désarme.
+name: Garde-fous
+
+# ⚠ `pull_request` SEULEMENT, et pas `workflow_dispatch`. Les quatre jobs raisonnent sur un
+# diff entre `base.sha` et `head.sha` de la PR ; hors de ce contexte ces deux références
+# n'existent pas, et un déclenchement manuel produirait un job vert qui n'a rien comparé.
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # L20.1 — LA DISCLOSURE IA.
+  #
+  # ⚠ **Livré NON BLOQUANT, et la date de bascule est écrite.** Le taux de conformité mesuré
+  # sur l'historique complet au 2026-08-28 est de **7 sur 105 commits (7 %)** — les deux
+  # commits de fusion étant exemptés. Rendre ce job bloquant le jour de sa livraison ferait
+  # échouer à peu près tout, et un garde-fou qui casse tous les builds le jour où il arrive est
+  # désarmé le lendemain.
+  #
+  # Il ne juge QUE les commits de la PR, pas l'historique : un historique de douze mois ne se
+  # documente pas rétroactivement, et le lui demander serait lui demander l'impossible.
+  #
+  # **Bascule prévue le 2026-10-01** : retirer `continue-on-error` et ajouter `--bloquant`.
+  # D'ici là, chaque PR publie son taux dans le résumé de job, ce qui donne cinq semaines de
+  # mesure avant de décider — et de quoi corriger la date si la mesure ne la soutient pas.
+  disclosure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Les deux références de la PR sont nécessaires pour énumérer ses commits ;
+          # `fetch-depth: 0` est le seul moyen sûr de les avoir toutes les deux.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Disclosure IA des commits de la PR
+        shell: bash
+        run: |
+          set -o pipefail
+          python tools/verifier_disclosure.py --markdown \
+            --base "${{ github.event.pull_request.base.sha }}" --tete "${{ github.event.pull_request.head.sha }}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # L20.1 bis — LA GARDE DE FUSION, distincte de celle de conformité.
+  #
+  # `Revu et testé manuellement : non` est une déclaration HONNÊTE : elle passe le job
+  # ci-dessus, et c'est voulu. Mais `CONTRIBUTING.md` dit que les contributions que personne
+  # n'a lues ne sont pas acceptées — cette déclaration doit donc bloquer la FUSION, pas la
+  # vérification. D'où deux jobs et deux drapeaux plutôt qu'un seul verdict confondu.
+  #
+  # ⚠ Celui-ci est bloquant DÈS MAINTENANT, contrairement au précédent, et la différence tient
+  # à ceci : il ne juge pas un format qui n'existait pas hier, il juge ce que l'auteur de la PR
+  # vient d'écrire lui-même. Un commit sans disclosure du tout ne l'atteint pas.
+  relecture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Aucun commit ne se déclare non relu
+        run: >
+          python tools/verifier_disclosure.py --exiger-relecture
+          --base "${{ github.event.pull_request.base.sha }}"
+          --tete "${{ github.event.pull_request.head.sha }}"
+
+  # ---------------------------------------------------------------------------
+  # L20.4 — FUITE, CORPUS, POIDS.
+  #
+  # Bloquant dès la livraison, et il peut l'être parce qu'il ne juge que ce que la PR AJOUTE.
+  #
+  # ⚠ L'arbre porte DÉJÀ 19 fichiers citant un titre d'œuvre en clair au 2026-08-28
+  # (`docs/mesures/atelier-github-2026-08-28.md` les liste). Juger le contenu entier des fichiers
+  # modifiés rendrait donc rouge toute PR qui touche l'un d'eux — le garde-fou serait retiré
+  # dans la semaine. Les lignes ajoutées, elles, sont sous le contrôle de qui ouvre la PR.
+  arbre:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ni poids, ni corpus, ni titre d'œuvre dans le diff
+        shell: bash
+        run: |
+          set -o pipefail
+          python tools/verifier_arbre.py --markdown \
+            --diff "${{ github.event.pull_request.base.sha }}" --tete "${{ github.event.pull_request.head.sha }}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: État de l'arbre entier (mesure, non bloquante)
+        # La dette héritée, publiée à chaque PR plutôt que laissée à un audit qu'on ne refait
+        # jamais. `--non-bloquant` : elle ne doit pas colorer en rouge une PR qui ne l'a pas
+        # créée, mais elle ne doit pas non plus disparaître de la vue.
+        if: always()
+        shell: bash
+        run: |
+          python tools/verifier_arbre.py --markdown --suivi --non-bloquant \
+            >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # L20.6 — LA DISCIPLINE DE LIVRAISON.
+  #
+  # L'échappatoire est l'étiquette de PR `sans-changelog`, passée explicitement ci-dessous.
+  # Elle est VISIBLE dans la liste des PR et s'audite d'un coup d'œil — contrairement à un mot
+  # magique dans le corps du message, qu'il faudrait aller chercher dans un texte.
+  livraison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: CHANGELOG, version, prompts, tableau daté
+        shell: bash
+        env:
+          ETIQUETTES: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -o pipefail
+          python tools/verifier_livraison.py --markdown \
+            --base "${{ github.event.pull_request.base.sha }}" --tete "${{ github.event.pull_request.head.sha }}" \
+            --etiquettes "$ETIQUETTES" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
