@@ -26,6 +26,18 @@ name: CI
 on:
   push:
     branches: ['**']
+    # ⚠ **LES TAGS, et sans eux le job `artefact` est du code mort** — lot 42.
+    #
+    # `branches: ['**']` ne couvre QUE les branches : un `git push origin v2.35.0` ne
+    # déclenchait donc pas ce workflow, et la condition `startsWith(github.ref, 'refs/tags/')`
+    # du job `artefact` ne pouvait jamais être vraie sur un événement `push`. Le job n'était
+    # atteignable que par `workflow_dispatch`.
+    #
+    # Constaté le 2026-09-07 : le tag `v2.35.0` a bien créé une release — `publication.yml`,
+    # lui, écoute `tags: ['v*']` — mais elle est arrivée **sans aucun fichier**, exactement le
+    # manque que le lot 40 croyait avoir fermé. Attacher l'installeur à une release depuis un
+    # job qui ne part jamais ne ferme rien.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
   schedule:

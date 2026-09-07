@@ -39,6 +39,74 @@ prompt.
 
 ---
 
+## [2.35.1] - 2026-09-07
+
+### CORRECTIF — la publication a montré ce qu'aucun test local ne pouvait montrer
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+> Aucun changement de comportement de l'application : ce lot répare la **fabrication** et deux
+> tests qui mesuraient l'environnement au lieu du code.
+
+Les trois défauts ci-dessous ont ceci de commun qu'ils n'apparaissent **ni en local, ni dans
+l'arbre publié** : il fallait une vraie publication et un vrai runner pour les faire sortir.
+
+#### 1. ⚠ Le job qui attache l'installeur à la release ne partait JAMAIS
+
+`ci.yml` déclarait `on: push: branches: ['**']`. Cela ne couvre **que les branches** : un
+`git push <remote> v2.35.0` ne déclenchait pas ce workflow, et la condition
+`startsWith(github.ref, 'refs/tags/')` du job `artefact` ne pouvait donc jamais être vraie sur
+un événement `push`. Le job n'était atteignable que par `workflow_dispatch`.
+
+**Conséquence, constatée le 2026-09-07 sur le dépôt public** : le tag a bien créé une release —
+`publication.yml`, lui, écoute `tags: ['v*']` — mais elle est arrivée **sans aucun fichier**.
+C'est exactement le manque que le lot 40 croyait avoir fermé : attacher un installeur depuis un
+job qui ne part jamais ne ferme rien.
+
+Le workflow écoute désormais `tags: ['v*']`. ⚠ Le test qui garde la correction **lit le YAML**,
+pas le texte : `tags:` apparaît aussi dans les commentaires, et un garde-fou qui se contenterait
+de le chercher passerait au vert sur une explication.
+
+#### 2. La collecte des tests s'interrompait sur tout environnement sans PDF
+
+`tests/test_completer_police.py` importait `fontTools` **au niveau module**, sans garde. Or
+`fontTools` n'est déclaré dans aucun fichier de dépendances : il arrive **transitivement** par
+`weasyprint`, qui est optionnel.
+
+Un environnement socle + interface + dev — celui de l'intégration continue — n'a donc pas
+`fontTools`, et cet import y faisait échouer la **collecte**, donc toute la suite, sur les deux
+plateformes : *« 4 skipped, 35 deselected, 1 error »* là où la suite en compte plus de cinq
+mille. Un test qui ne peut pas tourner doit s'ignorer, pas emporter ses voisins.
+
+`pytest.importorskip` avant l'import, comme PySide6 et onnxruntime ailleurs dans ce dépôt.
+
+#### 3. Un test dont le verdict dépendait de ce qui traînait dans l'environnement
+
+`test_le_remede_du_cbr_vient_du_catalogue_de_reparations` vérifie que le motif d'un `.cbr`
+illisible **lit son remède dans le catalogue** au lieu de le réécrire. Mais la chaîne `.cbr` a
+**deux maillons** — le paquet Python `rarfile` et l'outil externe `unrar` —, et `outil_rar`
+rend le premier motif venu : sans `rarfile`, elle sort avant d'avoir regardé l'outil externe.
+
+Le test passait donc sur une machine de développement (où `rarfile` est installé) et échouait
+en intégration continue, qui n'installe pas `requirements-manga.txt`. Il **pose** désormais
+`rarfile` au lieu de le supposer, et le second maillon gagne **son propre test** plutôt que
+d'être le hasard du premier.
+
+#### Ce que ce lot dit de la méthode
+
+Trois lots successifs ont livré, testé et mesuré un mécanisme de release. Il ne marchait pas.
+La suite était verte à chaque fois — y compris dans un arbre de travail propre, sans corpus,
+reproduisant les conditions d'un utilisateur public. Ce qui manquait n'était pas un test :
+c'était **d'exécuter la chose pour de vrai**.
+
+#### Fichiers
+
+`.github/workflows/ci.yml` · `tests/test_completer_police.py`, `tests/test_depot_guide.py`,
+`tests/test_empaquetage.py`.
+
+**Tests** : +2 — 5 034 → **5 036** collectés avec PySide6, 4 591 → **4 593** sans.
+
+---
+
 ## [2.35.0] - 2026-09-07
 
 ### MINEUR — trois gestes qui existaient sans être atteignables

@@ -250,14 +250,39 @@ def test_le_remede_du_cbr_vient_du_catalogue_de_reparations(monkeypatch):
     """Le motif ne réécrit plus le remède : il le lit là où la page Diagnostic le lit.
 
     Deux textes pour le même manque finissent par en dire deux choses — c'est exactement ce
-    qui est arrivé aux licences de poids dans ce dépôt (lot 38)."""
+    qui est arrivé aux licences de poids dans ce dépôt (lot 38).
+
+    ⚠ **`rarfile` est POSÉ, il n'est pas supposé présent** — lot 42. La chaîne `.cbr` a deux
+    maillons, et `outil_rar` rend le premier motif venu : sans `rarfile`, elle sort avant
+    d'avoir regardé l'outil externe, et ce test-ci vérifiait alors une phrase qui n'a rien à
+    voir avec le catalogue.
+
+    Il passait sur une machine de développement (où `rarfile` est installé) et échouait en
+    intégration continue, qui n'installe pas `requirements-manga.txt` — constaté le 2026-09-07,
+    reproduit dans un environnement neuf. Un test dont le verdict dépend de ce qui traîne dans
+    l'environnement ne mesure pas ce qu'il annonce."""
+    import sys
+    import types
+
     from core import diagnostic as diag
     from core import reparations as rep
+    monkeypatch.setitem(sys.modules, "rarfile", types.ModuleType("rarfile"))
     monkeypatch.setattr(diag.shutil, "which", lambda _nom: None)
     etat = dg.outil_rar()
     reparation = rep.par_identifiant("unrar")
     assert reparation is not None
     assert reparation.consigne() in etat.motif
+
+
+def test_sans_rarfile_le_motif_nomme_le_fichier_de_dependances(monkeypatch):
+    """L'autre maillon, et il mérite son test plutôt que d'être le hasard du précédent : sans
+    le paquet Python, le remède n'est pas d'installer un outil externe."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "rarfile", None)
+    etat = dg.outil_rar()
+    assert etat.disponible is False
+    assert "requirements-manga.txt" in etat.motif
 
 
 def test_un_lacher_vide_n_est_pas_executable(tmp_path):

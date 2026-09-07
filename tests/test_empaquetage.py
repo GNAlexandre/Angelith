@@ -532,3 +532,27 @@ def test_le_manifeste_ne_liste_que_la_version_qu_on_vient_de_geler(tmp_path, mon
     assert courant.is_file(), "l'installeur de la version courante a été effacé"
     assert not perime.exists(), "l'installeur périmé est resté"
     assert voisin.is_file(), "le nettoyage a débordé sur un fichier qui n'est pas un installeur"
+
+
+def test_le_workflow_se_declenche_bien_sur_un_TAG():
+    """⚠ **Sans cela, le job `artefact` est du code mort** — et il l'a été jusqu'au lot 42.
+
+    Le job porte `if: startsWith(github.ref, 'refs/tags/')`. Mais `on: push: branches: ['**']`
+    ne couvre QUE les branches : un `git push <remote> v2.35.0` ne déclenchait pas ce workflow,
+    donc la condition ne pouvait jamais être vraie sur un événement `push`.
+
+    Constaté le 2026-09-07 sur le dépôt public : le tag a bien créé une release — l'autre
+    workflow, lui, écoute les tags — mais **sans aucun fichier**. Attacher l'installeur depuis
+    un job qui ne part jamais ne ferme aucun manque.
+
+    Ce test lit le YAML plutôt que le texte : `tags:` apparaît aussi dans des commentaires, et
+    un garde-fou qui se contenterait de le chercher passerait au vert sur une explication."""
+    import yaml
+
+    ci = yaml.safe_load((RACINE / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    # ⚠ `on:` est lu par PyYAML comme le booléen `True` (YAML 1.1). C'est un piège connu de
+    # tous les fichiers de workflow, et le nommer ici évite de le redécouvrir.
+    declencheurs = ci.get("on") or ci.get(True)
+    tags = (declencheurs.get("push") or {}).get("tags")
+    assert tags, "le workflow ne se déclenche pas sur les tags : `artefact` ne partira jamais"
+    assert any(motif.startswith("v") for motif in tags), tags

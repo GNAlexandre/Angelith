@@ -19,7 +19,22 @@ import sys
 from pathlib import Path
 
 import pytest
-from fontTools.ttLib import TTFont
+
+# ⚠ `importorskip` AVANT l'import, comme PySide6 et onnxruntime ailleurs — lot 42.
+#
+# `fontTools` n'est déclaré dans AUCUN fichier de dépendances : il arrive transitivement par
+# `weasyprint`, qui est optionnel (l'export PDF). Un environnement socle + interface + dev n'a
+# donc pas fontTools — c'est le cas de l'intégration continue —, et cet import de niveau module
+# y faisait échouer la COLLECTE, donc toute la suite, sur les deux plateformes.
+#
+# Constaté le 2026-09-07 sur le dépôt public, reproduit dans un environnement neuf : « 4 skipped,
+# 35 deselected, 1 error » là où la suite complète en compte plus de cinq mille. Un test qui ne
+# peut pas tourner doit s'ignorer, pas emporter ses voisins.
+pytest.importorskip(
+    "fontTools",
+    reason="fontTools arrive avec weasyprint (export PDF), absent d'un socle sans PDF")
+
+from fontTools.ttLib import TTFont                                            # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
