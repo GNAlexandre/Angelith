@@ -39,6 +39,46 @@ prompt.
 
 ---
 
+## [2.35.3] - 2026-09-07
+
+### CORRECTIF — un exemple de test qui n'était absolu que sous Windows
+
+> `config.yaml` ne change pas d'un octet. Aucun cache invalidé, `FORMAT_VERSION` reste à **3**.
+> **Aucun changement de code applicatif** : le code avait raison, c'est l'exemple du test qui
+> ne valait que d'un côté.
+
+`test_un_chemin_absolu_n_est_jamais_deplace` garde une propriété réelle : un chemin absolu
+écrit dans `config.yaml` ne doit jamais être déplacé vers le dossier des documents. Mais il
+l'illustrait avec `D:/Manga/sources`, écrit en dur.
+
+| Exemple | absolu sous Windows | absolu sous POSIX |
+|---|---|---|
+| `D:/Manga/sources` | **oui** (lettre de lecteur) | **non** |
+| `/mnt/Manga/sources` | non | **oui** |
+
+Sous Linux, rien ne commence par une lettre suivie de deux points : le chemin y est **relatif**,
+`ancrer_chemins` l'ancrait donc — à juste titre —, et le test échouait sur le runner Linux et
+nulle part ailleurs.
+
+L'exemple suit désormais la plateforme, et une assertion `is_absolute()` en tête du test
+**échoue bruyamment** si quelqu'un remet un littéral qui n'est absolu que d'un côté.
+
+#### ⚠ Deuxième défaut de la même famille en deux lots
+
+Le lot 43 corrigeait un test vert parce que Windows parle français ; celui-ci, un test vert
+parce que Windows a des lettres de lecteur. Dans les deux cas : une machine de développement
+qui répond « vert » pour une raison que la machine d'en face n'a pas, et une propriété annoncée
+qui n'était pas mesurée.
+
+Les deux sont restés invisibles jusqu'à ce que l'intégration continue tourne pour de bon sur un
+dépôt public — c'est-à-dire jusqu'à ce que quelqu'un **exécute la chose ailleurs**.
+
+#### Fichiers
+
+`tests/test_installation.py`.
+
+---
+
 ## [2.35.2] - 2026-09-07
 
 ### CORRECTIF — un test vert parce que Windows parle français

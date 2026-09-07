@@ -25,6 +25,7 @@ une fois, sur le vrai binaire (`PLAN-37` L37.7).
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -256,10 +257,27 @@ def test_en_gel_les_poids_vont_dans_le_dossier_utilisateur(gel):
 
 
 def test_un_chemin_absolu_n_est_jamais_deplace(gel):
-    """Quelqu'un qui a écrit `D:/Manga/sources` l'a voulu."""
-    config = {"chemins": {"sources": "D:/Manga/sources", "build": "build"}}
+    """Quelqu'un qui a écrit un chemin absolu l'a voulu.
+
+    ⚠ **L'exemple DOIT être absolu sur la plateforme qui exécute le test**, et c'est le
+    correctif du lot 44. Il était écrit `D:/Manga/sources` en dur : absolu sous Windows grâce
+    à la lettre de lecteur, mais **relatif sous Linux**, où rien ne commence par une lettre
+    suivie de deux points. `ancrer_chemins` l'y ancrait donc — à juste titre —, et le test
+    échouait sur le runner Linux et nulle part ailleurs.
+
+    Le code n'avait rien : c'est l'EXEMPLE qui ne valait que sur une des deux plateformes.
+    Même famille que le test de langue du lot 43 — une machine de développement qui répond
+    « vert » pour une raison que la machine d'en face n'a pas.
+
+    L'assertion `is_absolute()` ci-dessous est le garde-fou de cette leçon : elle échoue
+    bruyamment si quelqu'un remet un littéral qui n'est absolu que d'un côté."""
+    absolu = "D:/Manga/sources" if os.name == "nt" else "/mnt/Manga/sources"
+    assert Path(absolu).is_absolute(), (
+        f"« {absolu} » n'est pas absolu sur cette plateforme : le test ne mesurerait pas ce "
+        f"qu'il annonce.")
+    config = {"chemins": {"sources": absolu, "build": "build"}}
     ins.ancrer_chemins(config)
-    assert config["chemins"]["sources"] == "D:/Manga/sources"
+    assert config["chemins"]["sources"] == absolu
 
 
 def test_la_section_manga_est_ancree_aussi(gel):
